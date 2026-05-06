@@ -1,61 +1,25 @@
 /* eslint-disable */
 /**
- * Generated `api` utility — manually pruned during the PocketBase auth
- * cutover (PR 3) to drop references to deleted modules: ResendOTP,
- * ResendOTPPasswordReset, auth, http, otpRateLimit, schema/otp, users.
+ * Generated `api` utility — manually pruned during the migration.
  *
- * Originally written by `npx convex codegen`. Will be deleted along with
- * the rest of convex/ in the cleanup PR.
+ * After PR 5 (data layer batch 2) the entire data layer lives in
+ * PocketBase and no app code imports `api.*` anymore. This file is
+ * kept as an empty placeholder so the still-existing `convex/_lib/`
+ * helper compiles. It (along with the rest of convex/) disappears in
+ * PR 9 cleanup.
  *
  * @module
  */
 
-import type * as _lib_access from "../_lib/access.js";
-import type * as apiKeys from "../apiKeys.js";
-import type * as pipeline from "../pipeline.js";
-import type * as schema__shared from "../schema/_shared.js";
-import type * as schema_pipeline from "../schema/pipeline.js";
-import type * as schema_userApiKeys from "../schema/userApiKeys.js";
+import type { ApiFromModules, FilterApi, FunctionReference } from 'convex/server';
 
-import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
-} from "convex/server";
+declare const fullApi: ApiFromModules<Record<string, never>>;
 
-declare const fullApi: ApiFromModules<{
-  "_lib/access": typeof _lib_access;
-  apiKeys: typeof apiKeys;
-  pipeline: typeof pipeline;
-  "schema/_shared": typeof schema__shared;
-  "schema/pipeline": typeof schema_pipeline;
-  "schema/userApiKeys": typeof schema_userApiKeys;
-}>;
+export declare const api: FilterApi<typeof fullApi, FunctionReference<any, 'public'>>;
 
-/**
- * A utility for referencing Convex functions in your app's public API.
- *
- * Usage:
- * ```js
- * const myFunctionReference = api.myModule.myFunction;
- * ```
- */
-export declare const api: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "public">
->;
-
-/**
- * A utility for referencing Convex functions in your app's internal API.
- *
- * Usage:
- * ```js
- * const myFunctionReference = internal.myModule.myFunction;
- * ```
- */
 export declare const internal: FilterApi<
   typeof fullApi,
-  FunctionReference<any, "internal">
+  FunctionReference<any, 'internal'>
 >;
 
 export declare const components: {};
