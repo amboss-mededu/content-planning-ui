@@ -1,64 +1,173 @@
+import 'server-only';
+
+import { cookies } from 'next/headers';
 import { connection } from 'next/server';
-import { fetchQueryAsUser } from '@/lib/convex/server';
+import type PocketBase from 'pocketbase';
+import { ClientResponseError } from 'pocketbase';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
+import type { SpecialtyRecord } from '@/lib/pb/types';
 import type { Specialty } from '@/lib/types';
-import { api } from '../../../convex/_generated/api';
 
-// Specialties live in Convex now. SSR pages call these helpers and get a
-// snapshot via `fetchQuery`; client components that mount inside the page
-// can subscribe live via `useQuery(api.specialties.list)` directly.
+// Specialties live in PocketBase. RSC pages call these helpers and get a
+// snapshot via the cookie-authed PB client. Client components that need
+// real-time updates subscribe via pb.collection('specialties').subscribe()
+// from the browser SDK.
 //
-// `'use cache'` and `cacheTag`/`cacheLife` are gone here on purpose — Convex
-// already caches and invalidates automatically. Re-introducing Next's cache
-// layer would just add staleness without saving any work.
+// `'use cache'` and `cacheTag`/`cacheLife` are intentionally absent — PB
+// real-time subscriptions handle invalidation, and Next's cache layer
+// would just add staleness without saving any work for an internal tool.
 
-// The Convex row carries `_id`/`_creationTime` plus a few workflow-managed
-// fields the existing UI Specialty type doesn't model. Project to the leaner
-// shape so callers stay typed against the same `Specialty` they were before.
-type ConvexSpecialty = {
-  slug: string;
-  name: string;
-  source: string;
-  sheetId?: string;
-  xlsxPath?: string;
-};
-
-function toSpecialty(row: ConvexSpecialty): Specialty {
+function toSpecialty(row: SpecialtyRecord): Specialty {
   return {
     slug: row.slug,
     name: row.name,
-    // The repo-typed Specialty narrows source to `'sheets'|'xlsx'` for the
-    // legacy Sheets/xlsx backends; in Convex we also see 'manual' from the
-    // /api/specialties POST. Keep the runtime value untouched and cast — UI
-    // call-sites already string-equality-check the variants they care about.
+    // The repo-typed Specialty narrows source to `'sheets'|'xlsx'|'manual'|
+    // 'board'`. Keep the runtime value untouched and cast — call-sites
+    // string-equality-check the variants they care about.
     source: row.source as Specialty['source'],
     sheetId: row.sheetId,
     xlsxPath: row.xlsxPath,
   };
 }
 
+async function userClient(): Promise<PocketBase> {
+  const store = await cookies();
+  const cookieHeader = store
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+  return createServerClient(cookieHeader);
+}
+
 // `await connection()` marks each call as request-time so Next 16's
 // `cacheComponents` static prerender doesn't try to statically inline the
-// Convex fetch (which uses Math.random() for request ids and trips the
-// `next-prerender-random` rule otherwise).
+// PocketBase fetch.
+
 export async function listSpecialties(): Promise<Specialty[]> {
   await connection();
-  const rows = await fetchQueryAsUser(api.specialties.list);
+  const pb = await userClient();
+  const rows = await pb
+    .collection('specialties')
+    .getFullList<SpecialtyRecord>({ sort: 'name' });
   return rows.map(toSpecialty);
 }
 
 export async function getSpecialty(slug: string): Promise<Specialty | null> {
   await connection();
-  const row = await fetchQueryAsUser(api.specialties.get, { slug });
-  return row ? toSpecialty(row) : null;
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection('specialties')
+      .getFirstListItem<SpecialtyRecord>(`slug = "${slug}"`);
+    return toSpecialty(row);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /**
- * Approved milestones blob for a specialty. Lives on `specialties.milestones`
- * (plain text, written at the end of the extract-milestones workflow). Returns
- * `null` when the pipeline hasn't produced any yet.
+ * Approved milestones blob for a specialty. Lives on
+ * `specialties.milestones` (plain text, written at the end of the
+ * extract-milestones workflow). Returns `null` when the pipeline hasn't
+ * produced any yet.
  */
 export async function getMilestones(slug: string): Promise<string | null> {
   await connection();
-  const row = await fetchQueryAsUser(api.specialties.get, { slug });
-  return row?.milestones ?? null;
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection('specialties')
+      .getFirstListItem<SpecialtyRecord>(`slug = "${slug}"`);
+    return row.milestones ?? null;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * Create or upsert a specialty (matched on slug). Used by the manual
+ * "Add specialty" form, exposed as POST /api/specialties.
+ */
+export async function createSpecialty(args: {
+  slug: string;
+  name: string;
+  source: string;
+  sheetId?: string;
+  xlsxPath?: string;
+  region?: string;
+  language?: string;
+}): Promise<string> {
+  const pb = await userClient();
+  const collection = pb.collection<SpecialtyRecord>('specialties');
+  try {
+    const existing = await collection.getFirstListItem(`slug = "${args.slug}"`);
+    const updated = await collection.update(existing.id, args);
+    return updated.id;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      const created = await collection.create(args);
+      return created.id;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Workflow write — uses the admin client so it works outside a request
+ * cookie context. Stores approved milestone text and bumps the
+ * `lastSeededAt` timestamp. Pass `milestones: undefined` to clear (used
+ * by reset-stage on extract_milestones).
+ */
+export async function updateMilestonesAsAdmin(args: {
+  slug: string;
+  milestones?: string;
+  bumpSeedTimestamp?: boolean;
+}): Promise<void> {
+  const pb = await createAdminClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${args.slug}"`);
+  const patch: { milestones?: string; lastSeededAt?: number } = {
+    milestones: args.milestones,
+  };
+  if (args.bumpSeedTimestamp) patch.lastSeededAt = Date.now();
+  await pb.collection('specialties').update(row.id, patch);
+}
+
+/**
+ * Workflow-side specialty read (admin-authed, no cookie). Used by
+ * workflow steps that may run outside a request context.
+ */
+export async function getSpecialtyAsAdmin(slug: string): Promise<Specialty | null> {
+  const pb = await createAdminClient();
+  try {
+    const row = await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+    return toSpecialty(row);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * Full PocketBase specialty record (admin-authed). Used by workflow
+ * steps that need fields beyond the UI Specialty type — e.g. region,
+ * language, milestones.
+ */
+export async function getSpecialtyRecordAsAdmin(
+  slug: string,
+): Promise<SpecialtyRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
 }

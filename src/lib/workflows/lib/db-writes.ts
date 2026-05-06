@@ -10,6 +10,10 @@
  */
 
 import { fetchMutation, fetchQuery } from 'convex/nextjs';
+import {
+  getSpecialtyRecordAsAdmin,
+  updateMilestonesAsAdmin,
+} from '@/lib/data/specialties';
 import { api } from '../../../../convex/_generated/api';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
@@ -271,11 +275,10 @@ export async function writeApprovedMilestones(
     specialtySlug,
     chars: milestones.length,
   });
-  await fetchMutation(api.specialties.updateMilestones, {
+  await updateMilestonesAsAdmin({
     slug: specialtySlug,
     milestones,
     bumpSeedTimestamp: true,
-    _secret: workflowSecret(),
   });
 }
 
@@ -294,10 +297,7 @@ export async function loadSpecialtyForMapping(
 ): Promise<SpecialtyMappingContext> {
   'use step';
   console.log('[pipeline] loadSpecialtyForMapping', { specialtySlug });
-  const row = await fetchQuery(api.specialties.get, {
-    slug: specialtySlug,
-    _secret: workflowSecret(),
-  });
+  const row = await getSpecialtyRecordAsAdmin(specialtySlug);
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,

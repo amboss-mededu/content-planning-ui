@@ -22,6 +22,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
 import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
+import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import type { MappingFilter } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
   const primaryModel = primaryParse.spec;
   const backupModel = backupParse.spec;
 
-  const spec = await fetchQueryAsUser(api.specialties.get, { slug });
+  const spec = await getSpecialty(slug);
   if (!spec) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }

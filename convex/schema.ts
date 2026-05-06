@@ -21,15 +21,12 @@ import { ontologyTables } from './schema/ontology';
 import { pipelineTables } from './schema/pipeline';
 import { sectionsTables } from './schema/sections';
 import { sourcesTables } from './schema/sources';
-import { specialtiesTables } from './schema/specialties';
 import { userApiKeysTables } from './schema/userApiKeys';
 
-// authTables + otpTables removed in the auth cutover (PR 3 of the
-// PocketBase migration); the entire convex/ directory gets deleted in
-// the final cleanup PR. Until then the remaining schema modules stay
-// here so the convex/_generated types still compile.
+// Schema modules are deleted domain-by-domain across PRs 4 and 5; the
+// whole convex/ directory disappears in PR 9 cleanup. Specialties was
+// the first domain ported (PR 4 commit 1).
 export default defineSchema({
-  ...specialtiesTables,
   ...codesTables,
   ...articlesTables,
   ...sectionsTables,

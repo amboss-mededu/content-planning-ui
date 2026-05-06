@@ -27,11 +27,9 @@ import type * as schema_ontology from "../schema/ontology.js";
 import type * as schema_pipeline from "../schema/pipeline.js";
 import type * as schema_sections from "../schema/sections.js";
 import type * as schema_sources from "../schema/sources.js";
-import type * as schema_specialties from "../schema/specialties.js";
 import type * as schema_userApiKeys from "../schema/userApiKeys.js";
 import type * as sections from "../sections.js";
 import type * as sources from "../sources.js";
-import type * as specialties from "../specialties.js";
 
 import type {
   ApiFromModules,
@@ -57,11 +55,9 @@ declare const fullApi: ApiFromModules<{
   "schema/pipeline": typeof schema_pipeline;
   "schema/sections": typeof schema_sections;
   "schema/sources": typeof schema_sources;
-  "schema/specialties": typeof schema_specialties;
   "schema/userApiKeys": typeof schema_userApiKeys;
   sections: typeof sections;
   sources: typeof sources;
-  specialties: typeof specialties;
 }>;
 
 /**

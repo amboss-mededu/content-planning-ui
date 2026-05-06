@@ -13,8 +13,9 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
+import { fetchMutationAsUser } from '@/lib/convex/server';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
+import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   }
   const inputs = parsed;
 
-  const spec = await fetchQueryAsUser(api.specialties.get, { slug });
+  const spec = await getSpecialty(slug);
   if (!spec) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }

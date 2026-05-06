@@ -8,6 +8,7 @@
  */
 
 import { fetchMutationAsUser } from '@/lib/convex/server';
+import { updateMilestonesAsAdmin } from '@/lib/data/specialties';
 import { api } from '../../../../convex/_generated/api';
 import type { StageName } from './db-writes';
 
@@ -35,7 +36,7 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       await fetchMutationAsUser(api.codes.deleteForSpecialty, { slug: specialtySlug });
       break;
     case 'extract_milestones':
-      await fetchMutationAsUser(api.specialties.updateMilestones, {
+      await updateMilestonesAsAdmin({
         slug: specialtySlug,
         milestones: undefined,
       });

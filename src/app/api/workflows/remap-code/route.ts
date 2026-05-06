@@ -11,6 +11,7 @@ import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
 import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
 import { getConsolidationLockState } from '@/lib/data/codes';
+import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { clearMappingForCode } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const spec = await fetchQueryAsUser(api.specialties.get, { slug });
+  const spec = await getSpecialty(slug);
   if (!spec) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }
