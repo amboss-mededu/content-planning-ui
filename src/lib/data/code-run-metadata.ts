@@ -1,14 +1,12 @@
 /**
- * Per-code mapping run metadata loader. Reads `pipelineEvents` from Convex
+ * Per-code mapping run metadata loader. Reads `pipelineEvents` from PocketBase
  * for the most recent `map_codes` run that touched a specific code, and
  * returns per-attempt usage + aggregate totals. Powers the Metadata tab in
  * the code-detail modal.
  */
 
-import { connection } from 'next/server';
-import { fetchQueryAsUser } from '@/lib/convex/server';
 import type { EventMetrics } from '@/lib/workflows/lib/events';
-import { api } from '../../../convex/_generated/api';
+import { getCodeRunMetadataPipeline } from './pipeline';
 
 export type CodeRunAttempt = {
   createdAt: string;
@@ -48,14 +46,13 @@ export async function loadCodeMappingMetadata(
   slug: string,
   code: string,
 ): Promise<CodeRunMetadata | null> {
-  await connection();
-  const result = await fetchQueryAsUser(api.pipeline.getCodeRunMetadata, { slug, code });
+  const result = await getCodeRunMetadataPipeline(slug, code);
   if (!result) return null;
 
   const attempts: CodeRunAttempt[] = result.events.map((e) => {
-    const m = (e.metrics ? (JSON.parse(e.metrics) as EventMetrics) : {}) as EventMetrics;
+    const m = (e.metrics ?? {}) as EventMetrics;
     return {
-      createdAt: new Date(e.createdAt).toISOString(),
+      createdAt: e.createdAt.toISOString(),
       level: (e.level as 'info' | 'warn' | 'error') ?? 'info',
       message: e.message,
       model: m.model ?? null,
@@ -103,11 +100,9 @@ export async function loadCodeMappingMetadata(
     .sort((x, y) => y.count - x.count);
 
   return {
-    runId: result.run._id,
-    runStartedAt: new Date(result.run.startedAt).toISOString(),
-    runFinishedAt: result.run.finishedAt
-      ? new Date(result.run.finishedAt).toISOString()
-      : null,
+    runId: result.run.id,
+    runStartedAt: result.run.startedAt.toISOString(),
+    runFinishedAt: result.run.finishedAt ? result.run.finishedAt.toISOString() : null,
     stageStatus: result.stage?.status ?? null,
     finalModel,
     totals: {

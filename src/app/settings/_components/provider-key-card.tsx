@@ -13,9 +13,7 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { useMutation } from 'convex/react';
 import { useState } from 'react';
-import { api } from '../../../../convex/_generated/api';
 
 export type ProviderId = 'google' | 'anthropic' | 'openai';
 
@@ -46,24 +44,32 @@ function statusBadge(args: { configured: boolean; status: 'ok' | 'failed' | null
   return { label: 'Saved · not tested', color: 'yellow' };
 }
 
+async function readError(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: string; message?: string };
+    return body.error ?? body.message ?? `${res.status} ${res.statusText}`;
+  } catch {
+    return `${res.status} ${res.statusText}`;
+  }
+}
+
 export function ProviderKeyCard({
   provider,
   configured,
   testedAt,
   status,
+  onChange,
 }: {
   provider: ProviderId;
   configured: boolean;
   testedAt: number | null;
   status: 'ok' | 'failed' | null;
+  onChange: () => void | Promise<void>;
 }) {
   const [keyInput, setKeyInput] = useState('');
   const [busy, setBusy] = useState<null | 'save' | 'clear' | 'test'>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const setKey = useMutation(api.apiKeys.setKeyForCurrentUser);
-  const clearKey = useMutation(api.apiKeys.clearKeyForCurrentUser);
 
   const badge = statusBadge({ configured, status });
 
@@ -80,9 +86,18 @@ export function ProviderKeyCard({
     }
     setBusy('save');
     try {
-      await setKey({ provider, key: keyInput });
-      setKeyInput('');
-      setNotice('Saved. Click Test connection to verify.');
+      const res = await fetch('/api/settings/keys', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, key: keyInput }),
+      });
+      if (!res.ok) {
+        setError(await readError(res));
+      } else {
+        setKeyInput('');
+        setNotice('Saved. Click Test connection to verify.');
+        await onChange();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -94,9 +109,18 @@ export function ProviderKeyCard({
     clearTransient();
     setBusy('clear');
     try {
-      await clearKey({ provider });
-      setKeyInput('');
-      setNotice('Cleared.');
+      const res = await fetch('/api/settings/keys', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+      if (!res.ok) {
+        setError(await readError(res));
+      } else {
+        setKeyInput('');
+        setNotice('Cleared.');
+        await onChange();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -116,6 +140,7 @@ export function ProviderKeyCard({
       const body = (await res.json()) as { ok: boolean; message?: string };
       if (body.ok) setNotice('Connection OK.');
       else setError(body.message ?? 'Test failed.');
+      await onChange();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -16,7 +16,8 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
 import { requireUserResponse } from '@/lib/auth';
-import { getConsolidationLockState, patchCode } from '@/lib/data/codes';
+import { patchCode } from '@/lib/data/codes';
+import { getConsolidationLockState } from '@/lib/data/pipeline';
 
 type Body = {
   description?: string | null;

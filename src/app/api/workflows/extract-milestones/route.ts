@@ -13,14 +13,17 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser } from '@/lib/convex/server';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
+import {
+  createPipelineRun,
+  initPipelineStage,
+  updatePipelineRun,
+} from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { extractMilestonesWorkflow } from '@/lib/workflows/preprocessing/extract-milestones';
-import { api } from '../../../../../convex/_generated/api';
 import { parseContentInputs } from '../_lib/inputs';
 
 type Body = {
@@ -72,20 +75,12 @@ export async function POST(req: NextRequest) {
 
   const milestonesInstructions = body.milestonesInstructions?.trim() || null;
 
-  const { id: runId } = await fetchMutationAsUser(api.pipeline.createRun, {
-    specialtySlug: slug,
+  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
+  await updatePipelineRun(runId, {
+    contentOutlineUrls: inputs,
+    milestonesInstructions,
   });
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: {
-      contentOutlineUrls: inputs,
-      milestonesInstructions,
-    },
-  });
-  await fetchMutationAsUser(api.pipeline.initStage, {
-    runId,
-    stage: 'extract_milestones',
-  });
+  await initPipelineStage({ runId, stage: 'extract_milestones' });
 
   const wfRun = await start(extractMilestonesWorkflow, [
     {
@@ -98,10 +93,7 @@ export async function POST(req: NextRequest) {
     },
   ]);
 
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: { workflowRunId: wfRun.runId },
-  });
+  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');

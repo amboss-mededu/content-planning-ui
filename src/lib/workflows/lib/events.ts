@@ -1,21 +1,16 @@
 /**
- * Per-stage event logger — writes a row to pipelineEvents in Convex for
+ * Per-stage event logger — writes a row to pipelineEvents (PocketBase) for
  * observability. Called from inside other `'use step'` functions; making
  * `logEvent` itself a step gives it its own retry semantics and bakes the
  * event-log writes into the workflow's durability replay.
  */
 
-import { fetchMutation, fetchQuery } from 'convex/nextjs';
-import { api } from '../../../../convex/_generated/api';
+import {
+  getStageAsAdmin,
+  listEventsAsAdmin,
+  logPipelineEventAsAdmin,
+} from '@/lib/data/pipeline';
 import type { StageName } from './db-writes';
-
-function workflowSecret(): string {
-  const s = process.env.WORKFLOW_SECRET;
-  if (!s) {
-    throw new Error('WORKFLOW_SECRET unset — workflow cannot authenticate to Convex.');
-  }
-  return s;
-}
 
 export type EventLevel = 'info' | 'warn' | 'error';
 
@@ -57,13 +52,12 @@ export async function logEvent(input: {
   metrics?: EventMetrics;
 }): Promise<void> {
   'use step';
-  await fetchMutation(api.pipeline.logEvent, {
+  await logPipelineEventAsAdmin({
     runId: input.runId,
     stage: input.stage,
     level: input.level,
     message: input.message,
-    metrics: input.metrics ? JSON.stringify(input.metrics) : undefined,
-    _secret: workflowSecret(),
+    metrics: input.metrics,
   });
 }
 
@@ -87,15 +81,8 @@ export async function aggregateStageMetrics(
   stage: StageName,
 ): Promise<StageTotals> {
   'use step';
-  const events = await fetchQuery(api.pipeline.listEvents, {
-    runId,
-    _secret: workflowSecret(),
-  });
-  const stageRow = await fetchQuery(api.pipeline.getStage, {
-    runId,
-    stage,
-    _secret: workflowSecret(),
-  });
+  const events = await listEventsAsAdmin(runId);
+  const stageRow = await getStageAsAdmin({ runId, stage });
 
   let apiCalls = 0;
   let computeMs = 0;
@@ -106,7 +93,7 @@ export async function aggregateStageMetrics(
   let anyCost = false;
   for (const e of events) {
     if (e.stage !== stage) continue;
-    const m = (e.metrics ? JSON.parse(e.metrics) : {}) as EventMetrics;
+    const m = (e.metrics ?? {}) as EventMetrics;
     if (typeof m.durationMs === 'number' && m.durationMs > 0) {
       apiCalls += 1;
       computeMs += m.durationMs;
@@ -120,9 +107,9 @@ export async function aggregateStageMetrics(
     }
   }
 
-  const durationMs = stageRow?.startedAt
-    ? Math.max(0, Date.now() - stageRow.startedAt)
-    : null;
+  const stageStartedMs = stageRow?.startedAt ? stageRow.startedAt.getTime() : null;
+  const durationMs =
+    stageStartedMs !== null ? Math.max(0, Date.now() - stageStartedMs) : null;
 
   return {
     apiCalls,

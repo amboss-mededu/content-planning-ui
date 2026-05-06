@@ -4,22 +4,19 @@
  * POST /api/settings/test-key
  *   body: { provider: 'google' | 'anthropic' | 'openai' }
  *
- * Reads the requesting user's stored key via Convex (server-side; the key
- * never round-trips through the browser), pings the provider with the
- * cheapest model + a 1-token completion, and records the outcome on the
- * user's `userApiKeys` row via `apiKeys.markTestedForCurrentUser`.
+ * Reads the requesting user's stored key via the PocketBase admin client
+ * (server-side; the key never round-trips through the browser), pings the
+ * provider with the cheapest model + a 1-token completion, and records
+ * the outcome on the user's `userApiKeys` row.
  */
 
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { fetchQuery } from 'convex/nextjs';
 import { type NextRequest, NextResponse } from 'next/server';
-import { env } from '@/env';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser } from '@/lib/convex/server';
-import { api } from '../../../../../convex/_generated/api';
+import { getKeyForUserAsAdmin, markTestedForCurrentUser } from '@/lib/data/user-api-keys';
 
 type Provider = 'google' | 'anthropic' | 'openai';
 
@@ -45,24 +42,11 @@ export async function POST(req: NextRequest) {
   }
   const provider = body.provider;
 
-  // Identify the caller via the PocketBase cookie. The api.apiKeys read
-  // below still hits the wiped Convex DB — PR 5 (userApiKeys port) will
-  // replace it with a PocketBase SDK call.
   const user = await getCurrentUser();
   if (!user?._id) {
     return NextResponse.json({ ok: false, message: 'unauthorized' }, { status: 401 });
   }
-  if (!env.WORKFLOW_SECRET) {
-    return NextResponse.json(
-      { ok: false, message: 'Server is missing WORKFLOW_SECRET — cannot test keys.' },
-      { status: 500 },
-    );
-  }
-  const apiKey = await fetchQuery(api.apiKeys.getKeyForUserService, {
-    userId: user._id,
-    provider,
-    _secret: env.WORKFLOW_SECRET,
-  });
+  const apiKey = await getKeyForUserAsAdmin({ userId: user._id, provider });
   if (!apiKey) {
     return NextResponse.json(
       { ok: false, message: 'No key saved for this provider yet.' },
@@ -90,17 +74,11 @@ export async function POST(req: NextRequest) {
         prompt: 'ping',
       });
     }
-    await fetchMutationAsUser(api.apiKeys.markTestedForCurrentUser, {
-      provider,
-      status: 'ok',
-    });
+    await markTestedForCurrentUser({ provider, status: 'ok' });
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await fetchMutationAsUser(api.apiKeys.markTestedForCurrentUser, {
-      provider,
-      status: 'failed',
-    });
+    await markTestedForCurrentUser({ provider, status: 'failed' });
     return NextResponse.json({ ok: false, message }, { status: 200 });
   }
 }

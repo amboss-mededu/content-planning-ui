@@ -11,10 +11,9 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getRun } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchQueryAsUser } from '@/lib/convex/server';
+import { getRunAsAdmin } from '@/lib/data/pipeline';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import { resetStageCascade } from '@/lib/workflows/lib/reset';
-import { api } from '../../../../../convex/_generated/api';
 
 const VALID_STAGES: ReadonlySet<StageName> = new Set([
   'extract_codes',
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   console.log('[cancel-stage]', body);
 
-  const run = await fetchQueryAsUser(api.pipeline.getRun, { runId: body.runId });
+  const run = await getRunAsAdmin(body.runId);
 
   // Reset state first — this is what unblocks the UI. The workflow runtime
   // cancel is fire-and-forget below.

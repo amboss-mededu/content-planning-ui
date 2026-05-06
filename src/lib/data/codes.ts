@@ -4,7 +4,6 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
-import { fetchQueryAsUser } from '@/lib/convex/server';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   CodeRecord,
@@ -13,9 +12,6 @@ import type {
   NewArticle,
   SectionUpdate,
 } from '@/lib/pb/types';
-// getConsolidationLockState still hits the Convex pipeline domain; that
-// gets ported in PR 5. Until then this one helper bridges to Convex.
-import { api } from '../../../convex/_generated/api';
 
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
@@ -116,17 +112,6 @@ export async function listCodeCategories(slug: string): Promise<CodeCategorySumm
   return Array.from(totals.entries())
     .map(([category, t]) => ({ category, total: t.total, unmapped: t.unmapped }))
     .sort((a, b) => a.category.localeCompare(b.category));
-}
-
-/**
- * Bridge to the still-Convex pipeline.getConsolidationLockState. Gets
- * ported to PocketBase in PR 5 along with the rest of the pipeline domain.
- */
-export async function getConsolidationLockState(
-  slug: string,
-): Promise<{ locked: boolean; status: string | null }> {
-  await connection();
-  return await fetchQueryAsUser(api.pipeline.getConsolidationLockState, { slug });
 }
 
 // --- Writes (request-scoped: user edits) -----------------------------------

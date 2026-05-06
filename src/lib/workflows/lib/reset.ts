@@ -1,13 +1,15 @@
 /**
  * Stage-reset helpers. Resetting a stage clears its output artifacts AND
- * cascades through every downstream stage. Used by /api/workflows/reset-stage.
+ * cascades through every downstream stage. Used by /api/workflows/reset-stage
+ * and /api/workflows/cancel.
  *
- * These run in the Next.js request context (API route handlers), so Convex
- * calls go through `fetchMutationAsUser` and the signed-in user's JWT
- * authorizes the writes.
+ * These run in the Next.js request context (API route handlers), so the
+ * cookie-authed PocketBase helpers are used. Editor-data deletes
+ * (codes / sections / articles / milestones) go through the existing
+ * admin-side helpers since the relevant collections currently use the same
+ * permission rules either way.
  */
 
-import { fetchMutationAsUser } from '@/lib/convex/server';
 import {
   deleteArticleUpdateSuggestionsForSpecialtyAsAdmin,
   deleteConsolidatedArticlesForSpecialtyAsAdmin,
@@ -17,9 +19,12 @@ import {
   clearAllMappingsForSpecialtyAsAdmin,
   deleteCodesForSpecialtyAsAdmin,
 } from '@/lib/data/codes';
+import {
+  cancelStaleRunsForSpecialty,
+  resetStage as resetStagePb,
+} from '@/lib/data/pipeline';
 import { deleteConsolidatedSectionsForSpecialtyAsAdmin } from '@/lib/data/sections';
 import { updateMilestonesAsAdmin } from '@/lib/data/specialties';
-import { api } from '../../../../convex/_generated/api';
 import type { StageName } from './db-writes';
 
 const DOWNSTREAM: Record<StageName, StageName[]> = {
@@ -80,11 +85,9 @@ export async function resetStageCascade(input: {
   const toReset = stagesToReset(input.stage);
   for (const s of toReset) {
     await clearEditorDataForStage(s, input.specialtySlug);
-    await fetchMutationAsUser(api.pipeline.resetStage, { runId: input.runId, stage: s });
+    await resetStagePb({ runId: input.runId, stage: s });
   }
-  await fetchMutationAsUser(api.pipeline.cancelStaleRunsForSpecialty, {
-    slug: input.specialtySlug,
-  });
+  await cancelStaleRunsForSpecialty(input.specialtySlug);
   return toReset;
 }
 
@@ -95,8 +98,6 @@ export async function resetStageCascade(input: {
  * keep the data they have. Returns the count of runs cancelled.
  */
 export async function clearStaleRunsForSpecialty(specialtySlug: string): Promise<number> {
-  const result = await fetchMutationAsUser(api.pipeline.cancelStaleRunsForSpecialty, {
-    slug: specialtySlug,
-  });
+  const result = await cancelStaleRunsForSpecialty(specialtySlug);
   return result.cancelled;
 }
