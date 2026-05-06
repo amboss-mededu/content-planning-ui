@@ -1,33 +1,14 @@
 /**
- * Convex schema aggregator.
- *
- * Per-domain table definitions live in `convex/schema/<domain>.ts`. Adding a
- * new domain: drop a `<domain>Tables` export there, import + spread it here.
- *
- * Single-DB Convex setup. Holds editor-facing data, ontologies, AMBOSS
- * library mirror, pipeline state, auth tables, and rate-limit counters.
- *
- * For shape conventions (jsonBlob vs jsonBlobString, ASCII-only field-name
- * rule) see `convex/schema/_shared.ts`. Phase B2 of the architecture
- * cleanup will normalise the `jsonBlobString` columns to typed
- * arrays-of-records.
+ * Convex schema aggregator — shrinking as PRs port domains to PocketBase.
+ * The whole convex/ directory disappears in PR 9 cleanup. Remaining
+ * domains: pipeline + extractedCodes (PR 5), userApiKeys (PR 5).
  */
 
 import { defineSchema } from 'convex/server';
-import { ambossTables } from './schema/amboss';
-import { ontologyTables } from './schema/ontology';
 import { pipelineTables } from './schema/pipeline';
-import { sourcesTables } from './schema/sources';
 import { userApiKeysTables } from './schema/userApiKeys';
 
-// Schema modules are deleted domain-by-domain across PRs 4 and 5; the
-// whole convex/ directory disappears in PR 9 cleanup. Ported so far:
-// specialties (PR 4 commit 1), codes + codeCategories + mappingsInFlight
-// (PR 4 commit 2).
 export default defineSchema({
-  ...ontologyTables,
-  ...ambossTables,
-  ...sourcesTables,
   ...pipelineTables,
   ...userApiKeysTables,
 });

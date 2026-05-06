@@ -10,12 +10,9 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { useMutation } from 'convex/react';
-import { ConvexError } from 'convex/values';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
-import { api } from '../../../../../../convex/_generated/api';
 import type { SourceKind } from './add-source-modal';
 
 const KIND_COPY: Record<
@@ -68,12 +65,27 @@ export function SourcesCard({
 }) {
   const router = useRouter();
   const copy = KIND_COPY[kind];
-  const createCodeSource = useMutation(api.sources.createCode);
-  const createMilestoneSource = useMutation(api.sources.createMilestone);
-  const removeCodeSource = useMutation(api.sources.removeCode);
-  const removeMilestoneSource = useMutation(api.sources.removeMilestone);
-  const create = kind === 'code' ? createCodeSource : createMilestoneSource;
-  const remove = kind === 'code' ? removeCodeSource : removeMilestoneSource;
+  const endpoint = kind === 'code' ? '/api/sources/code' : '/api/sources/milestone';
+  async function create(args: { slug: string; name: string }): Promise<void> {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `add failed (${res.status})`);
+    }
+  }
+  async function remove(args: { slug: string }): Promise<void> {
+    const res = await fetch(`${endpoint}?slug=${encodeURIComponent(args.slug)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `delete failed (${res.status})`);
+    }
+  }
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -103,13 +115,7 @@ export function SourcesCard({
       setName('');
       router.refresh();
     } catch (err) {
-      setError(
-        err instanceof ConvexError && typeof err.data === 'string'
-          ? err.data
-          : err instanceof Error
-            ? err.message
-            : 'Failed to add source.',
-      );
+      setError(err instanceof Error ? err.message : 'Failed to add source.');
     } finally {
       setSubmitting(false);
     }
@@ -121,13 +127,7 @@ export function SourcesCard({
       await remove({ slug: targetSlug });
       router.refresh();
     } catch (err) {
-      setError(
-        err instanceof ConvexError && typeof err.data === 'string'
-          ? err.data
-          : err instanceof Error
-            ? err.message
-            : 'Failed to delete source.',
-      );
+      setError(err instanceof Error ? err.message : 'Failed to delete source.');
     }
   };
 

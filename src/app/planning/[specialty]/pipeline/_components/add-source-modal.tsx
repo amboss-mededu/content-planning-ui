@@ -1,11 +1,8 @@
 'use client';
 
 import { Callout, Input, Modal, Stack } from '@amboss/design-system';
-import { useMutation } from 'convex/react';
-import { ConvexError } from 'convex/values';
 import { useState } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
-import { api } from '../../../../../../convex/_generated/api';
 
 export type SourceKind = 'code' | 'milestone';
 
@@ -50,9 +47,18 @@ export function AddSourceModal({
   onCreated: (source: CodeSource) => void;
 }) {
   const copy = KIND_COPY[kind];
-  const createCode = useMutation(api.sources.createCode);
-  const createMilestone = useMutation(api.sources.createMilestone);
-  const create = kind === 'code' ? createCode : createMilestone;
+  const endpoint = kind === 'code' ? '/api/sources/code' : '/api/sources/milestone';
+  async function create(args: { slug: string; name: string }): Promise<void> {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `add failed (${res.status})`);
+    }
+  }
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -89,13 +95,7 @@ export function AddSourceModal({
       reset();
       onCreated({ slug: s, name: n });
     } catch (err) {
-      setError(
-        err instanceof ConvexError && typeof err.data === 'string'
-          ? err.data
-          : err instanceof Error
-            ? err.message
-            : 'Failed to add source.',
-      );
+      setError(err instanceof Error ? err.message : 'Failed to add source.');
     } finally {
       setSubmitting(false);
     }

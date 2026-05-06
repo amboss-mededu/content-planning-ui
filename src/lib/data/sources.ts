@@ -1,30 +1,34 @@
+import 'server-only';
+
+import { cookies } from 'next/headers';
 import { connection } from 'next/server';
-import { fetchQueryAsUser } from '@/lib/convex/server';
+import type PocketBase from 'pocketbase';
+import { createServerClient } from '@/lib/pb/server';
+import type { OntologyCodeRecord } from '@/lib/pb/types';
 import type { OntologySource } from '@/lib/types';
-import { api } from '../../../convex/_generated/api';
+
+const COLLECTION_BY_SOURCE: Record<OntologySource, string> = {
+  ICD10: 'icd10Codes',
+  HCUP: 'hcupCodes',
+  ABIM: 'abimCodes',
+  Orpha: 'orphaCodes',
+};
+
+async function userClient(): Promise<PocketBase> {
+  const store = await cookies();
+  const cookieHeader = store
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+  return createServerClient(cookieHeader);
+}
 
 export async function listSourceOntology(slug: string, source: OntologySource) {
   await connection();
-  switch (source) {
-    case 'ICD10':
-      return {
-        source,
-        rows: await fetchQueryAsUser(api.ontology.listIcd10, { slug }),
-      } as const;
-    case 'HCUP':
-      return {
-        source,
-        rows: await fetchQueryAsUser(api.ontology.listHcup, { slug }),
-      } as const;
-    case 'ABIM':
-      return {
-        source,
-        rows: await fetchQueryAsUser(api.ontology.listAbim, { slug }),
-      } as const;
-    case 'Orpha':
-      return {
-        source,
-        rows: await fetchQueryAsUser(api.ontology.listOrpha, { slug }),
-      } as const;
-  }
+  const pb = await userClient();
+  const collection = COLLECTION_BY_SOURCE[source];
+  const rows = await pb
+    .collection<OntologyCodeRecord>(collection)
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  return { source, rows } as const;
 }

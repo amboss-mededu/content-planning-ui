@@ -38,6 +38,7 @@
     "scripts/mark-imported.ts",
     "scripts/refresh-amboss-library.ts",
     "scripts/wipe-prod.ts",
-    "scripts/start-extract.ts"
+    "scripts/start-extract.ts",
+    "scripts/seed-from-xlsx.ts"
   ]
 }
