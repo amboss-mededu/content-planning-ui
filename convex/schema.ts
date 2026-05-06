@@ -15,10 +15,8 @@
 
 import { defineSchema } from 'convex/server';
 import { ambossTables } from './schema/amboss';
-import { articlesTables } from './schema/articles';
 import { ontologyTables } from './schema/ontology';
 import { pipelineTables } from './schema/pipeline';
-import { sectionsTables } from './schema/sections';
 import { sourcesTables } from './schema/sources';
 import { userApiKeysTables } from './schema/userApiKeys';
 
@@ -27,8 +25,6 @@ import { userApiKeysTables } from './schema/userApiKeys';
 // specialties (PR 4 commit 1), codes + codeCategories + mappingsInFlight
 // (PR 4 commit 2).
 export default defineSchema({
-  ...articlesTables,
-  ...sectionsTables,
   ...ontologyTables,
   ...ambossTables,
   ...sourcesTables,

@@ -9,9 +9,15 @@
 
 import { fetchMutationAsUser } from '@/lib/convex/server';
 import {
+  deleteArticleUpdateSuggestionsForSpecialtyAsAdmin,
+  deleteConsolidatedArticlesForSpecialtyAsAdmin,
+  deleteNewArticleSuggestionsForSpecialtyAsAdmin,
+} from '@/lib/data/articles';
+import {
   clearAllMappingsForSpecialtyAsAdmin,
   deleteCodesForSpecialtyAsAdmin,
 } from '@/lib/data/codes';
+import { deleteConsolidatedSectionsForSpecialtyAsAdmin } from '@/lib/data/sections';
 import { updateMilestonesAsAdmin } from '@/lib/data/specialties';
 import { api } from '../../../../convex/_generated/api';
 import type { StageName } from './db-writes';
@@ -49,22 +55,14 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       await clearAllMappingsForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_primary':
-      await fetchMutationAsUser(api.articles.deleteNewForSpecialty, {
-        slug: specialtySlug,
-      });
-      await fetchMutationAsUser(api.articles.deleteUpdatesForSpecialty, {
-        slug: specialtySlug,
-      });
+      await deleteNewArticleSuggestionsForSpecialtyAsAdmin(specialtySlug);
+      await deleteArticleUpdateSuggestionsForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_articles':
-      await fetchMutationAsUser(api.articles.deleteConsolidatedForSpecialty, {
-        slug: specialtySlug,
-      });
+      await deleteConsolidatedArticlesForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_sections':
-      await fetchMutationAsUser(api.sections.deleteForSpecialty, {
-        slug: specialtySlug,
-      });
+      await deleteConsolidatedSectionsForSpecialtyAsAdmin(specialtySlug);
       break;
   }
 }
