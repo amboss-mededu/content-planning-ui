@@ -112,7 +112,7 @@ export const getStatusForCurrentUser = query({
  */
 export const getKeyForUserService = query({
   args: {
-    userId: v.id('users'),
+    userId: v.string(),
     provider: providerArg,
     _secret: serviceSecretArg,
   },

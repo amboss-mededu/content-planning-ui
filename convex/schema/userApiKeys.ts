@@ -5,7 +5,7 @@ const testStatus = v.union(v.literal('ok'), v.literal('failed'));
 
 export const userApiKeysTables = {
   userApiKeys: defineTable({
-    userId: v.id('users'),
+    userId: v.string(),
     googleApiKey: v.optional(v.string()),
     anthropicApiKey: v.optional(v.string()),
     openaiApiKey: v.optional(v.string()),

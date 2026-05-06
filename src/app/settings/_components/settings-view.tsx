@@ -1,18 +1,19 @@
 'use client';
 
 import { H1, Stack, Text } from '@amboss/design-system';
-import { useConvexAuth, useQuery } from 'convex/react';
+import { useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { type ProviderId, ProviderKeyCard } from './provider-key-card';
 
 const PROVIDERS: ProviderId[] = ['google', 'anthropic', 'openai'];
 
 export function SettingsView() {
-  const { isAuthenticated } = useConvexAuth();
-  const status = useQuery(
-    api.apiKeys.getStatusForCurrentUser,
-    isAuthenticated ? {} : 'skip',
-  );
+  // useConvexAuth was removed in the auth cutover (PR 3); the proxy now
+  // gates this page via PB cookie auth, so we know the user is signed in
+  // by the time this component renders. The useQuery still calls Convex
+  // and will fail at runtime against the wiped DB — PR 5 (data layer)
+  // replaces it with a PocketBase SDK call.
+  const status = useQuery(api.apiKeys.getStatusForCurrentUser, {});
 
   return (
     <Stack space="xl">

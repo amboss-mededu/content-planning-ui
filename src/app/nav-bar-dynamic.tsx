@@ -8,11 +8,9 @@ import {
   NavBar,
   NavBarName,
 } from '@amboss/design-system';
-import { useAuthActions } from '@convex-dev/auth/react';
-import { useConvexAuth, useQuery } from 'convex/react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../../convex/_generated/api';
+import type { CurrentUser } from '@/lib/auth';
 
 const NAV_ITEMS = [
   { label: 'Home', href: '/' },
@@ -38,14 +36,9 @@ function useScrollCompact() {
   return isCompact;
 }
 
-function UserMenu() {
-  const { isAuthenticated } = useConvexAuth();
-  const user = useQuery(api.users.getCurrentUser, isAuthenticated ? {} : 'skip');
-  const { signOut } = useAuthActions();
+function UserMenu({ user }: { user: CurrentUser }) {
   const router = useRouter();
-
-  if (!isAuthenticated || !user?.email) return null;
-
+  if (!user.email) return null;
   const localPart = user.email.split('@')[0] ?? user.email;
 
   return (
@@ -59,10 +52,10 @@ function UserMenu() {
         {
           label: 'Sign out',
           onSelect: async () => {
-            await signOut();
-            // Hard navigation — same reason as the post-sign-in case in
-            // src/app/login/page.tsx: guarantees the proxy reads the cleared
-            // cookie on the next request and avoids any stale-state flicker.
+            // Hard navigation guarantees the proxy reads the cleared cookie
+            // on the next request. The /api/auth/logout endpoint clears the
+            // pb_auth cookie and 303-redirects to /login.
+            await fetch('/api/auth/logout', { method: 'POST' });
             window.location.assign('/login');
           },
         },
@@ -71,10 +64,10 @@ function UserMenu() {
   );
 }
 
-export function NavBarDynamic() {
+export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
   const pathname = usePathname() ?? '/';
   const isCompact = useScrollCompact();
-  const { isAuthenticated } = useConvexAuth();
+  const isAuthenticated = !!user;
   const activeIndex = Math.max(
     0,
     NAV_ITEMS.findIndex((item) =>
@@ -102,9 +95,7 @@ export function NavBarDynamic() {
               </NavBar.PrimaryNav>
             )}
           </Inline>
-          <div className="primary-nav-user">
-            <UserMenu />
-          </div>
+          <div className="primary-nav-user">{user ? <UserMenu user={user} /> : null}</div>
         </div>
       </NavBar.PrimaryNavContainer>
       {isAuthenticated && (

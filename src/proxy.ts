@@ -1,34 +1,52 @@
-import {
-  convexAuthNextjsMiddleware,
-  createRouteMatcher,
-  nextjsMiddlewareRedirect,
-} from '@convex-dev/auth/nextjs/server';
+import { type NextRequest, NextResponse } from 'next/server';
+import PocketBase from 'pocketbase';
+import { env } from './env';
+import { PB_AUTH_COOKIE } from './lib/pb/server';
 
-const isLoginPage = createRouteMatcher(['/login']);
+// Paths that must remain reachable without an auth cookie.
+const PUBLIC_PREFIXES = ['/login', '/auth/callback/', '/api/auth/login/'];
 
-export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
-  // Only gate page navigations (GETs). POSTs are either:
-  //   • the /api/auth handshake (proxied by the middleware itself),
-  //   • Convex Auth's `invalidateCache` Server Action that fires on token
-  //     state changes (POSTs to the current URL — redirecting it breaks the
-  //     Server-Action RSC stream and hangs the client-side `await signIn`).
-  // Letting non-GETs fall through fixes both.
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+}
+
+export default function proxy(request: NextRequest): NextResponse | undefined {
+  // Only gate page navigations (GETs). POSTs (Server Functions, OAuth
+  // exchange, /api/auth/logout) need to fall through — every mutating
+  // route does its own auth check via requireUserResponse().
   if (request.method !== 'GET') return;
 
-  const isAuthenticated = await convexAuth.isAuthenticated();
+  const { pathname, search } = request.nextUrl;
+  const cookieHeader = request.headers.get('cookie') ?? '';
 
-  if (isLoginPage(request) && isAuthenticated) {
-    return nextjsMiddlewareRedirect(request, '/');
+  // Local validity check — checks JWT exp without a network call.
+  // PocketBase's authStore.isValid is sync.
+  let isAuthenticated = false;
+  if (cookieHeader && cookieHeader.length > 0) {
+    const pb = new PocketBase(env.POCKETBASE_URL);
+    pb.authStore.loadFromCookie(cookieHeader, PB_AUTH_COOKIE);
+    isAuthenticated = pb.authStore.isValid;
   }
-  if (!isLoginPage(request) && !isAuthenticated) {
-    const next = encodeURIComponent(request.nextUrl.pathname + request.nextUrl.search);
-    return nextjsMiddlewareRedirect(request, `/login?next=${next}`);
+
+  if (isPublicPath(pathname)) {
+    // Already signed in but heading back to /login → bounce home.
+    if (pathname === '/login' && isAuthenticated) {
+      return NextResponse.redirect(new URL('/', request.nextUrl.origin));
+    }
+    return; // let public routes through
   }
-});
+
+  if (!isAuthenticated) {
+    const next = encodeURIComponent(pathname + search);
+    return NextResponse.redirect(new URL(`/login?next=${next}`, request.nextUrl.origin));
+  }
+
+  return; // authenticated → continue
+}
 
 export const config = {
-  // Run on every path except Next internals and static assets. /api/auth is
-  // intentionally INCLUDED so the middleware can proxy it to the Convex
-  // backend.
+  // Run on every path except Next internals and static assets. Auth API
+  // routes are intentionally INCLUDED so the public-path check above can
+  // exempt them.
   matcher: ['/((?!_next/static|_next/image|favicon\\.ico|.*\\.[a-z0-9]+$).*)'],
 };

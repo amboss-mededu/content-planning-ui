@@ -20,7 +20,7 @@
 
 import { fetchQuery } from 'convex/nextjs';
 import { env } from '@/env';
-import { fetchQueryAsUser } from '@/lib/convex/server';
+import { getCurrentUser } from '@/lib/auth';
 import { api } from '../../../../convex/_generated/api';
 import type { ProviderApiKeys, ProviderId } from './llm';
 
@@ -35,11 +35,11 @@ export async function resolveApiKeysForRun(
 ): Promise<ProviderApiKeys> {
   const result: ProviderApiKeys = {};
 
-  // Identify the caller (JWT-authenticated). If unauthenticated we skip the
-  // per-user lookup and fall straight through to env — the route's existing
-  // `requireUserResponse` guard means we shouldn't get here without auth, but
-  // a defensive null-check costs nothing.
-  const user = await fetchQueryAsUser(api.users.getCurrentUser, {});
+  // Identify the caller via the PocketBase cookie (proxy gates the route, so
+  // we only get here authenticated; defensive null-check anyway). The
+  // remaining api.apiKeys.getKeyForUserService call below still hits the
+  // wiped Convex DB and will return null — userApiKeys port lands in PR 5.
+  const user = await getCurrentUser();
   const userId = user?._id ?? null;
 
   if (!env.WORKFLOW_SECRET || !userId) {

@@ -1,4 +1,3 @@
-import { ConvexAuthNextjsServerProvider } from '@convex-dev/auth/nextjs/server';
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import type { Metadata, Viewport } from 'next';
@@ -44,13 +43,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <Suspense>
-          <ConvexAuthNextjsServerProvider>
-            <EmotionRegistry>
-              <ConvexProviders>
-                <NavShell>{children}</NavShell>
-              </ConvexProviders>
-            </EmotionRegistry>
-          </ConvexAuthNextjsServerProvider>
+          <EmotionRegistry>
+            <ConvexProviders>
+              <NavShell>{children}</NavShell>
+            </ConvexProviders>
+          </EmotionRegistry>
         </Suspense>
         <Analytics />
         <SpeedInsights />

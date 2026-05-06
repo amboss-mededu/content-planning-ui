@@ -17,8 +17,8 @@ import { generateText } from 'ai';
 import { fetchQuery } from 'convex/nextjs';
 import { type NextRequest, NextResponse } from 'next/server';
 import { env } from '@/env';
-import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
+import { getCurrentUser, requireUserResponse } from '@/lib/auth';
+import { fetchMutationAsUser } from '@/lib/convex/server';
 import { api } from '../../../../../convex/_generated/api';
 
 type Provider = 'google' | 'anthropic' | 'openai';
@@ -45,11 +45,10 @@ export async function POST(req: NextRequest) {
   }
   const provider = body.provider;
 
-  // Identify the caller, then read the key via the service-secret-protected
-  // path. Splitting these means the raw-key query refuses any client that
-  // doesn't present `WORKFLOW_SECRET` (i.e. anything other than this server-
-  // side route).
-  const user = await fetchQueryAsUser(api.users.getCurrentUser, {});
+  // Identify the caller via the PocketBase cookie. The api.apiKeys read
+  // below still hits the wiped Convex DB — PR 5 (userApiKeys port) will
+  // replace it with a PocketBase SDK call.
+  const user = await getCurrentUser();
   if (!user?._id) {
     return NextResponse.json({ ok: false, message: 'unauthorized' }, { status: 401 });
   }

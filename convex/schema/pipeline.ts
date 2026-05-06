@@ -30,7 +30,7 @@ export const pipelineTables = {
     // Actor audit trail. Set when a user triggers the run via an authenticated
     // request; left undefined for workflow-internal create paths and legacy
     // rows from before this field existed.
-    createdByUserId: v.optional(v.id('users')),
+    createdByUserId: v.optional(v.string()),
   })
     .index('by_specialty', ['specialtySlug'])
     .index('by_specialty_started', ['specialtySlug', 'startedAt']),

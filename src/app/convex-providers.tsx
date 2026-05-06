@@ -1,7 +1,6 @@
 'use client';
 
-import { ConvexAuthNextjsProvider } from '@convex-dev/auth/nextjs';
-import { ConvexReactClient } from 'convex/react';
+import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { env } from '@/env';
 
 /**
@@ -15,11 +14,19 @@ import { env } from '@/env';
  * the construction out of the render tree avoids the prerender error
  * entirely. One module-scope client is the right fit anyway — every browser
  * tab has its own JS environment, so there's no cross-request leakage.
+ *
+ * Auth context (previously ConvexAuthNextjsProvider) was removed in the
+ * Convex → PocketBase auth cutover. PocketBase auth state is server-side
+ * only (HttpOnly cookie + per-request `createServerClient`); client code
+ * receives the resolved user as a prop from RSC.
+ *
+ * This whole file gets deleted in the cleanup PR once every Convex
+ * `useQuery` is replaced with a PocketBase subscription.
  */
 const convex = new ConvexReactClient(
   env.NEXT_PUBLIC_CONVEX_URL ?? 'https://example.convex.cloud',
 );
 
 export function ConvexProviders({ children }: { children: React.ReactNode }) {
-  return <ConvexAuthNextjsProvider client={convex}>{children}</ConvexAuthNextjsProvider>;
+  return <ConvexProvider client={convex}>{children}</ConvexProvider>;
 }

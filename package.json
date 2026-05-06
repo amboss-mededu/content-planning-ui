@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "configure-oauth": "dotenv -e .env.local -- tsx scripts/configure-oauth.ts",
     "seed:convex": "dotenv -e .env.local -- tsx scripts/seed-convex.ts",
     "seed:ontology": "dotenv -e .env.local -- tsx scripts/seed-from-xlsx.ts",
     "import-board": "dotenv -e .env.local -- tsx scripts/import-board-mapping.ts",

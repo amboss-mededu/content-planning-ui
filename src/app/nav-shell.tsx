@@ -1,13 +1,15 @@
 import { Suspense } from 'react';
+import { getCurrentUser } from '@/lib/auth';
 import { NavBarDynamic } from './nav-bar-dynamic';
 import { NavShellFooter } from './nav-shell-footer';
 
-export function NavShell({ children }: { children: React.ReactNode }) {
+export async function NavShell({ children }: { children: React.ReactNode }) {
+  const user = await getCurrentUser();
   return (
     <>
       <div className="nav-fixed">
         <Suspense fallback={<div className="nav-placeholder" />}>
-          <NavBarDynamic />
+          <NavBarDynamic user={user} />
         </Suspense>
       </div>
 

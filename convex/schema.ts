@@ -13,21 +13,22 @@
  * arrays-of-records.
  */
 
-import { authTables } from '@convex-dev/auth/server';
 import { defineSchema } from 'convex/server';
 import { ambossTables } from './schema/amboss';
 import { articlesTables } from './schema/articles';
 import { codesTables } from './schema/codes';
 import { ontologyTables } from './schema/ontology';
-import { otpTables } from './schema/otp';
 import { pipelineTables } from './schema/pipeline';
 import { sectionsTables } from './schema/sections';
 import { sourcesTables } from './schema/sources';
 import { specialtiesTables } from './schema/specialties';
 import { userApiKeysTables } from './schema/userApiKeys';
 
+// authTables + otpTables removed in the auth cutover (PR 3 of the
+// PocketBase migration); the entire convex/ directory gets deleted in
+// the final cleanup PR. Until then the remaining schema modules stay
+// here so the convex/_generated types still compile.
 export default defineSchema({
-  ...authTables,
   ...specialtiesTables,
   ...codesTables,
   ...articlesTables,
@@ -36,6 +37,5 @@ export default defineSchema({
   ...ambossTables,
   ...sourcesTables,
   ...pipelineTables,
-  ...otpTables,
   ...userApiKeysTables,
 });
