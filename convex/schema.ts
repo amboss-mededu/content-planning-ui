@@ -16,7 +16,6 @@
 import { defineSchema } from 'convex/server';
 import { ambossTables } from './schema/amboss';
 import { articlesTables } from './schema/articles';
-import { codesTables } from './schema/codes';
 import { ontologyTables } from './schema/ontology';
 import { pipelineTables } from './schema/pipeline';
 import { sectionsTables } from './schema/sections';
@@ -24,10 +23,10 @@ import { sourcesTables } from './schema/sources';
 import { userApiKeysTables } from './schema/userApiKeys';
 
 // Schema modules are deleted domain-by-domain across PRs 4 and 5; the
-// whole convex/ directory disappears in PR 9 cleanup. Specialties was
-// the first domain ported (PR 4 commit 1).
+// whole convex/ directory disappears in PR 9 cleanup. Ported so far:
+// specialties (PR 4 commit 1), codes + codeCategories + mappingsInFlight
+// (PR 4 commit 2).
 export default defineSchema({
-  ...codesTables,
   ...articlesTables,
   ...sectionsTables,
   ...ontologyTables,

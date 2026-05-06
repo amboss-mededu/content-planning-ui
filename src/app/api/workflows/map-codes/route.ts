@@ -21,7 +21,8 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
+import { fetchMutationAsUser } from '@/lib/convex/server';
+import { listUnmappedCodesAsAdmin } from '@/lib/data/codes';
 import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import type { MappingFilter } from '@/lib/workflows/lib/db-writes';
@@ -62,8 +63,7 @@ async function countUnmappedWithFilter(
   slug: string,
   filter: MappingFilter | null,
 ): Promise<number> {
-  const rows = await fetchQueryAsUser(api.codes.listUnmapped, {
-    slug,
+  const rows = await listUnmappedCodesAsAdmin(slug, {
     categories: filter?.categories ?? undefined,
     codes: filter?.codes ?? undefined,
   });

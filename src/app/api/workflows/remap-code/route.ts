@@ -9,8 +9,8 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser, fetchQueryAsUser } from '@/lib/convex/server';
-import { getConsolidationLockState } from '@/lib/data/codes';
+import { fetchMutationAsUser } from '@/lib/convex/server';
+import { getCodeAsAdmin, getConsolidationLockState } from '@/lib/data/codes';
 import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { clearMappingForCode } from '@/lib/workflows/lib/db-writes';
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }
 
-  const existing = await fetchQueryAsUser(api.codes.get, { slug, code });
+  const existing = await getCodeAsAdmin(slug, code);
   if (!existing) {
     return NextResponse.json({ error: `code not found: ${code}` }, { status: 404 });
   }

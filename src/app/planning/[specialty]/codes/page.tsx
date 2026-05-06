@@ -1,6 +1,8 @@
-import { preloadQueryAsUser } from '@/lib/convex/server';
-import { getConsolidationLockState } from '@/lib/data/codes';
-import { api } from '../../../../../convex/_generated/api';
+import {
+  getConsolidationLockState,
+  listCodes,
+  listInFlightCodes,
+} from '@/lib/data/codes';
 import { CodesViewClient } from './codes-view-client';
 
 export default async function CodesPage({
@@ -10,14 +12,12 @@ export default async function CodesPage({
 }) {
   const { specialty: slug } = await params;
 
-  // Codes + in-flight markers come from Convex; the consolidation lock still
-  // lives in Postgres pipeline state. Preload all three in parallel so the
-  // first render has every prop ready and the client doesn't wait on a
-  // round trip.
-  const [lock, preloadedCodes, preloadedInFlight] = await Promise.all([
+  // RSC fetches the snapshot; the client hook subscribes to PB live updates.
+  // The consolidation lock still bridges to Convex pipeline state until PR 5.
+  const [lock, codes, inFlight] = await Promise.all([
     getConsolidationLockState(slug),
-    preloadQueryAsUser(api.codes.list, { slug }),
-    preloadQueryAsUser(api.codes.inFlight, { slug }),
+    listCodes(slug),
+    listInFlightCodes(slug),
   ]);
 
   return (
@@ -25,8 +25,8 @@ export default async function CodesPage({
       slug={slug}
       canEdit={!lock.locked}
       lockStatus={lock.status}
-      preloadedCodes={preloadedCodes}
-      preloadedInFlight={preloadedInFlight}
+      initialCodes={codes}
+      initialInFlight={inFlight}
     />
   );
 }

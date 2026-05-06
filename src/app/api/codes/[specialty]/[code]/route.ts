@@ -14,10 +14,9 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { ClientResponseError } from 'pocketbase';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser } from '@/lib/convex/server';
-import { getConsolidationLockState } from '@/lib/data/codes';
-import { api } from '../../../../../../convex/_generated/api';
+import { getConsolidationLockState, patchCode } from '@/lib/data/codes';
 
 type Body = {
   description?: string | null;
@@ -74,12 +73,12 @@ export async function PATCH(
   console.log('[codes] PATCH', { slug, code: codeId, fields });
 
   try {
-    await fetchMutationAsUser(api.codes.patch, { slug, code: codeId, fields });
+    await patchCode(slug, codeId, fields);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes('No code')) {
+    if (e instanceof ClientResponseError && e.status === 404) {
       return NextResponse.json({ error: 'code not found' }, { status: 404 });
     }
+    const msg = e instanceof Error ? e.message : String(e);
     console.error('[codes] PATCH failed:', e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }

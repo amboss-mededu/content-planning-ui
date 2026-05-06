@@ -8,6 +8,10 @@
  */
 
 import { fetchMutationAsUser } from '@/lib/convex/server';
+import {
+  clearAllMappingsForSpecialtyAsAdmin,
+  deleteCodesForSpecialtyAsAdmin,
+} from '@/lib/data/codes';
 import { updateMilestonesAsAdmin } from '@/lib/data/specialties';
 import { api } from '../../../../convex/_generated/api';
 import type { StageName } from './db-writes';
@@ -33,7 +37,7 @@ export function stagesToReset(stage: StageName): StageName[] {
 async function clearEditorDataForStage(stage: StageName, specialtySlug: string) {
   switch (stage) {
     case 'extract_codes':
-      await fetchMutationAsUser(api.codes.deleteForSpecialty, { slug: specialtySlug });
+      await deleteCodesForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'extract_milestones':
       await updateMilestonesAsAdmin({
@@ -42,9 +46,7 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       });
       break;
     case 'map_codes':
-      await fetchMutationAsUser(api.codes.clearAllMappingsForSpecialty, {
-        slug: specialtySlug,
-      });
+      await clearAllMappingsForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_primary':
       await fetchMutationAsUser(api.articles.deleteNewForSpecialty, {

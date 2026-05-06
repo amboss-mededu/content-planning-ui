@@ -1,35 +1,48 @@
 'use client';
 
-import { type Preloaded, usePreloadedQuery } from 'convex/react';
+import { useMemo } from 'react';
+import type { CodeRecord, MappingInFlightRecord } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
-import type { api } from '../../../../../convex/_generated/api';
 import { CodesView } from '../../_components/codes-view';
 
 /**
- * Codes are served by Convex — every connected client re-renders when any
- * row in the specialty changes (workflow writes, user edits, in-flight pulse
- * inserts/deletes). The page renders a `Preloaded` query so the first paint
- * has the full table; subsequent updates flow over the open WebSocket.
+ * Codes table — server-rendered with the initial snapshot, live-updated
+ * via PocketBase WebSocket subscriptions. Replaces the Convex
+ * `usePreloadedQuery` / `useQuery` pair.
  *
- * The blob fields (`articlesWhereCoverageIs` / `existingArticleUpdates` /
- * `newArticlesNeeded`) are now stored as typed arrays in Convex (Phase B2),
- * so no client-side hydration is needed.
+ * Blob fields (`articlesWhereCoverageIs` etc.) come back from PB as
+ * already-parsed JSON, so no client-side hydration needed.
  */
 export function CodesViewClient({
   slug,
   canEdit,
   lockStatus,
-  preloadedCodes,
-  preloadedInFlight,
+  initialCodes,
+  initialInFlight,
 }: {
   slug: string;
   canEdit: boolean;
   lockStatus: string | null;
-  preloadedCodes: Preloaded<typeof api.codes.list>;
-  preloadedInFlight: Preloaded<typeof api.codes.inFlight>;
+  initialCodes: CodeRecord[];
+  initialInFlight: string[];
 }) {
-  const codes = usePreloadedQuery(preloadedCodes);
-  const inFlight = usePreloadedQuery(preloadedInFlight);
+  const codes = useLiveCollection<CodeRecord>('codes', initialCodes, {
+    filter: `specialtySlug = "${slug}"`,
+  });
+  const inFlightRows = useLiveCollection<MappingInFlightRecord>(
+    'mappingsInFlight',
+    [], // initial pulled from server passes through inFlightCodes prop below
+    { filter: `specialtySlug = "${slug}"` },
+  );
+
+  // Merge initial snapshot (string[]) with the live subscription (records)
+  // so the first paint shows pulses without waiting for the WebSocket.
+  const inFlightCodes = useMemo(() => {
+    const live = new Set(inFlightRows.map((r) => r.code));
+    for (const code of initialInFlight) live.add(code);
+    return Array.from(live);
+  }, [inFlightRows, initialInFlight]);
 
   return (
     <CodesView
@@ -37,7 +50,7 @@ export function CodesViewClient({
       specialtySlug={slug}
       canEdit={canEdit}
       lockStatus={lockStatus}
-      inFlightCodes={inFlight}
+      inFlightCodes={inFlightCodes}
     />
   );
 }

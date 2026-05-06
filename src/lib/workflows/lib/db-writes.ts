@@ -11,6 +11,14 @@
 
 import { fetchMutation, fetchQuery } from 'convex/nextjs';
 import {
+  bulkInsertCodesAsAdmin,
+  clearInFlightForRunAsAdmin,
+  clearMappingAsAdmin,
+  listUnmappedCodesAsAdmin,
+  markCodesInFlightAsAdmin,
+  writeCodeMappingAsAdmin,
+} from '@/lib/data/codes';
+import {
   getSpecialtyRecordAsAdmin,
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
@@ -254,11 +262,7 @@ export async function promoteExtractedCodesToCodes(
   const chunkSize = 25;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
-    await fetchMutation(api.codes.bulkInsert, {
-      slug: specialtySlug,
-      rows: chunk,
-      _secret: workflowSecret(),
-    });
+    await bulkInsertCodesAsAdmin(specialtySlug, chunk);
   }
   console.log('[pipeline] promoteExtractedCodesToCodes → promoted', rows.length);
   return { promoted: rows.length };
@@ -328,11 +332,9 @@ export async function listUnmappedCodes(
 ): Promise<UnmappedCodeRow[]> {
   'use step';
   console.log('[pipeline] listUnmappedCodes', { specialtySlug, filter });
-  const rows = await fetchQuery(api.codes.listUnmapped, {
-    slug: specialtySlug,
+  const rows = await listUnmappedCodesAsAdmin(specialtySlug, {
     categories: filter?.categories?.filter((s) => typeof s === 'string' && s.length > 0),
     codes: filter?.codes?.filter((s) => typeof s === 'string' && s.length > 0),
-    _secret: workflowSecret(),
   });
   console.log('[pipeline] listUnmappedCodes →', rows.length);
   return rows;
@@ -388,7 +390,7 @@ export async function writeCodeMapping(
       : typeof mapping.coverage.coverageScore === 'string'
         ? Number.parseInt(mapping.coverage.coverageScore, 10) || undefined
         : undefined;
-  await fetchMutation(api.codes.writeMapping, {
+  await writeCodeMappingAsAdmin({
     slug: specialtySlug,
     code,
     isInAMBOSS: mapping.coverage.inAMBOSS ?? undefined,
@@ -402,7 +404,6 @@ export async function writeCodeMapping(
       : undefined,
     existingArticleUpdates: mapping.suggestion.sectionUpdates ?? undefined,
     newArticlesNeeded: mapping.suggestion.newArticlesNeeded ?? undefined,
-    _secret: workflowSecret(),
   });
 }
 
@@ -411,11 +412,7 @@ export async function clearMappingForCode(
   code: string,
 ): Promise<void> {
   console.log('[pipeline] clearMappingForCode', { specialtySlug, code });
-  await fetchMutation(api.codes.clearMapping, {
-    slug: specialtySlug,
-    code,
-    _secret: workflowSecret(),
-  });
+  await clearMappingAsAdmin(specialtySlug, code);
 }
 
 export async function markCodesInFlight(
@@ -430,19 +427,11 @@ export async function markCodesInFlight(
     count: codes.length,
   });
   if (codes.length === 0) return;
-  await fetchMutation(api.codes.markInFlight, {
-    slug: specialtySlug,
-    codes,
-    runId,
-    _secret: workflowSecret(),
-  });
+  await markCodesInFlightAsAdmin(specialtySlug, codes, runId);
 }
 
 export async function clearInFlightForRun(runId: string): Promise<void> {
   'use step';
   console.log('[pipeline] clearInFlightForRun', { runId });
-  await fetchMutation(api.codes.clearInFlightForRun, {
-    runId,
-    _secret: workflowSecret(),
-  });
+  await clearInFlightForRunAsAdmin(runId);
 }
