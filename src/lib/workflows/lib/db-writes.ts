@@ -5,11 +5,11 @@
  * their results to the workflow event log. Workflow functions never touch the
  * DB directly — they call these helpers.
  *
- * Single-DB Convex setup: pipeline runs/stages/events/extracted-codes plus
- * editor data all live in Convex; mutations are invoked via fetchMutation.
+ * Pipeline runs/stages/events/extracted-codes plus the editor data tables
+ * all live in PocketBase; mutations go through the admin client (workflow
+ * code has no request cookie in scope).
  */
 
-import { fetchMutation, fetchQuery } from 'convex/nextjs';
 import {
   bulkInsertCodesAsAdmin,
   clearInFlightForRunAsAdmin,
@@ -19,27 +19,19 @@ import {
   writeCodeMappingAsAdmin,
 } from '@/lib/data/codes';
 import {
+  createPipelineRunAsAdmin,
+  initPipelineStageAsAdmin,
+  listExtractedCodesForRunAsAdmin,
+  updatePipelineRunAsAdmin,
+  updatePipelineStageAsAdmin,
+  writeExtractedCodesAsAdmin,
+} from '@/lib/data/pipeline';
+import {
   getSpecialtyRecordAsAdmin,
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
-import { api } from '../../../../convex/_generated/api';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
-
-// Workflow + script callers run outside a Next.js request and have no user
-// JWT. Public Convex functions accept the shared secret on a `_secret` arg
-// to authorize machine traffic. The Convex deployment must have
-// WORKFLOW_SECRET set to the matching value (see .env.example).
-function workflowSecret(): string {
-  const s = process.env.WORKFLOW_SECRET;
-  if (!s) {
-    throw new Error(
-      'WORKFLOW_SECRET unset — workflow cannot authenticate to Convex. ' +
-        'Set it in the Vercel environment and on the Convex deployment.',
-    );
-  }
-  return s;
-}
 
 export type PipelineRunStatus =
   | 'running'
@@ -75,10 +67,9 @@ export async function createPipelineRun(input: {
 }): Promise<{ id: string }> {
   'use step';
   console.log('[pipeline] createPipelineRun', input);
-  const result = await fetchMutation(api.pipeline.createRun, {
+  const result = await createPipelineRunAsAdmin({
     specialtySlug: input.specialtySlug,
     workflowRunId: input.workflowRunId,
-    _secret: workflowSecret(),
   });
   console.log('[pipeline] createPipelineRun →', result.id);
   return { id: result.id };
@@ -93,14 +84,10 @@ export async function updatePipelineRunStatus(
   console.log('[pipeline] updatePipelineRunStatus', { runId, status, error });
   const terminal =
     status === 'completed' || status === 'failed' || status === 'cancelled';
-  await fetchMutation(api.pipeline.updateRun, {
-    runId,
-    patch: {
-      status,
-      ...(terminal ? { finishedAt: Date.now() } : {}),
-      ...(error !== undefined ? { error } : {}),
-    },
-    _secret: workflowSecret(),
+  await updatePipelineRunAsAdmin(runId, {
+    status,
+    ...(terminal ? { finishedAt: Date.now() } : {}),
+    ...(error !== undefined ? { error } : {}),
   });
 }
 
@@ -112,11 +99,7 @@ export async function initPipelineStage(
 ): Promise<{ id: string }> {
   'use step';
   console.log('[pipeline] initPipelineStage', { runId, stage });
-  return await fetchMutation(api.pipeline.initStage, {
-    runId,
-    stage,
-    _secret: workflowSecret(),
-  });
+  return await initPipelineStageAsAdmin({ runId, stage });
 }
 
 export async function markStageRunning(
@@ -126,7 +109,7 @@ export async function markStageRunning(
 ): Promise<void> {
   'use step';
   console.log('[pipeline] markStageRunning', { runId, stage, workflowRunId });
-  await fetchMutation(api.pipeline.updateStage, {
+  await updatePipelineStageAsAdmin({
     runId,
     stage,
     patch: {
@@ -134,7 +117,6 @@ export async function markStageRunning(
       startedAt: Date.now(),
       ...(workflowRunId ? { workflowRunId } : {}),
     },
-    _secret: workflowSecret(),
   });
 }
 
@@ -146,17 +128,14 @@ export async function markStageAwaitingApproval(
 ): Promise<void> {
   'use step';
   console.log('[pipeline] markStageAwaitingApproval', { runId, stage, outputSummary });
-  await fetchMutation(api.pipeline.updateStage, {
+  await updatePipelineStageAsAdmin({
     runId,
     stage,
     patch: {
       status: 'awaiting_approval',
-      outputSummary: JSON.stringify(outputSummary),
-      ...(draftPayload !== undefined
-        ? { draftPayload: JSON.stringify(draftPayload) }
-        : {}),
+      outputSummary,
+      ...(draftPayload !== undefined ? { draftPayload } : {}),
     },
-    _secret: workflowSecret(),
   });
 }
 
@@ -168,16 +147,15 @@ export async function markStageCompleted(
 ): Promise<void> {
   'use step';
   console.log('[pipeline] markStageCompleted', { runId, stage, approvedBy });
-  await fetchMutation(api.pipeline.updateStage, {
+  await updatePipelineStageAsAdmin({
     runId,
     stage,
     patch: {
       status: 'completed',
       finishedAt: Date.now(),
       ...(approvedBy ? { approvedAt: Date.now(), approvedBy } : {}),
-      ...(outputSummary ? { outputSummary: JSON.stringify(outputSummary) } : {}),
+      ...(outputSummary ? { outputSummary } : {}),
     },
-    _secret: workflowSecret(),
   });
 }
 
@@ -188,7 +166,7 @@ export async function markStageFailed(
 ): Promise<void> {
   'use step';
   console.log('[pipeline] markStageFailed', { runId, stage, errorMessage });
-  await fetchMutation(api.pipeline.updateStage, {
+  await updatePipelineStageAsAdmin({
     runId,
     stage,
     patch: {
@@ -196,7 +174,6 @@ export async function markStageFailed(
       finishedAt: Date.now(),
       errorMessage,
     },
-    _secret: workflowSecret(),
   });
 }
 
@@ -220,16 +197,16 @@ export async function writeExtractedCodes(
     consolidationCategory: c.consolidationCategory,
     description: c.description,
     source: c.source,
-    metadata: c.metadata !== undefined ? JSON.stringify(c.metadata) : undefined,
+    metadata: c.metadata,
   }));
-  // Convex per-mutation write limits — chunk to stay safe.
+  // PocketBase has no per-call write limits the way Convex does, but inserts
+  // run sequentially per row. Chunking keeps progress visible in logs.
   const chunkSize = 50;
   for (let i = 0; i < rows.length; i += chunkSize) {
-    await fetchMutation(api.pipeline.writeExtractedCodes, {
+    await writeExtractedCodesAsAdmin({
       runId,
       specialtySlug,
       rows: rows.slice(i, i + chunkSize),
-      _secret: workflowSecret(),
     });
   }
   return { inserted: rows.length };
@@ -247,10 +224,7 @@ export async function promoteExtractedCodesToCodes(
 ): Promise<{ promoted: number }> {
   'use step';
   console.log('[pipeline] promoteExtractedCodesToCodes', { runId, specialtySlug });
-  const staged = await fetchQuery(api.pipeline.listExtractedCodesForRun, {
-    runId,
-    _secret: workflowSecret(),
-  });
+  const staged = await listExtractedCodesForRunAsAdmin(runId);
   if (staged.length === 0) return { promoted: 0 };
   const rows = staged.map((s) => ({
     code: s.code,
@@ -294,7 +268,7 @@ export type SpecialtyMappingContext = {
 
 /**
  * One-shot fetch of the specialty fields the mapping workflow needs. Step-
- * cached so replays read from the workflow event log, not Convex.
+ * cached so replays read from the workflow event log, not the DB.
  */
 export async function loadSpecialtyForMapping(
   specialtySlug: string,
@@ -342,11 +316,10 @@ export async function listUnmappedCodes(
 
 /**
  * Coerce a `coveredSections[].sections` block into the typed array form the
- * Convex schema expects. The mapping prompt encourages a `record<title, id>`
- * shape and Convex requires ASCII-only field names, so unicode section
- * titles (e.g. "Vitamin B₁₂") would fail at validation if stored as a
- * record. The corresponding read-side fallback in `code-detail-modal.tsx`
- * is kept to handle any pre-normalisation rows that survive a wipe gap.
+ * codes schema expects. The mapping prompt encourages a `record<title, id>`
+ * shape and we want unicode section titles (e.g. "Vitamin B₁₂") preserved.
+ * The corresponding read-side fallback in `code-detail-modal.tsx` is kept to
+ * handle any pre-normalisation rows that survive a wipe gap.
  */
 function normaliseCoveredSections(
   blocks: MappingOutput['coverage']['coveredSections'],

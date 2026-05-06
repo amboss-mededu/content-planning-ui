@@ -19,14 +19,17 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser } from '@/lib/convex/server';
 import { listCodeSources } from '@/lib/data/code-sources';
+import {
+  createPipelineRun,
+  initPipelineStage,
+  updatePipelineRun,
+} from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { extractCodesWorkflow } from '@/lib/workflows/preprocessing/extract-codes';
-import { api } from '../../../../../convex/_generated/api';
 import { parseContentInputs } from '../_lib/inputs';
 
 type Body = {
@@ -80,20 +83,15 @@ export async function POST(req: NextRequest) {
   const identifyInstructions = body.identifyModulesInstructions?.trim() || null;
   const extractInstructions = body.extractCodesInstructions?.trim() || null;
 
-  const { id: runId } = await fetchMutationAsUser(api.pipeline.createRun, {
-    specialtySlug: slug,
+  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
+  await updatePipelineRun(runId, {
+    contentOutlineUrls: inputs,
+    ...(identifyInstructions
+      ? { identifyModulesInstructions: identifyInstructions }
+      : {}),
+    ...(extractInstructions ? { extractCodesInstructions: extractInstructions } : {}),
   });
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: {
-      contentOutlineUrls: inputs,
-      ...(identifyInstructions
-        ? { identifyModulesInstructions: identifyInstructions }
-        : {}),
-      ...(extractInstructions ? { extractCodesInstructions: extractInstructions } : {}),
-    },
-  });
-  await fetchMutationAsUser(api.pipeline.initStage, { runId, stage: 'extract_codes' });
+  await initPipelineStage({ runId, stage: 'extract_codes' });
 
   const wfRun = await start(extractCodesWorkflow, [
     {
@@ -107,10 +105,7 @@ export async function POST(req: NextRequest) {
     },
   ]);
 
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: { workflowRunId: wfRun.runId },
-  });
+  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');

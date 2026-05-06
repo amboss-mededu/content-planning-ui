@@ -21,15 +21,18 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
-import { fetchMutationAsUser } from '@/lib/convex/server';
 import { listUnmappedCodesAsAdmin } from '@/lib/data/codes';
+import {
+  createPipelineRun,
+  initPipelineStage,
+  updatePipelineRun,
+} from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import type { MappingFilter } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { mapCodesWorkflow } from '@/lib/workflows/mapping/map-codes';
-import { api } from '../../../../../convex/_generated/api';
 
 type Body = {
   specialtySlug?: string;
@@ -138,18 +141,13 @@ export async function POST(req: NextRequest) {
   const checkAgainstLibrary = body.checkAgainstLibrary !== false;
   const mappingInstructions = body.additionalInstructions?.trim() || null;
 
-  const { id: runId } = await fetchMutationAsUser(api.pipeline.createRun, {
-    specialtySlug: slug,
+  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
+  await updatePipelineRun(runId, {
+    mappingInstructions,
+    mappingCheckIds: checkAgainstLibrary,
+    ...(filter ? { mappingFilter: filter } : {}),
   });
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: {
-      mappingInstructions,
-      mappingCheckIds: checkAgainstLibrary,
-      ...(filter ? { mappingFilter: filter } : {}),
-    },
-  });
-  await fetchMutationAsUser(api.pipeline.initStage, { runId, stage: 'map_codes' });
+  await initPipelineStage({ runId, stage: 'map_codes' });
 
   const wfRun = await start(mapCodesWorkflow, [
     {
@@ -166,10 +164,7 @@ export async function POST(req: NextRequest) {
     },
   ]);
 
-  await fetchMutationAsUser(api.pipeline.updateRun, {
-    runId,
-    patch: { workflowRunId: wfRun.runId },
-  });
+  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');

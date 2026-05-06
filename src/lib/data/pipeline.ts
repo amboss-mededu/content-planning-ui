@@ -1,18 +1,32 @@
-/**
- * Readers for pipeline runs + stages. Convex-backed since Phase 3 of the
- * migration; the previous Next.js cache layer is gone (Convex caches its
- * own queries).
- */
+import 'server-only';
 
+import { cookies } from 'next/headers';
 import { connection } from 'next/server';
-import { fetchQueryAsUser } from '@/lib/convex/server';
+import type PocketBase from 'pocketbase';
+import { ClientResponseError } from 'pocketbase';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
+import type {
+  ContentInput,
+  ExtractedCodeRecord,
+  MappingFilter,
+  PipelineEventRecord,
+  PipelineRunRecord,
+  PipelineStageRecord,
+} from '@/lib/pb/types';
 import { derivePhase, type Phase } from '@/lib/phase';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
-import { api } from '../../../convex/_generated/api';
 
-export type ContentInputRef = { source: string; url: string };
+// Pipeline runs/stages/events live in PocketBase. RSC pages and route
+// handlers call the cookie-authed helpers (`*` and `list*`); workflow
+// code (no cookies in scope) calls the `*AsAdmin` variants which use a
+// superuser-authed PB client.
+//
+// Real-time updates happen via the dashboard's 2s polling loop
+// (router.refresh) — no PB subscribe needed here.
 
-export type MappingFilterRef = { categories?: string[]; codes?: string[] };
+export type ContentInputRef = ContentInput;
+
+export type MappingFilterRef = MappingFilter;
 
 export type PipelineRunRow = {
   id: string;
@@ -63,61 +77,27 @@ export type StageContext = {
   events: PipelineEventRow[];
 };
 
-type ConvexRun = {
-  _id: string;
-  specialtySlug: string;
-  status: string;
-  workflowRunId?: string;
-  startedAt: number;
-  updatedAt: number;
-  finishedAt?: number;
-  error?: string;
-  contentOutlineUrls?: ContentInputRef[];
-  identifyModulesInstructions?: string;
-  extractCodesInstructions?: string;
-  milestonesInstructions?: string;
-  mappingInstructions?: string;
-  mappingCheckIds: boolean;
-  mappingFilter?: MappingFilterRef;
+export type MapCodesHistory = {
+  runs: PipelineRunRow[];
+  events: PipelineEventRow[];
 };
 
-type ConvexStage = {
-  _id: string;
-  runId: string;
-  stage: string;
-  status: string;
-  workflowRunId?: string;
-  startedAt?: number;
-  finishedAt?: number;
-  approvedAt?: number;
-  approvedBy?: string;
-  outputSummary?: string;
-  draftPayload?: string;
-  errorMessage?: string;
-};
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
-type ConvexEvent = {
-  _id: string;
-  runId: string;
-  stage: string;
-  level: string;
-  message: string;
-  metrics?: string;
-  createdAt: number;
-};
-
-function parseJson<T>(s: string | undefined): T | null {
-  if (s === undefined || s === null) return null;
-  try {
-    return JSON.parse(s) as T;
-  } catch {
-    return null;
-  }
+async function userClient(): Promise<PocketBase> {
+  const store = await cookies();
+  const cookieHeader = store
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+  return createServerClient(cookieHeader);
 }
 
-function toRun(r: ConvexRun): PipelineRunRow {
+// --- Mappers ----------------------------------------------------------------
+
+function toRun(r: PipelineRunRecord): PipelineRunRow {
   return {
-    id: r._id,
+    id: r.id,
     specialtySlug: r.specialtySlug,
     status: r.status,
     workflowRunId: r.workflowRunId ?? null,
@@ -135,9 +115,9 @@ function toRun(r: ConvexRun): PipelineRunRow {
   };
 }
 
-function toStage(r: ConvexStage): PipelineStageRow {
+function toStage(r: PipelineStageRecord): PipelineStageRow {
   return {
-    id: r._id,
+    id: r.id,
     runId: r.runId,
     stage: r.stage,
     status: r.status,
@@ -146,23 +126,25 @@ function toStage(r: ConvexStage): PipelineStageRow {
     finishedAt: r.finishedAt !== undefined ? new Date(r.finishedAt) : null,
     approvedAt: r.approvedAt !== undefined ? new Date(r.approvedAt) : null,
     approvedBy: r.approvedBy ?? null,
-    outputSummary: parseJson(r.outputSummary),
-    draftPayload: parseJson(r.draftPayload),
+    outputSummary: r.outputSummary ?? null,
+    draftPayload: r.draftPayload ?? null,
     errorMessage: r.errorMessage ?? null,
   };
 }
 
-function toEvent(r: ConvexEvent): PipelineEventRow {
+function toEvent(r: PipelineEventRecord): PipelineEventRow {
   return {
-    id: r._id,
+    id: r.id,
     runId: r.runId,
     stage: r.stage,
     level: r.level,
     message: r.message,
-    metrics: parseJson(r.metrics),
+    metrics: (r.metrics as Record<string, unknown> | undefined) ?? null,
     createdAt: new Date(r.createdAt),
   };
 }
+
+// --- User-facing reads (cookie-authed) -------------------------------------
 
 /**
  * The "current" run for a specialty: the most recent non-terminal run if any
@@ -172,14 +154,24 @@ export async function getCurrentPipelineRun(
   slug: string,
 ): Promise<PipelineRunRow | null> {
   await connection();
-  const r = await fetchQueryAsUser(api.pipeline.getCurrentRun, { slug });
-  return r ? toRun(r as ConvexRun) : null;
+  const pb = await userClient();
+  const rows = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    sort: '-startedAt',
+  });
+  if (rows.length === 0) return null;
+  const nonTerminal = rows.find((r) => !TERMINAL_STATUSES.has(r.status));
+  return toRun(nonTerminal ?? rows[0]);
 }
 
 export async function listPipelineRuns(slug: string): Promise<PipelineRunRow[]> {
   await connection();
-  const rows = await fetchQueryAsUser(api.pipeline.listRuns, { slug });
-  return (rows as ConvexRun[]).map(toRun);
+  const pb = await userClient();
+  const rows = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    sort: '-startedAt',
+  });
+  return rows.map(toRun);
 }
 
 export async function listPipelineStages(
@@ -187,8 +179,11 @@ export async function listPipelineStages(
   _slug: string,
 ): Promise<PipelineStageRow[]> {
   await connection();
-  const rows = await fetchQueryAsUser(api.pipeline.listStages, { runId });
-  return (rows as ConvexStage[]).map(toStage);
+  const pb = await userClient();
+  const rows = await pb
+    .collection<PipelineStageRecord>('pipelineStages')
+    .getFullList({ filter: pb.filter('runId = {:runId}', { runId }) });
+  return rows.map(toStage);
 }
 
 export async function listPipelineEvents(
@@ -196,55 +191,563 @@ export async function listPipelineEvents(
   _slug: string,
 ): Promise<PipelineEventRow[]> {
   await connection();
-  const rows = await fetchQueryAsUser(api.pipeline.listEvents, { runId });
-  return (rows as ConvexEvent[]).map(toEvent);
+  const pb = await userClient();
+  const rows = await pb.collection<PipelineEventRecord>('pipelineEvents').getFullList({
+    filter: pb.filter('runId = {:runId}', { runId }),
+    sort: 'createdAt',
+  });
+  return rows.map(toEvent);
 }
 
+/**
+ * Latest stage per stage-name for a specialty, with each stage's owning run
+ * URLs and the run+stage events. Used by the dashboard so each stage card is
+ * self-contained.
+ */
 export async function getLatestStageContexts(
   slug: string,
 ): Promise<Partial<Record<StageName, StageContext>>> {
   await connection();
-  const raw = await fetchQueryAsUser(api.pipeline.getLatestStageContexts, { slug });
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  if (runs.length === 0) return {};
+
+  const runById = new Map<string, PipelineRunRecord>(runs.map((r) => [r.id, r]));
+  const stageRows: PipelineStageRecord[] = [];
+  for (const r of runs) {
+    const stages = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: r.id }) });
+    stageRows.push(...stages);
+  }
+
+  // Pick the most recent stage per stage-name. Precedence:
+  //   finishedAt > startedAt > run.startedAt.
+  const latestByStage = new Map<string, { row: PipelineStageRecord; ts: number }>();
+  for (const s of stageRows) {
+    const run = runById.get(s.runId);
+    const ts = s.finishedAt ?? s.startedAt ?? run?.startedAt ?? 0;
+    const prev = latestByStage.get(s.stage);
+    if (!prev || ts > prev.ts) latestByStage.set(s.stage, { row: s, ts });
+  }
+
+  const contributedRunIds = new Set([...latestByStage.values()].map((v) => v.row.runId));
+  const eventRows: PipelineEventRecord[] = [];
+  for (const rid of contributedRunIds) {
+    const evs = await pb
+      .collection<PipelineEventRecord>('pipelineEvents')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: rid }) });
+    eventRows.push(...evs);
+  }
+  eventRows.sort((a, b) => a.createdAt - b.createdAt);
+
   const out: Partial<Record<StageName, StageContext>> = {};
-  for (const [stageName, ctx] of Object.entries(raw)) {
-    const c = ctx as {
-      stage: ConvexStage;
-      runUrls: ContentInputRef[] | null;
-      events: ConvexEvent[];
-    };
+  for (const [stageName, { row }] of latestByStage.entries()) {
+    const run = runById.get(row.runId);
     out[stageName as StageName] = {
-      stage: toStage(c.stage),
-      runUrls: c.runUrls ?? null,
-      events: c.events.map(toEvent),
+      stage: toStage(row),
+      runUrls: run?.contentOutlineUrls ?? null,
+      events: eventRows
+        .filter((e) => e.runId === row.runId && e.stage === stageName)
+        .map(toEvent),
     };
   }
   return out;
 }
 
-export type MapCodesHistory = {
-  runs: PipelineRunRow[];
-  events: PipelineEventRow[];
-};
-
 export async function getMapCodesHistory(slug: string): Promise<MapCodesHistory> {
   await connection();
-  const r = await fetchQueryAsUser(api.pipeline.getMapCodesHistory, { slug });
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    sort: '-startedAt',
+  });
+  if (runs.length === 0) return { runs: [], events: [] };
+  const events: PipelineEventRecord[] = [];
+  const runIdsWithMapEvents = new Set<string>();
+  for (const r of runs) {
+    const evs = await pb.collection<PipelineEventRecord>('pipelineEvents').getFullList({
+      filter: pb.filter('runId = {:runId} && stage = {:stage}', {
+        runId: r.id,
+        stage: 'map_codes',
+      }),
+    });
+    if (evs.length > 0) {
+      runIdsWithMapEvents.add(r.id);
+      events.push(...evs);
+    }
+  }
+  events.sort((a, b) => a.createdAt - b.createdAt);
   return {
-    runs: (r.runs as ConvexRun[]).map(toRun),
-    events: (r.events as ConvexEvent[]).map(toEvent),
+    runs: runs.filter((r) => runIdsWithMapEvents.has(r.id)).map(toRun),
+    events: events.map(toEvent),
   };
 }
 
 /**
- * Phase lookup for the home-page specialty grid. One query returns the most
+ * Phase lookup for the home-page specialty grid. One scan returns the most
  * recent run status per specialty; result is keyed by slug.
  */
 export async function listSpecialtyPhases(): Promise<Record<string, Phase>> {
   await connection();
-  const map = await fetchQueryAsUser(api.pipeline.listSpecialtyPhases);
+  const pb = await userClient();
+  const runs = await pb
+    .collection<PipelineRunRecord>('pipelineRuns')
+    .getFullList({ sort: '-startedAt' });
+  const latest = new Map<string, { status: string; startedAt: number }>();
+  for (const r of runs) {
+    const prev = latest.get(r.specialtySlug);
+    if (!prev || r.startedAt > prev.startedAt) {
+      latest.set(r.specialtySlug, { status: r.status, startedAt: r.startedAt });
+    }
+  }
   const out: Record<string, Phase> = {};
-  for (const [slug, status] of Object.entries(map)) {
-    out[slug] = derivePhase({ status: status as string });
+  for (const [slug, v] of latest.entries()) {
+    out[slug] = derivePhase({ status: v.status });
   }
   return out;
+}
+
+/**
+ * Per-code mapping run metadata: the most recent `map_codes` run that touched
+ * `code` for `slug`, plus the per-attempt event log for that code.
+ */
+export type CodeRunMetadataResult = {
+  run: PipelineRunRow;
+  stage: PipelineStageRow | null;
+  events: PipelineEventRow[];
+};
+
+export async function getCodeRunMetadataPipeline(
+  slug: string,
+  code: string,
+): Promise<CodeRunMetadataResult | null> {
+  await connection();
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    sort: '-startedAt',
+  });
+  for (const run of runs) {
+    const events = await pb
+      .collection<PipelineEventRecord>('pipelineEvents')
+      .getFullList({
+        filter: pb.filter('runId = {:runId} && stage = {:stage}', {
+          runId: run.id,
+          stage: 'map_codes',
+        }),
+        sort: 'createdAt',
+      });
+    const codeEvents = events.filter((e) => {
+      const m = e.metrics as { code?: string } | undefined;
+      return m?.code === code;
+    });
+    if (codeEvents.length === 0) continue;
+    let stageRow: PipelineStageRecord | null = null;
+    try {
+      stageRow = await pb
+        .collection<PipelineStageRecord>('pipelineStages')
+        .getFirstListItem(
+          pb.filter('runId = {:runId} && stage = {:stage}', {
+            runId: run.id,
+            stage: 'map_codes',
+          }),
+        );
+    } catch (e) {
+      if (!(e instanceof ClientResponseError && e.status === 404)) throw e;
+    }
+    return {
+      run: toRun(run),
+      stage: stageRow ? toStage(stageRow) : null,
+      events: codeEvents.map(toEvent),
+    };
+  }
+  return null;
+}
+
+/**
+ * Consolidation lock state for a specialty. Locked when the most recent
+ * `consolidate_primary` stage across every run for the specialty is in any
+ * status other than `pending`/`skipped`.
+ */
+export async function getConsolidationLockState(
+  slug: string,
+): Promise<{ locked: boolean; status: string | null }> {
+  await connection();
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  let latest: { status: string; ts: number } | null = null;
+  for (const r of runs) {
+    const stages = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFullList({
+        filter: pb.filter('runId = {:runId} && stage = {:stage}', {
+          runId: r.id,
+          stage: 'consolidate_primary',
+        }),
+      });
+    for (const s of stages) {
+      const ts = s.finishedAt ?? s.startedAt ?? r.startedAt;
+      if (!latest || ts > latest.ts) latest = { status: s.status, ts };
+    }
+  }
+  const status = latest?.status ?? null;
+  const locked = status !== null && status !== 'pending' && status !== 'skipped';
+  return { locked, status };
+}
+
+// --- User-facing writes (cookie-authed) ------------------------------------
+
+export type PipelineRunPatch = {
+  status?: string;
+  workflowRunId?: string;
+  finishedAt?: number;
+  error?: string | null;
+  contentOutlineUrls?: ContentInputRef[];
+  identifyModulesInstructions?: string;
+  extractCodesInstructions?: string;
+  milestonesInstructions?: string | null;
+  mappingInstructions?: string | null;
+  mappingCheckIds?: boolean;
+  mappingFilter?: MappingFilterRef;
+};
+
+export async function createPipelineRun(args: {
+  specialtySlug: string;
+  workflowRunId?: string;
+  createdByUserId?: string;
+}): Promise<{ id: string }> {
+  const pb = await userClient();
+  const now = Date.now();
+  const created = await pb.collection<PipelineRunRecord>('pipelineRuns').create({
+    specialtySlug: args.specialtySlug,
+    status: 'running',
+    workflowRunId: args.workflowRunId,
+    startedAt: now,
+    updatedAt: now,
+    mappingCheckIds: true,
+    createdByUserId: args.createdByUserId,
+  });
+  return { id: created.id };
+}
+
+export async function updatePipelineRun(
+  runId: string,
+  patch: PipelineRunPatch,
+): Promise<void> {
+  const pb = await userClient();
+  const cleaned: Record<string, unknown> = { updatedAt: Date.now() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) cleaned[k] = v;
+  }
+  await pb.collection('pipelineRuns').update(runId, cleaned);
+}
+
+export async function initPipelineStage(args: {
+  runId: string;
+  stage: StageName;
+}): Promise<{ id: string }> {
+  const pb = await userClient();
+  const created = await pb.collection<PipelineStageRecord>('pipelineStages').create({
+    runId: args.runId,
+    stage: args.stage,
+    status: 'pending',
+  });
+  return { id: created.id };
+}
+
+// --- Admin-side helpers (workflow code: no cookies in scope) ---------------
+
+async function findStageId(
+  pb: PocketBase,
+  runId: string,
+  stage: string,
+): Promise<string | null> {
+  try {
+    const row = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFirstListItem(
+        pb.filter('runId = {:runId} && stage = {:stage}', { runId, stage }),
+      );
+    return row.id;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function getRunAsAdmin(runId: string): Promise<PipelineRunRow | null> {
+  const pb = await createAdminClient();
+  try {
+    const row = await pb.collection<PipelineRunRecord>('pipelineRuns').getOne(runId);
+    return toRun(row);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function createPipelineRunAsAdmin(args: {
+  specialtySlug: string;
+  workflowRunId?: string;
+  createdByUserId?: string;
+}): Promise<{ id: string }> {
+  const pb = await createAdminClient();
+  const now = Date.now();
+  const created = await pb.collection<PipelineRunRecord>('pipelineRuns').create({
+    specialtySlug: args.specialtySlug,
+    status: 'running',
+    workflowRunId: args.workflowRunId,
+    startedAt: now,
+    updatedAt: now,
+    mappingCheckIds: true,
+    createdByUserId: args.createdByUserId,
+  });
+  return { id: created.id };
+}
+
+export async function updatePipelineRunAsAdmin(
+  runId: string,
+  patch: PipelineRunPatch,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const cleaned: Record<string, unknown> = { updatedAt: Date.now() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) cleaned[k] = v;
+  }
+  await pb.collection('pipelineRuns').update(runId, cleaned);
+}
+
+export async function initPipelineStageAsAdmin(args: {
+  runId: string;
+  stage: StageName;
+}): Promise<{ id: string }> {
+  const pb = await createAdminClient();
+  const created = await pb.collection<PipelineStageRecord>('pipelineStages').create({
+    runId: args.runId,
+    stage: args.stage,
+    status: 'pending',
+  });
+  return { id: created.id };
+}
+
+export type PipelineStagePatch = {
+  status?: string;
+  workflowRunId?: string;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  approvedAt?: number | null;
+  approvedBy?: string | null;
+  outputSummary?: unknown;
+  draftPayload?: unknown;
+  errorMessage?: string | null;
+};
+
+export async function updatePipelineStageAsAdmin(args: {
+  runId: string;
+  stage: StageName;
+  patch: PipelineStagePatch;
+}): Promise<void> {
+  const pb = await createAdminClient();
+  const id = await findStageId(pb, args.runId, args.stage);
+  if (!id) throw new Error(`stage not found: ${args.runId}/${args.stage}`);
+  const cleaned: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args.patch)) {
+    if (v !== undefined) cleaned[k] = v;
+  }
+  await pb.collection('pipelineStages').update(id, cleaned);
+}
+
+export async function getStageAsAdmin(args: {
+  runId: string;
+  stage: StageName;
+}): Promise<PipelineStageRow | null> {
+  const pb = await createAdminClient();
+  try {
+    const row = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFirstListItem(
+        pb.filter('runId = {:runId} && stage = {:stage}', {
+          runId: args.runId,
+          stage: args.stage,
+        }),
+      );
+    return toStage(row);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function listEventsAsAdmin(runId: string): Promise<PipelineEventRow[]> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<PipelineEventRecord>('pipelineEvents').getFullList({
+    filter: pb.filter('runId = {:runId}', { runId }),
+    sort: 'createdAt',
+  });
+  return rows.map(toEvent);
+}
+
+export async function logPipelineEventAsAdmin(args: {
+  runId: string;
+  stage: StageName;
+  level: string;
+  message: string;
+  metrics?: unknown;
+}): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('pipelineEvents').create({
+    runId: args.runId,
+    stage: args.stage,
+    level: args.level,
+    message: args.message,
+    metrics: args.metrics,
+    createdAt: Date.now(),
+  });
+}
+
+export type ExtractedCodeInput = {
+  code: string;
+  category?: string;
+  consolidationCategory?: string;
+  description?: string;
+  source?: string;
+  metadata?: unknown;
+};
+
+export async function writeExtractedCodesAsAdmin(args: {
+  runId: string;
+  specialtySlug: string;
+  rows: ExtractedCodeInput[];
+}): Promise<void> {
+  const pb = await createAdminClient();
+  const now = Date.now();
+  for (const r of args.rows) {
+    await pb.collection('extractedCodes').create({
+      runId: args.runId,
+      specialtySlug: args.specialtySlug,
+      ...r,
+      createdAt: now,
+    });
+  }
+}
+
+export type ExtractedCodeRow = {
+  id: string;
+  runId: string;
+  specialtySlug: string;
+  code: string;
+  category?: string;
+  consolidationCategory?: string;
+  description?: string;
+  source?: string;
+  metadata?: unknown;
+};
+
+export async function listExtractedCodesForRunAsAdmin(
+  runId: string,
+): Promise<ExtractedCodeRow[]> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<ExtractedCodeRecord>('extractedCodes')
+    .getFullList({ filter: pb.filter('runId = {:runId}', { runId }) });
+  return rows.map((r) => ({
+    id: r.id,
+    runId: r.runId,
+    specialtySlug: r.specialtySlug,
+    code: r.code,
+    category: r.category,
+    consolidationCategory: r.consolidationCategory,
+    description: r.description,
+    source: r.source,
+    metadata: r.metadata,
+  }));
+}
+
+/**
+ * Cancel every non-terminal run for a specialty. Returns count cancelled.
+ * Cookie-authed — called from request handlers (e.g. clear-stale-runs).
+ */
+export async function cancelStaleRunsForSpecialty(
+  slug: string,
+): Promise<{ cancelled: number }> {
+  const pb = await userClient();
+  return cancelStaleRuns(pb, slug);
+}
+
+export async function cancelStaleRunsForSpecialtyAsAdmin(
+  slug: string,
+): Promise<{ cancelled: number }> {
+  const pb = await createAdminClient();
+  return cancelStaleRuns(pb, slug);
+}
+
+async function cancelStaleRuns(
+  pb: PocketBase,
+  slug: string,
+): Promise<{ cancelled: number }> {
+  const rows = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  const now = Date.now();
+  let cancelled = 0;
+  for (const r of rows) {
+    if (TERMINAL_STATUSES.has(r.status)) continue;
+    await pb.collection('pipelineRuns').update(r.id, {
+      status: 'cancelled',
+      finishedAt: now,
+      updatedAt: now,
+    });
+    cancelled += 1;
+  }
+  return { cancelled };
+}
+
+/**
+ * Wipe the events + extracted_codes scoped to (runId, stage) and reset the
+ * stage row to pending. Cookie-authed because /api/workflows/cancel runs in a
+ * request context.
+ */
+export async function resetStage(args: {
+  runId: string;
+  stage: StageName;
+}): Promise<void> {
+  const pb = await userClient();
+  await resetStageInternal(pb, args.runId, args.stage);
+}
+
+async function resetStageInternal(
+  pb: PocketBase,
+  runId: string,
+  stage: StageName,
+): Promise<void> {
+  const events = await pb.collection<PipelineEventRecord>('pipelineEvents').getFullList({
+    filter: pb.filter('runId = {:runId} && stage = {:stage}', { runId, stage }),
+  });
+  await Promise.all(events.map((e) => pb.collection('pipelineEvents').delete(e.id)));
+
+  if (stage === 'extract_codes') {
+    const ec = await pb
+      .collection<ExtractedCodeRecord>('extractedCodes')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId }) });
+    await Promise.all(ec.map((r) => pb.collection('extractedCodes').delete(r.id)));
+  }
+
+  const stageId = await findStageId(pb, runId, stage);
+  if (stageId) {
+    await pb.collection('pipelineStages').update(stageId, {
+      status: 'pending',
+      startedAt: null,
+      finishedAt: null,
+      approvedAt: null,
+      approvedBy: null,
+      outputSummary: null,
+      draftPayload: null,
+      errorMessage: null,
+    });
+  }
 }
