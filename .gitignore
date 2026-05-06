@@ -48,3 +48,7 @@ next-env.d.ts
 # vercel
 .vercel
 .env*.local
+
+# pocketbase
+/bin/pocketbase
+/pb_data/

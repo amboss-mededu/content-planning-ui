@@ -13,7 +13,11 @@
       "!src/app/.well-known",
       "!drizzle",
       "!convex/_generated",
-      "!.convex"
+      "!.convex",
+      "!pb_migrations",
+      "!pb_hooks",
+      "!pb_data",
+      "!bin"
     ]
   },
   "formatter": {
