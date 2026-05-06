@@ -13,12 +13,15 @@
 //   - Convex .index('name', [fields...])   -> SQL CREATE INDEX statement
 //
 // Auth replacement:
-//   - convex/authTables -> built-in PocketBase auth collection ('users')
-//   - Email/password disabled; sign-in is Google OAuth only.
+//   - convex/authTables -> built-in PocketBase 'users' auth collection.
+//     PocketBase 0.37 auto-creates this collection on first start, so this
+//     migration UPDATES it rather than re-creating it.
+//   - Email/password kept enabled (PocketBase requires at least one auth
+//     mechanism to be enabled). OAuth2 is configured separately via a
+//     setup script (scripts/configure-oauth.ts, lands later) that reads
+//     GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET from env so
+//     credentials never live in this committed file.
 //   - Domain restriction enforced server-side in pb_hooks/main.pb.js.
-//   - Google OAuth credentials are NOT in this file; configure via
-//     PocketBase admin UI on first start or via a setup script that uses
-//     the admin SDK + env vars.
 //
 // Access rules: every data collection requires an authenticated request
 // (`@request.auth.id != ''`). userApiKeys is row-scoped to the owning
@@ -27,31 +30,27 @@
 migrate(
   (app) => {
     // -------------------------------------------------------------------
-    // users (auth)  — replaces authTables from @convex-dev/auth
+    // users (auth)  — UPDATE the auto-created built-in users collection
+    // to replace authTables from @convex-dev/auth. We add the `name` and
+    // `avatarUrl` custom fields and tighten the access rules.
     // -------------------------------------------------------------------
-    const users = new Collection({
-      type: 'auth',
-      name: 'users',
-      listRule: 'id = @request.auth.id',
-      viewRule: 'id = @request.auth.id',
-      createRule: null, // signup happens via OAuth flow only
-      updateRule: 'id = @request.auth.id',
-      deleteRule: null,
-      passwordAuth: { enabled: false, identityFields: ['email'] },
-      otp: { enabled: false },
-      oauth2: {
-        enabled: true,
-        // Provider credentials live outside the migration (admin UI / env-var
-        // setup script). Keeping secrets out of the committed migration.
-        providers: [{ name: 'google' }],
-      },
-      fields: [
-        { type: 'text', name: 'name', max: 200 },
-        { type: 'url', name: 'avatarUrl' },
-      ],
-    });
+    const users = app.findCollectionByNameOrId('users');
+    users.listRule = 'id = @request.auth.id';
+    users.viewRule = 'id = @request.auth.id';
+    users.createRule = null; // sign-up only via OAuth flow (configure-oauth.ts)
+    users.updateRule = 'id = @request.auth.id';
+    users.deleteRule = null;
+
+    // Add custom fields if they don't already exist (idempotent on re-run).
+    if (!users.fields.getByName('name')) {
+      users.fields.add(new Field({ type: 'text', name: 'name', max: 200 }));
+    }
+    if (!users.fields.getByName('avatarUrl')) {
+      users.fields.add(new Field({ type: 'url', name: 'avatarUrl' }));
+    }
+
     app.save(users);
-    const usersId = app.findCollectionByNameOrId('users').id;
+    const usersId = users.id;
 
     // -------------------------------------------------------------------
     // specialties
@@ -664,7 +663,10 @@ migrate(
     );
   },
   (app) => {
-    // Down: drop in reverse-dependency order. relation → users last.
+    // Down: drop our custom collections in reverse-dependency order.
+    // The built-in `users` collection is reverted (custom fields removed,
+    // rules cleared) rather than deleted — PB requires a users collection
+    // to exist.
     const names = [
       'otpRateLimit',
       'userApiKeys',
@@ -688,7 +690,6 @@ migrate(
       'codeCategories',
       'codes',
       'specialties',
-      'users',
     ];
     for (const name of names) {
       try {
@@ -697,6 +698,22 @@ migrate(
       } catch (_) {
         /* not present — ignore */
       }
+    }
+
+    try {
+      const users = app.findCollectionByNameOrId('users');
+      const nameField = users.fields.getByName('name');
+      if (nameField) users.fields.removeById(nameField.id);
+      const avatarField = users.fields.getByName('avatarUrl');
+      if (avatarField) users.fields.removeById(avatarField.id);
+      users.listRule = null;
+      users.viewRule = null;
+      users.createRule = null;
+      users.updateRule = null;
+      users.deleteRule = null;
+      app.save(users);
+    } catch (_) {
+      /* not present — ignore */
     }
   },
 );
