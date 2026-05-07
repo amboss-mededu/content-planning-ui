@@ -50,7 +50,6 @@ export const env = createEnv({
     GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
     ANTHROPIC_API_KEY: optionalString,
     OPENAI_API_KEY: optionalString,
-    BLOB_READ_WRITE_TOKEN: optionalString,
     INTERNAL_REVALIDATE_SECRET: optionalString,
     CONVEX_DEPLOYMENT: optionalString,
     // PocketBase — added in PR 2 of the migration. Required from PR 3
@@ -77,7 +76,6 @@ export const env = createEnv({
     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN,
     INTERNAL_REVALIDATE_SECRET: process.env.INTERNAL_REVALIDATE_SECRET,
     CONVEX_DEPLOYMENT: process.env.CONVEX_DEPLOYMENT,
     NEXT_PUBLIC_CONVEX_URL: process.env.NEXT_PUBLIC_CONVEX_URL,

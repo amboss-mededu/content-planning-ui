@@ -1,7 +1,6 @@
 'use client';
 
 import { Button, Callout, H6, Input, Select, Stack } from '@amboss/design-system';
-import { upload } from '@vercel/blob/client';
 import { useRef } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 
@@ -31,28 +30,16 @@ export function newInputRow(defaultSource: string): InputRowState {
   };
 }
 
-/**
- * Client uploads go through `@vercel/blob/client#upload`, which requires a
- * short-lived token from `/api/blob/upload-token`. When `BLOB_READ_WRITE_TOKEN`
- * isn't provisioned, the client's own error is the unhelpful "Failed to
- * retrieve the client token" — it doesn't surface the server's 501 body. Do a
- * quick preflight so the user sees the real reason (and a fix path).
- */
-export async function explainUploadFailure(fallback: string): Promise<string> {
-  try {
-    const res = await fetch('/api/blob/upload-token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    if (res.status === 501) {
-      const body = await res.json().catch(() => ({}));
-      return typeof body?.error === 'string' ? body.error : fallback;
-    }
-  } catch {
-    // fall through
+async function uploadPdf(file: File): Promise<UploadedFile> {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const res = await fetch('/api/uploads', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Upload failed (${res.status})`);
   }
-  return fallback;
+  const body = (await res.json()) as { url: string; name: string };
+  return { name: body.name, url: body.url };
 }
 
 export function InputRow({
@@ -79,18 +66,10 @@ export function InputRow({
     if (!file) return;
     onChange({ uploading: true, uploadError: null });
     try {
-      const blob = await upload(file.name, file, {
-        access: 'public',
-        handleUploadUrl: '/api/blob/upload-token',
-        contentType: 'application/pdf',
-      });
-      onChange({
-        upload: { name: file.name, url: blob.url },
-        uploading: false,
-      });
+      const uploaded = await uploadPdf(file);
+      onChange({ upload: uploaded, uploading: false });
     } catch (err) {
-      const generic = err instanceof Error ? err.message : String(err);
-      const message = await explainUploadFailure(generic);
+      const message = err instanceof Error ? err.message : String(err);
       onChange({ uploading: false, uploadError: message });
     } finally {
       if (fileInput.current) fileInput.current.value = '';
