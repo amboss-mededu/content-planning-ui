@@ -1,12 +1,9 @@
-# DEPLOYMENT_POCKETBASE.md — PocketBase architecture (target)
+# DEPLOYMENT_POCKETBASE.md — PocketBase architecture
 
-> **Status: ASPIRATIONAL — migration in progress.** This describes the
-> target architecture that replaces Convex + Vercel Workflow + Vercel
-> Blob with self-hosted PocketBase + Google OAuth. The migration ships
-> as a series of PRs against `migration/integration`; this banner is
-> removed in the final cleanup PR. For the architecture rationale see
-> [`MIGRATION_PROPOSAL.md`](./MIGRATION_PROPOSAL.md). For the previous
-> Convex/Vercel setup see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+> Self-hosted PocketBase + Google OAuth. Replaces the previous
+> Convex + Vercel Workflow + Vercel Blob stack documented in
+> [`DEPLOYMENT.md`](./DEPLOYMENT.md). Architecture rationale is in
+> [`MIGRATION_PROPOSAL.md`](./MIGRATION_PROPOSAL.md).
 
 ## Stack
 

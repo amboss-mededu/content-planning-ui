@@ -51,10 +51,6 @@ export const env = createEnv({
     ANTHROPIC_API_KEY: optionalString,
     OPENAI_API_KEY: optionalString,
     INTERNAL_REVALIDATE_SECRET: optionalString,
-    CONVEX_DEPLOYMENT: optionalString,
-    // PocketBase — added in PR 2 of the migration. Required from PR 3
-    // (auth cutover) onward; optional now so the still-Convex-running
-    // app keeps booting on the integration branch.
     POCKETBASE_URL: optionalString,
     POCKETBASE_ADMIN_EMAIL: optionalString,
     POCKETBASE_ADMIN_PASSWORD: optionalString,
@@ -62,7 +58,6 @@ export const env = createEnv({
     GOOGLE_OAUTH_CLIENT_SECRET: optionalString,
   },
   client: {
-    NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
   },
   runtimeEnv: {
@@ -77,8 +72,6 @@ export const env = createEnv({
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     INTERNAL_REVALIDATE_SECRET: process.env.INTERNAL_REVALIDATE_SECRET,
-    CONVEX_DEPLOYMENT: process.env.CONVEX_DEPLOYMENT,
-    NEXT_PUBLIC_CONVEX_URL: process.env.NEXT_PUBLIC_CONVEX_URL,
     POCKETBASE_URL: process.env.POCKETBASE_URL,
     POCKETBASE_ADMIN_EMAIL: process.env.POCKETBASE_ADMIN_EMAIL,
     POCKETBASE_ADMIN_PASSWORD: process.env.POCKETBASE_ADMIN_PASSWORD,
