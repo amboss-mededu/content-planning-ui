@@ -19,11 +19,12 @@ export function useLiveCollection<T extends RecordModel>(
   initial: T[],
   opts?: { filter?: string },
 ): T[] {
+  // `initial` is a fresh reference on every parent render (callers pass
+  // server-rendered arrays or `[]` literals), so we can't resync state
+  // from it via useEffect — that would loop. Seed once via useState's
+  // initializer; the subscription owns updates from then on. If a caller
+  // needs to force a reset, it should remount with a `key` prop.
   const [rows, setRows] = useState<T[]>(initial);
-
-  useEffect(() => {
-    setRows(initial);
-  }, [initial]);
 
   useEffect(() => {
     const pb = getBrowserClient();
