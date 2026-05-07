@@ -1669,11 +1669,35 @@ function TableCells<T>({
               : 'transparent',
           }}
         >
-          {c.editable ? (
-            <EditableCell row={row} column={c} editable={c.editable} />
-          ) : (
-            c.render(row)
-          )}
+          {/*
+           * Wrap the rendered cell content in a flex row so cell-level
+           * alignment is enforced by `justifyContent` rather than
+           * relying on `textAlign` to cascade through arbitrary nested
+           * elements (DS components, <button>s, inline-flex wrappers).
+           * That makes the alignment robust to UA button defaults and
+           * to design-system components that introduce their own block
+           * layout — a colored Badge or chip stays centered inside an
+           * align:'center' cell instead of pinning to the left edge.
+           */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent:
+                c.align === 'right'
+                  ? 'flex-end'
+                  : c.align === 'center'
+                    ? 'center'
+                    : 'flex-start',
+              width: '100%',
+            }}
+          >
+            {c.editable ? (
+              <EditableCell row={row} column={c} editable={c.editable} />
+            ) : (
+              c.render(row)
+            )}
+          </div>
         </td>
       ))}
     </>
