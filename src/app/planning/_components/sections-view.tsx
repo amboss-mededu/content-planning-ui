@@ -32,6 +32,7 @@ const columns: Column<ConsolidatedSection>[] = [
       'Whether this row is a brand-new section or an update to an existing one',
     render: kindBadge,
     width: 140,
+    align: 'center',
     // Sort/filter on the derived kind string; the toolbar Select above the
     // table uses the same axis but tracks its choice in URL params, so the
     // two are independent — applying both intersects.
@@ -46,6 +47,7 @@ const columns: Column<ConsolidatedSection>[] = [
     label: 'Article',
     description: 'Parent article this section belongs to',
     render: (r) => r.articleTitle ?? '—',
+    align: 'center',
     accessor: (r) => r.articleTitle ?? null,
     type: 'string',
     filterable: true,
@@ -56,6 +58,7 @@ const columns: Column<ConsolidatedSection>[] = [
     label: 'Section',
     description: 'Suggested section name',
     render: (r) => r.sectionName ?? '—',
+    align: 'center',
     accessor: (r) => r.sectionName ?? null,
     type: 'string',
     filterable: true,
@@ -69,7 +72,6 @@ const columns: Column<ConsolidatedSection>[] = [
     accessor: (r) => r.category ?? null,
     type: 'string',
     filterable: true,
-    verticalAlign: 'top',
   },
   {
     key: 'importance',
@@ -77,7 +79,7 @@ const columns: Column<ConsolidatedSection>[] = [
     description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
-    align: 'right',
+    align: 'center',
     accessor: (r) => r.overallImportance ?? null,
     type: 'number',
     filterable: true,
@@ -89,7 +91,7 @@ const columns: Column<ConsolidatedSection>[] = [
       'Existing AMBOSS coverage score for this section (higher = better covered)',
     render: (r) => r.overallCoverage ?? '—',
     width: 100,
-    align: 'right',
+    align: 'center',
     accessor: (r) => r.overallCoverage ?? null,
     type: 'number',
     filterable: true,
@@ -100,6 +102,7 @@ const columns: Column<ConsolidatedSection>[] = [
     description: 'Editor assigned to draft or update this section',
     render: (r) => r.assignedEditor ?? '—',
     width: 140,
+    align: 'center',
     accessor: (r) => r.assignedEditor ?? null,
     type: 'string',
     filterable: true,
@@ -117,7 +120,6 @@ const columns: Column<ConsolidatedSection>[] = [
     type: 'string',
     filterable: true,
     filterMode: 'contains',
-    verticalAlign: 'top',
   },
 ];
 

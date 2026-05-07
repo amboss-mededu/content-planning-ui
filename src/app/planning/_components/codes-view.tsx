@@ -113,6 +113,7 @@ export function CodesView({
           </ClickableCell>
         ),
         width: 80,
+        align: 'center',
         accessor: (r) => r.source ?? null,
         type: 'string',
         filterable: true,
@@ -132,6 +133,7 @@ export function CodesView({
           </ClickableCell>
         ),
         width: 180,
+        align: 'center',
         accessor: (r) => r.code ?? null,
         type: 'string',
         group: 'metadata',
@@ -145,7 +147,6 @@ export function CodesView({
         // widths and the nowrap headers overflow into neighbors. Drag-resize
         // still overrides on a per-column basis.
         width: 320,
-        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             <span style={{ textAlign: 'left' }}>{r.description ?? ''}</span>
@@ -165,7 +166,6 @@ export function CodesView({
         label: 'Category',
         description: 'Category from the source ontology this code belongs to',
         width: 200,
-        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             {r.category ?? '—'}
@@ -181,7 +181,6 @@ export function CodesView({
         label: 'Consolidation category',
         description: 'Bucket this code was assigned to during consolidation/dedup',
         width: 220,
-        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             {r.consolidationCategory ?? '—'}
@@ -197,6 +196,7 @@ export function CodesView({
         label: 'In AMBOSS',
         description: 'Whether this code is already covered by an AMBOSS article',
         width: 110,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (r.isInAMBOSS === true) {
@@ -243,6 +243,7 @@ export function CodesView({
           );
         },
         width: 140,
+        align: 'center',
         // Sort as a number (rank) so asc/desc follow the coverage ladder rather
         // than alphabetical order of the level label.
         accessor: (r) =>
@@ -272,6 +273,7 @@ export function CodesView({
           );
         },
         width: 90,
+        align: 'center',
         accessor: (r) => r.depthOfCoverage ?? null,
         type: 'number',
         filterable: true,
@@ -282,6 +284,7 @@ export function CodesView({
         label: 'Articles',
         description: 'Existing AMBOSS articles (and sections) that cover this code',
         width: 180,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const arr = r.articlesWhereCoverageIs ?? [];
@@ -310,6 +313,7 @@ export function CodesView({
         label: 'Updates',
         description: 'Suggested updates to existing AMBOSS articles for this code',
         width: 130,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const n = r.existingArticleUpdates?.length ?? 0;
@@ -332,6 +336,7 @@ export function CodesView({
         label: 'New articles',
         description: 'Brand-new AMBOSS articles proposed to cover this code',
         width: 130,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const n = r.newArticlesNeeded?.length ?? 0;
