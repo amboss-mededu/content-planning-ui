@@ -5,12 +5,8 @@
  *   body: { description?, category?, consolidationCategory? }
  *
  * Gated on consolidation state — returns 409 if `consolidate_primary` is in
- * any state other than `pending`/`skipped` (still read from Postgres). The
- * gate is also enforced in the UI, but re-checked here so a stale tab can't
- * bypass it.
- *
- * Codes themselves live in Convex now; the write goes through `api.codes.patch`
- * so every connected editor sees the change without polling.
+ * any state other than `pending`/`skipped`. The gate is also enforced in the
+ * UI, but re-checked here so a stale tab can't bypass it.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
