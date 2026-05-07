@@ -1,9 +1,12 @@
 # Migration Proposal — Post-Convex / Post-Vercel Architecture
 
-> **Status: PROPOSAL FOR REVIEW.** No code has been migrated. This document
-> exists so reviewers can sign off on the target architecture before the actual
-> deploy docs (`DEPLOYMENT.md` + `DEPLOYMENT_POCKETBASE.md`) and the migration
-> work itself are produced.
+> **Status: complete.** Shipped as 9 stacked PRs against `migration/integration`
+> (PR 1 docs → PR 9 cleanup). The runtime is now PocketBase + Google OAuth;
+> Convex, Vercel Workflow, and `@vercel/blob` are removed from the codebase.
+> Production PocketBase deployment and Vercel project teardown are tracked
+> separately. For the live runbook see [`DEPLOYMENT_POCKETBASE.md`](./DEPLOYMENT_POCKETBASE.md);
+> the previous Convex/Vercel setup is preserved for reference in
+> [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
 ## TL;DR
 
