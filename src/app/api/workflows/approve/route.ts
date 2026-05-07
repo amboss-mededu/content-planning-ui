@@ -1,25 +1,28 @@
 /**
- * Resume a paused approval hook.
+ * Resolve a stage that is `awaiting_approval`.
  *
  * POST /api/workflows/approve
  *   body: {
  *     runId: string;
- *     stage: 'extract_codes' | 'extract_milestones';
+ *     specialtySlug: string;
+ *     stage: 'extract_codes' | 'extract_milestones' | 'map_codes';
  *     approved: boolean;
- *     approvedBy?: string;
  *     note?: string;
  *   }
  *
- * Uses the deterministic `approve:<runId>:<stage>` token so the route doesn't
- * need to know the hook id — the paused workflow is waiting on that exact
- * token via `createHook`.
+ * With the workflow runtime gone (PR 6), there is no paused hook to resume.
+ * Phase 1 stashed the draft on `pipelineStages.draftPayload` and parked the
+ * stage; this route invokes the matching `*Phase2` continuation directly to
+ * promote (or reject) the draft. `map_codes` does not have an approval gate
+ * so this route 400s for that stage.
  */
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { resumeHook } from 'workflow/api';
 import { getCurrentUser } from '@/lib/auth';
-import { type ApprovableStage, approvalToken } from '@/lib/workflows/lib/approval';
+import type { ApprovableStage } from '@/lib/workflows/lib/approval';
+import { extractCodesPhase2 } from '@/lib/workflows/preprocessing/extract-codes';
+import { extractMilestonesPhase2 } from '@/lib/workflows/preprocessing/extract-milestones';
 
 type Body = {
   runId?: string;
@@ -35,7 +38,6 @@ type Body = {
 const APPROVABLE_STAGES: ReadonlySet<ApprovableStage> = new Set([
   'extract_codes',
   'extract_milestones',
-  'map_codes',
 ]);
 
 export async function POST(req: NextRequest) {
@@ -47,9 +49,14 @@ export async function POST(req: NextRequest) {
   if (!body.runId) {
     return NextResponse.json({ error: 'runId required' }, { status: 400 });
   }
+  if (!body.specialtySlug) {
+    return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
+  }
   if (!body.stage || !APPROVABLE_STAGES.has(body.stage)) {
     return NextResponse.json(
-      { error: `stage must be one of ${[...APPROVABLE_STAGES].join(', ')}` },
+      {
+        error: `stage must be one of ${[...APPROVABLE_STAGES].join(', ')}`,
+      },
       { status: 400 },
     );
   }
@@ -58,24 +65,32 @@ export async function POST(req: NextRequest) {
   }
 
   const approvedBy = user.email ?? user.name ?? user._id;
-  const token = approvalToken(body.runId, body.stage);
-  console.log('[approve] resuming hook', {
+  console.log('[approve] resolving stage', {
     runId: body.runId,
     stage: body.stage,
     approved: body.approved,
     approvedBy,
   });
-  await resumeHook(token, {
+
+  const phase2Input = {
+    runId: body.runId,
+    specialtySlug: body.specialtySlug,
     approved: body.approved,
     approvedBy,
     note: body.note,
-  });
+  };
 
-  if (body.specialtySlug) {
-    revalidateTag(`pipeline:${body.specialtySlug}`, 'max');
-    revalidateTag(`codes:${body.specialtySlug}`, 'max');
-    revalidateTag(`specialty:${body.specialtySlug}`, 'max');
+  // Run the continuation inline — these are quick (DB writes only, no LLM
+  // calls) so the user can see the result on the next page load.
+  if (body.stage === 'extract_codes') {
+    await extractCodesPhase2(phase2Input);
+  } else {
+    await extractMilestonesPhase2(phase2Input);
   }
+
+  revalidateTag(`pipeline:${body.specialtySlug}`, 'max');
+  revalidateTag(`codes:${body.specialtySlug}`, 'max');
+  revalidateTag(`specialty:${body.specialtySlug}`, 'max');
   revalidateTag('specialty-phases', 'max');
   revalidateTag('specialties', 'max');
 

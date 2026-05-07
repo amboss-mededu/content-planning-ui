@@ -1,9 +1,13 @@
 /**
- * Deterministic token builders for stage-approval hooks.
+ * Deterministic token returned by trigger routes so the UI has a stable
+ * value to send back when invoking /api/workflows/approve.
  *
- * Workflows call `createHook({ token: approvalToken(runId, stage) })`; API
- * routes call `resumeHook(approvalToken(runId, stage), payload)` to release
- * the paused workflow without ever having to look up the hook directly.
+ * Pre-PR-6 this matched the token a paused workflow hook was waiting on.
+ * The runtime is gone now — the token is purely an opaque per-stage
+ * identifier the UI echoes back; the approve route looks at runId + stage
+ * directly to invoke the matching `*Phase2`. We keep it because removing
+ * it would change the trigger response shape (and thus client code) for
+ * no benefit.
  */
 
 export type ApprovableStage = 'extract_codes' | 'extract_milestones' | 'map_codes';

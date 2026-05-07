@@ -15,7 +15,6 @@ function baseUrl(): string {
 }
 
 export async function revalidateSpecialtyCache(slug: string): Promise<void> {
-  'use step';
   const tags = [
     `codes:${slug}`,
     `specialty:${slug}`,

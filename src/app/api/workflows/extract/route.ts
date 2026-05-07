@@ -1,5 +1,5 @@
 /**
- * Trigger endpoint for the extract-codes workflow.
+ * Trigger endpoint for code extraction.
  *
  * POST /api/workflows/extract
  *   body: {
@@ -10,14 +10,16 @@
  *   }
  *
  * Responsibility:
- *   1. Verify the specialty exists in Convex.
+ *   1. Verify the specialty exists.
  *   2. Create a pipelineRuns row + the extract_codes stage.
- *   3. Call `start(extractCodesWorkflow, ...)` and record the workflow run id.
+ *   3. Kick off `extractCodesPhase1` fire-and-forget — the route returns
+ *      immediately while the background promise drives the pipeline. The
+ *      app runs as a long-lived Node server (`next start`), so background
+ *      promises continue past the response.
  */
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
 import { listCodeSources } from '@/lib/data/code-sources';
 import {
@@ -29,7 +31,7 @@ import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
-import { extractCodesWorkflow } from '@/lib/workflows/preprocessing/extract-codes';
+import { extractCodesPhase1 } from '@/lib/workflows/preprocessing/extract-codes';
 import { parseContentInputs } from '../_lib/inputs';
 
 type Body = {
@@ -93,26 +95,26 @@ export async function POST(req: NextRequest) {
   });
   await initPipelineStage({ runId, stage: 'extract_codes' });
 
-  const wfRun = await start(extractCodesWorkflow, [
-    {
-      runId,
-      specialtySlug: slug,
-      inputs,
-      identifyInstructions: identifyInstructions ?? undefined,
-      extractInstructions: extractInstructions ?? undefined,
-      model,
-      apiKeys,
-    },
-  ]);
-
-  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
+  // Fire-and-forget: extraction continues in the background after this
+  // response. Unhandled rejections are logged so a thrown step doesn't
+  // crash the Node process.
+  void extractCodesPhase1({
+    runId,
+    specialtySlug: slug,
+    inputs,
+    identifyInstructions: identifyInstructions ?? undefined,
+    extractInstructions: extractInstructions ?? undefined,
+    model,
+    apiKeys,
+  }).catch((e) => {
+    console.error('[extract] Phase1 unhandled rejection', e);
+  });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');
 
   return NextResponse.json({
     runId,
-    workflowRunId: wfRun.runId,
     specialty: slug,
     inputs: inputs.length,
     approvalToken: approvalToken(runId, 'extract_codes'),

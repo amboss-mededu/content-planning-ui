@@ -41,8 +41,6 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.3.3",
     "@vercel/speed-insights": "^2.0.0",
-    "@workflow/ai": "^4.1.2",
-    "@workflow/next": "^4.0.5",
     "ai": "^6.0.168",
     "convex": "^1.36.1",
     "emotion-theming": "^11.0.0",
@@ -53,8 +51,6 @@
     "prop-types": "^15.8.1",
     "react": "19.2.5",
     "react-dom": "19.2.5",
-    "workflow": "^4.2.4",
-    "ws": "^8.20.0",
     "zod": "^4.3.6"
   },
   "overrides": {
@@ -71,7 +67,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
     "dotenv-cli": "^11.0.0",
     "jsdom": "^29.0.2",

@@ -1,5 +1,4 @@
 import type { NextConfig } from 'next';
-import { withWorkflow } from 'workflow/next';
 import './src/env';
 
 const securityHeaders = [
@@ -20,4 +19,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withWorkflow(nextConfig);
+export default nextConfig;

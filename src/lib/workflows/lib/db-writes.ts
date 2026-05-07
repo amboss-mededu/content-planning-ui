@@ -65,7 +65,6 @@ export async function createPipelineRun(input: {
   specialtySlug: string;
   workflowRunId?: string;
 }): Promise<{ id: string }> {
-  'use step';
   console.log('[pipeline] createPipelineRun', input);
   const result = await createPipelineRunAsAdmin({
     specialtySlug: input.specialtySlug,
@@ -80,7 +79,6 @@ export async function updatePipelineRunStatus(
   status: PipelineRunStatus,
   error?: string | null,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] updatePipelineRunStatus', { runId, status, error });
   const terminal =
     status === 'completed' || status === 'failed' || status === 'cancelled';
@@ -97,7 +95,6 @@ export async function initPipelineStage(
   runId: string,
   stage: StageName,
 ): Promise<{ id: string }> {
-  'use step';
   console.log('[pipeline] initPipelineStage', { runId, stage });
   return await initPipelineStageAsAdmin({ runId, stage });
 }
@@ -107,7 +104,6 @@ export async function markStageRunning(
   stage: StageName,
   workflowRunId?: string,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] markStageRunning', { runId, stage, workflowRunId });
   await updatePipelineStageAsAdmin({
     runId,
@@ -126,7 +122,6 @@ export async function markStageAwaitingApproval(
   outputSummary: Record<string, unknown>,
   draftPayload?: unknown,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] markStageAwaitingApproval', { runId, stage, outputSummary });
   await updatePipelineStageAsAdmin({
     runId,
@@ -145,7 +140,6 @@ export async function markStageCompleted(
   approvedBy?: string,
   outputSummary?: Record<string, unknown>,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] markStageCompleted', { runId, stage, approvedBy });
   await updatePipelineStageAsAdmin({
     runId,
@@ -164,7 +158,6 @@ export async function markStageFailed(
   stage: StageName,
   errorMessage: string,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] markStageFailed', { runId, stage, errorMessage });
   await updatePipelineStageAsAdmin({
     runId,
@@ -184,7 +177,6 @@ export async function writeExtractedCodes(
   specialtySlug: string,
   rawCodes: RawExtractedCode[],
 ): Promise<{ inserted: number }> {
-  'use step';
   console.log('[pipeline] writeExtractedCodes', {
     runId,
     specialtySlug,
@@ -222,7 +214,6 @@ export async function promoteExtractedCodesToCodes(
   runId: string,
   specialtySlug: string,
 ): Promise<{ promoted: number }> {
-  'use step';
   console.log('[pipeline] promoteExtractedCodesToCodes', { runId, specialtySlug });
   const staged = await listExtractedCodesForRunAsAdmin(runId);
   if (staged.length === 0) return { promoted: 0 };
@@ -248,7 +239,6 @@ export async function writeApprovedMilestones(
   specialtySlug: string,
   milestones: string,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] writeApprovedMilestones', {
     specialtySlug,
     chars: milestones.length,
@@ -273,7 +263,6 @@ export type SpecialtyMappingContext = {
 export async function loadSpecialtyForMapping(
   specialtySlug: string,
 ): Promise<SpecialtyMappingContext> {
-  'use step';
   console.log('[pipeline] loadSpecialtyForMapping', { specialtySlug });
   const row = await getSpecialtyRecordAsAdmin(specialtySlug);
   return {
@@ -304,7 +293,6 @@ export async function listUnmappedCodes(
   specialtySlug: string,
   filter?: MappingFilter | null,
 ): Promise<UnmappedCodeRow[]> {
-  'use step';
   console.log('[pipeline] listUnmappedCodes', { specialtySlug, filter });
   const rows = await listUnmappedCodesAsAdmin(specialtySlug, {
     categories: filter?.categories?.filter((s) => typeof s === 'string' && s.length > 0),
@@ -355,7 +343,6 @@ export async function writeCodeMapping(
   code: string,
   mapping: MappingOutput,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] writeCodeMapping', { specialtySlug, code });
   const coverageScore =
     typeof mapping.coverage.coverageScore === 'number'
@@ -393,7 +380,6 @@ export async function markCodesInFlight(
   codes: string[],
   runId: string,
 ): Promise<void> {
-  'use step';
   console.log('[pipeline] markCodesInFlight', {
     specialtySlug,
     runId,
@@ -404,7 +390,6 @@ export async function markCodesInFlight(
 }
 
 export async function clearInFlightForRun(runId: string): Promise<void> {
-  'use step';
   console.log('[pipeline] clearInFlightForRun', { runId });
   await clearInFlightForRunAsAdmin(runId);
 }

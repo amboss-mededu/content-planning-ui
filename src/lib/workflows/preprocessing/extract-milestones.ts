@@ -1,14 +1,17 @@
 /**
- * Milestone extraction workflow (preprocessing stage).
+ * Milestone extraction (preprocessing stage).
  *
  * Single Gemini call across every provided URL (via `url_context`) produces a
  * plain-text milestones blob, which the user approves before it lands on
- * `specialties.milestones`. Same durability + revalidate plumbing as
- * `extract-codes.ts`.
+ * `specialties.milestones`.
+ *
+ * Approval is a hard split: `extractMilestonesPhase1` runs to
+ * `awaiting_approval` (the draft is stashed on `pipelineStages.draftPayload`
+ * as `{ milestones }`); the approve route handler invokes
+ * `extractMilestonesPhase2` to finalise.
  */
 
-import { createHook, FatalError } from 'workflow';
-import { type ApprovalPayload, approvalToken } from '../lib/approval';
+import { getStageAsAdmin } from '@/lib/data/pipeline';
 import {
   markStageAwaitingApproval,
   markStageCompleted,
@@ -32,10 +35,10 @@ export type ExtractMilestonesInput = {
   apiKeys: ProviderApiKeys;
 };
 
-export async function extractMilestonesWorkflow(input: ExtractMilestonesInput) {
-  'use workflow';
-
-  console.log('[pipeline] extractMilestonesWorkflow start', {
+export async function extractMilestonesPhase1(
+  input: ExtractMilestonesInput,
+): Promise<void> {
+  console.log('[pipeline] extractMilestonesPhase1 start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
@@ -90,27 +93,56 @@ export async function extractMilestonesWorkflow(input: ExtractMilestonesInput) {
         costUsd: totals.costUsd,
       },
     });
+    await revalidateSpecialtyCache(input.specialtySlug);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await markStageFailed(input.runId, 'extract_milestones', msg);
+    await updatePipelineRunStatus(input.runId, 'failed', msg);
+    await revalidateSpecialtyCache(input.specialtySlug);
+    throw e;
+  }
+}
 
-    using hook = createHook<ApprovalPayload>({
-      token: approvalToken(input.runId, 'extract_milestones'),
-    });
-    const approval = await hook;
+/**
+ * Continuation invoked by /api/workflows/approve. Reads the draft milestones
+ * blob off the staged stage row and either commits it to
+ * `specialties.milestones` (approve) or marks the stage failed (reject).
+ */
+export async function extractMilestonesPhase2(input: {
+  runId: string;
+  specialtySlug: string;
+  approved: boolean;
+  approvedBy?: string;
+  note?: string;
+}): Promise<void> {
+  console.log('[pipeline] extractMilestonesPhase2', {
+    runId: input.runId,
+    specialtySlug: input.specialtySlug,
+    approved: input.approved,
+  });
 
-    if (!approval.approved) {
-      const reason = approval.note ? `: ${approval.note}` : '';
+  try {
+    if (!input.approved) {
+      const reason = input.note ? `: ${input.note}` : '';
       await markStageFailed(input.runId, 'extract_milestones', `Rejected${reason}`);
-      throw new FatalError('Milestone extraction rejected');
+      await updatePipelineRunStatus(input.runId, 'cancelled', 'Rejected');
+      await revalidateSpecialtyCache(input.specialtySlug);
+      return;
     }
-
+    const stage = await getStageAsAdmin({
+      runId: input.runId,
+      stage: 'extract_milestones',
+    });
+    const draft = stage?.draftPayload as { milestones?: string } | null;
+    const milestones = draft?.milestones;
+    if (typeof milestones !== 'string' || milestones.length === 0) {
+      throw new Error('No drafted milestones blob found on stage row');
+    }
     await writeApprovedMilestones(input.specialtySlug, milestones);
-    await markStageCompleted(input.runId, 'extract_milestones', approval.approvedBy);
-    // Single-stage pipeline for now — finalize the run so the UI stops showing
-    // it as active. The preprocessing orchestrator (Step 6) will later manage
-    // this top-level transition instead.
+    await markStageCompleted(input.runId, 'extract_milestones', input.approvedBy);
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    if (e instanceof FatalError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     await markStageFailed(input.runId, 'extract_milestones', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
