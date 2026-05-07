@@ -56,6 +56,11 @@ export const env = createEnv({
     POCKETBASE_ADMIN_PASSWORD: optionalString,
     GOOGLE_OAUTH_CLIENT_ID: optionalString,
     GOOGLE_OAUTH_CLIENT_SECRET: optionalString,
+    // Dev-only auto-login. When set in development mode, the proxy redirects
+    // unauthenticated requests to /api/auth/dev-autologin (instead of /login),
+    // which mints a session for this email via the PB impersonate API. Useful
+    // when OAuth credentials aren't provisioned yet. Ignored in production.
+    DEV_AUTOLOGIN_EMAIL: optionalString,
   },
   client: {
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
@@ -77,6 +82,7 @@ export const env = createEnv({
     POCKETBASE_ADMIN_PASSWORD: process.env.POCKETBASE_ADMIN_PASSWORD,
     GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
     GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
   },
   emptyStringAsUndefined: true,
