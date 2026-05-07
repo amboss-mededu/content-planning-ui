@@ -22,10 +22,8 @@ type Body = {
 };
 
 function cleanOpt(v: unknown): string | undefined {
-  // Convex patch can't express "clear this field" via the wire, so we treat
-  // `null` and empty strings as no-ops here (the UI doesn't currently expose
-  // a clear action either). Trim whitespace and forward only meaningful
-  // values.
+  // Treat `null` and empty strings as no-ops — the UI doesn't expose a
+  // clear action, so we forward only meaningful, trimmed values.
   if (typeof v !== 'string') return undefined;
   const trimmed = v.trim();
   return trimmed.length === 0 ? undefined : trimmed;

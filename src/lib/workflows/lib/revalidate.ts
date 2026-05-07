@@ -1,18 +1,11 @@
 /**
- * Workflow-side cache invalidation.
- *
- * Step function that POSTs to `/api/internal/revalidate` so the workflow can
- * bust Next.js cache tags after mutating DB state (e.g. after promoting
- * extracted codes into the canonical `codes` table). Workflows can't call
- * `revalidateTag` directly — it's a Next.js cache API unavailable in the
- * workflow sandbox.
+ * Pipeline-side cache invalidation. Pipelines run in-process now, so we can
+ * call `revalidateTag` directly — no HTTP self-call needed. Failures are
+ * swallowed: the UI will still see fresh data once cache tags expire
+ * naturally, and a stage shouldn't fail because invalidation hiccuped.
  */
 
-function baseUrl(): string {
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  return 'http://localhost:3000';
-}
+import { revalidateTag } from 'next/cache';
 
 export async function revalidateSpecialtyCache(slug: string): Promise<void> {
   const tags = [
@@ -24,21 +17,10 @@ export async function revalidateSpecialtyCache(slug: string): Promise<void> {
   ];
   console.log('[pipeline] revalidateSpecialtyCache', { slug, tags });
   try {
-    const res = await fetch(`${baseUrl()}/api/internal/revalidate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        tags,
-        secret: process.env.INTERNAL_REVALIDATE_SECRET,
-      }),
-    });
-    if (!res.ok) {
-      const msg = await res.text().catch(() => '');
-      console.warn('[pipeline] revalidateSpecialtyCache non-OK', res.status, msg);
+    for (const t of tags) {
+      revalidateTag(t, 'max');
     }
   } catch (e) {
-    // Never fail the workflow just because revalidation failed — the UI will
-    // still see fresh data once the cache tags naturally expire.
     console.warn('[pipeline] revalidateSpecialtyCache threw', e);
   }
 }

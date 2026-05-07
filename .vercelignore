@@ -1,8 +1,0 @@
-.env.local
-.env.*.local
-node_modules
-.next
-dist
-coverage
-e2e/test-results
-playwright-report

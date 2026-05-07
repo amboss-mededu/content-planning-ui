@@ -1,13 +1,11 @@
 /**
- * UI-facing domain types. Convex's generated `Doc<'codes'>` etc. are the
- * authoritative shapes for what's stored, but UI components and the
+ * UI-facing domain types. The PocketBase row shapes in `src/lib/pb/types.ts`
+ * are the authoritative storage shapes, but UI components and the
  * `src/lib/data/*` adapters need stable TypeScript types they can pass
- * around without leaking the entire Convex schema.
+ * around without coupling every consumer to the storage layer.
  *
- * These types pre-date the Convex migration; they're imported by the
- * planning UI everywhere a row is rendered. Keeping them as plain
- * TypeScript (no Zod) — runtime parsing for xlsx ingest lives in the
- * seed scripts (`scripts/_lib/xlsx.ts`).
+ * Plain TypeScript (no Zod) — runtime parsing for xlsx ingest lives in
+ * the seed scripts (`scripts/_lib/xlsx.ts`).
  */
 
 // --- Coverage --------------------------------------------------------------

@@ -39,7 +39,6 @@ Pipelines are **human-gated** at every approval boundary and **per-specialty sil
 │   ├── api/workflows/*     pipeline triggers + approval/cancel/reset       │
 │   ├── api/settings/keys   per-user provider API key writes                │
 │   ├── api/sources/*       code/milestone source registries                │
-│   ├── api/internal/*      pipeline → Next cache bridge (revalidate)       │
 │   └── lib/pb/*            cookie-authed + admin PocketBase clients        │
 └──────┬──────────────────────────────────────────┬────────────────────────┘
        │ user cookie / admin auth                  │ void runAsync().catch(…)
@@ -139,7 +138,6 @@ src/app/
     sources/{code,milestone}/route.ts source-slug registries
     specialties/route.ts              create-specialty
     codes/[specialty]/[code]/         per-code edits + run metadata
-    internal/revalidate               pipeline → Next cache bridge
   proxy.ts                            sign-in gate (Next 16 middleware)
 ```
 
@@ -185,7 +183,7 @@ lib/
   db-writes.ts           every PB write goes through these helpers
   events.ts              logEvent + aggregateStageMetrics
   reset.ts               cascade reset across stages + clear editor data
-  revalidate.ts          POST → /api/internal/revalidate
+  revalidate.ts          revalidateTag(...) — bust Next.js cache tags
   llm.ts                 unified provider wrapper (Gemini / Anthropic / OpenAI)
   parse-model.ts         provider/model spec parser
   resolve-keys.ts        merge per-user keys + env fallbacks at run start
@@ -265,7 +263,6 @@ Two callers, one PocketBase backend.
 | `POCKETBASE_ADMIN_EMAIL` / `POCKETBASE_ADMIN_PASSWORD` | Superuser credentials (admin client + scripts) |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Configured into PB via `configure-oauth` script |
 | `STAFF_EMAIL_ALLOWLIST` *(set on the PB process)* | Comma-separated allowlist; falls back to AMBOSS-domain whitelist |
-| `INTERNAL_REVALIDATE_SECRET` | Pipeline → `/api/internal/revalidate` cache-bust |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Optional env fallback for Gemini |
 | `ANTHROPIC_API_KEY` | Optional env fallback for Anthropic |
 | `OPENAI_API_KEY` | Optional env fallback for OpenAI |
@@ -347,7 +344,7 @@ Background promise (still in the same Node process)
                        │
                        ▼  (Phase 2, fire-and-forget again)
   ├── promoteExtractedCodesToCodes(...)
-  ├── revalidateSpecialtyCache(...)     ← POST /api/internal/revalidate
+  ├── revalidateSpecialtyCache(...)     ← revalidateTag (in-process)
   └── markStageCompleted(approvedBy)
 ```
 
@@ -414,7 +411,7 @@ When you add a new Next.js API route:
 
 1. **Mutating route** (POST/PATCH/DELETE) → `requireUserResponse()` at the top, returns 401 if missing.
 2. **Read route** → relies on `proxy.ts` GET-redirect; no in-handler check needed (but doesn't hurt).
-3. **Service route** (pipeline → Next, e.g. `internal/revalidate`) → secret-header check, fail-closed in production.
+3. **Service route** (machine-to-machine, no signed-in user) → require a shared secret in a header and fail-closed in production. None today; the previous `internal/revalidate` indirection was collapsed into in-process `revalidateTag` calls.
 
 When you add a new PB collection:
 

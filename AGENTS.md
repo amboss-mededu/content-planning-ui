@@ -32,9 +32,9 @@ Do not derive component APIs from training data — `docs/amboss/llms-full.txt` 
 
 ## Extension points
 
-- **Auth**: `src/lib/auth/index.ts` exports a stub `getCurrentUser()` returning `null`. Wire your identity provider here. For request-time gating in Next.js 16, add `src/proxy.ts` (the renamed middleware).
-- **Database**: `src/lib/db/index.ts` exports a stub `db`. Declare the client (Drizzle/Prisma/Kysely) there so server code imports from one place.
+- **Auth**: `src/lib/auth/index.ts` wires `getCurrentUser` / `isAuthenticated` / `requireUserResponse` to the cookie-authed PocketBase client. Request-time gating lives in `src/proxy.ts` (the renamed Next 16 middleware). Email allowlist enforcement is server-side in `pb_hooks/main.pb.js`.
+- **Database**: PocketBase is the source of truth. Server-side reads/writes go through `src/lib/data/*` (which use the clients in `src/lib/pb/server.ts`); browser-side live queries go through `useLiveCollection` from `src/lib/pb/use-live-collection.ts`.
 - **Env vars**: Declare in `src/env.ts` under `server` or `client` schemas; `next.config.ts` imports it so builds fail fast on missing vars. Local overrides go in `.env.local` (see `.env.example`).
-- **Deployment**: Zero-config on Vercel (`vercel deploy`). `@vercel/analytics` and `@vercel/speed-insights` are already rendered from the root layout — inert off-platform, active on deploy.
+- **Deployment**: Self-hosted — `next start` Node server alongside the PocketBase binary. See [`DEPLOYMENT_POCKETBASE.md`](DEPLOYMENT_POCKETBASE.md) for the runbook.
 <!-- END:amboss-design-system -->
 

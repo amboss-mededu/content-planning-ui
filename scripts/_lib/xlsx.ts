@@ -1,11 +1,8 @@
 /**
  * Xlsx ingest helpers, used only by CLI seed scripts.
  *
- * Combines what used to live under `src/lib/repositories/xlsx/`,
- * `src/lib/repositories/common/`, and the registry builder in
- * `src/lib/repositories/index.ts`. Convex is the runtime source of
- * truth; xlsx fixtures are only consumed at seed time, so this code
- * has no place in the app bundle.
+ * PocketBase is the runtime source of truth; xlsx fixtures are only
+ * consumed at seed time, so this code has no place in the app bundle.
  */
 
 import { existsSync, promises as fs } from 'node:fs';
