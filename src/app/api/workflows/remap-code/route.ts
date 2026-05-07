@@ -7,7 +7,6 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
 import { getCodeAsAdmin } from '@/lib/data/codes';
 import {
@@ -115,22 +114,22 @@ export async function POST(req: NextRequest) {
   });
   await initPipelineStage({ runId, stage: 'map_codes' });
 
-  const wfRun = await start(mapCodesWorkflow, [
-    {
-      runId,
-      specialtySlug: slug,
-      contentBase: body.contentBase?.trim() || undefined,
-      language: body.language?.trim() || undefined,
-      additionalInstructions: mappingInstructions ?? undefined,
-      checkAgainstLibrary,
-      filter: { codes: [code] },
-      primaryModel,
-      backupModel,
-      apiKeys,
-    },
-  ]);
-
-  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
+  // Fire-and-forget single-code remap. Continues past the response on
+  // this long-lived Node server.
+  void mapCodesWorkflow({
+    runId,
+    specialtySlug: slug,
+    contentBase: body.contentBase?.trim() || undefined,
+    language: body.language?.trim() || undefined,
+    additionalInstructions: mappingInstructions ?? undefined,
+    checkAgainstLibrary,
+    filter: { codes: [code] },
+    primaryModel,
+    backupModel,
+    apiKeys,
+  }).catch((e) => {
+    console.error('[remap-code] workflow unhandled rejection', e);
+  });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag(`codes:${slug}`, 'max');
@@ -138,7 +137,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     runId,
-    workflowRunId: wfRun.runId,
     specialty: slug,
     code,
     approvalToken: approvalToken(runId, 'map_codes'),

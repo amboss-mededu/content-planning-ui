@@ -11,7 +11,6 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { start } from 'workflow/api';
 import { requireUserResponse } from '@/lib/auth';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import {
@@ -23,7 +22,7 @@ import { getSpecialty } from '@/lib/data/specialties';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
-import { extractMilestonesWorkflow } from '@/lib/workflows/preprocessing/extract-milestones';
+import { extractMilestonesPhase1 } from '@/lib/workflows/preprocessing/extract-milestones';
 import { parseContentInputs } from '../_lib/inputs';
 
 type Body = {
@@ -82,25 +81,25 @@ export async function POST(req: NextRequest) {
   });
   await initPipelineStage({ runId, stage: 'extract_milestones' });
 
-  const wfRun = await start(extractMilestonesWorkflow, [
-    {
-      runId,
-      specialtySlug: slug,
-      inputs,
-      milestonesInstructions: milestonesInstructions ?? undefined,
-      model,
-      apiKeys,
-    },
-  ]);
-
-  await updatePipelineRun(runId, { workflowRunId: wfRun.runId });
+  // Fire-and-forget: extraction continues past the response on this
+  // long-lived Node server. Catch unhandled rejections so a thrown step
+  // doesn't crash the process.
+  void extractMilestonesPhase1({
+    runId,
+    specialtySlug: slug,
+    inputs,
+    milestonesInstructions: milestonesInstructions ?? undefined,
+    model,
+    apiKeys,
+  }).catch((e) => {
+    console.error('[extract-milestones] Phase1 unhandled rejection', e);
+  });
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');
 
   return NextResponse.json({
     runId,
-    workflowRunId: wfRun.runId,
     specialty: slug,
     inputs: inputs.length,
     approvalToken: approvalToken(runId, 'extract_milestones'),
