@@ -1,11 +1,12 @@
 /**
- * Ad-hoc dev trigger for the extract-codes workflow.
+ * Ad-hoc dev trigger for the extract-codes pipeline stage.
  *
  * Usage: npm run wf:extract -- <specialty-slug> <url1> [url2 ...]
  *
  * POSTs /api/workflows/extract on the running dev server with the specialty
- * slug + content outline URLs. The route handles DB prep + start(). Prints
- * run ids + the approval hook token.
+ * slug + content outline URLs. The route handles DB prep + fires the phase 1
+ * promise. Prints the run id + the approval token the UI uses to release
+ * phase 2 once the operator approves the staged extraction.
  */
 
 const DEV_URL = process.env.DEV_URL ?? 'http://localhost:3000';
@@ -33,11 +34,9 @@ async function main() {
   }
 
   console.log('\n--- extract-codes run started ---');
-  console.log('pipeline run id:    ', body.runId);
-  console.log('workflow run id:    ', body.workflowRunId);
-  console.log('specialty:          ', body.specialty, `(${body.urls} urls)`);
-  console.log('approval hook token:', body.approvalToken);
-  console.log('\nObservability: npx workflow web', body.workflowRunId);
+  console.log('pipeline run id: ', body.runId);
+  console.log('specialty:       ', body.specialty, `(${body.inputs} inputs)`);
+  console.log('approval token:  ', body.approvalToken);
 }
 
 main().catch((e) => {

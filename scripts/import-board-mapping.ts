@@ -2,20 +2,19 @@
  * Import specialty registry rows from board_specialty_mapping_competencies.xlsx.
  *
  * Usage:
- *   npm run db:import-board                  # import every specialty in every region tab
- *   npm run db:import-board -- dermatology   # import only dermatology
- *   npm run db:import-board -- psychiatry dermatology
+ *   npm run import-board                  # import every specialty in every region tab
+ *   npm run import-board -- dermatology   # import only dermatology
+ *   npm run import-board -- psychiatry dermatology
  *
  * Only identity columns are populated: slug, name, region, language, source.
- * PDF URLs and system prompts are per-run inputs (live on pipeline_runs), not
+ * PDF URLs and system prompts are per-run inputs (live on pipelineRuns), not
  * specialty attributes — so this script doesn't touch them.
  *
  * Idempotent — existing rows are updated; `source` is preserved on conflict so
  * a specialty seeded from xlsx keeps its lineage.
  */
 
-import { api } from '../convex/_generated/api';
-import { convexClient } from './_lib/convex';
+import { pbAdminClient } from './_lib/pb';
 import { readTabRows } from './_lib/xlsx';
 
 const WORKBOOK = 'board_specialty_mapping_competencies.xlsx';
@@ -96,7 +95,7 @@ async function readRegionSpecialties(region: string): Promise<SpecialtyRow[]> {
 
 async function main() {
   const filter = new Set(process.argv.slice(2).map((s) => s.toLowerCase()));
-  const convex = convexClient();
+  const pb = await pbAdminClient();
   const regions = await readRegions();
   console.log('[import] master regions:', [...regions.keys()]);
   if (filter.size > 0) console.log('[import] filter:', [...filter]);
@@ -108,13 +107,24 @@ async function main() {
     if (selected.length === 0) continue;
     console.log(`[import] ${regionKey}: ${selected.length} specialties`);
     for (const s of selected) {
-      await convex.mutation(api.specialties.create, {
+      const payload = {
         slug: s.slug,
         name: s.name,
         source: 'board',
         region: cfg.region,
         language: cfg.language,
-      });
+      };
+      try {
+        const existing = await pb
+          .collection('specialties')
+          .getFirstListItem(`slug = "${s.slug}"`);
+        // Preserve original `source` on conflict — xlsx-seeded specialties
+        // shouldn't be downgraded to 'board'.
+        const { source: _drop, ...patch } = payload;
+        await pb.collection('specialties').update(existing.id, patch);
+      } catch {
+        await pb.collection('specialties').create(payload);
+      }
       upserts++;
     }
   }

@@ -1,65 +1,80 @@
 /**
- * One-shot production wipe. Clears every Convex table.
- *
- * Single-DB Convex setup: all editor data, ontology, AMBOSS library mirror,
- * sources, and pipeline state live here.
+ * One-shot production wipe. Clears every PocketBase data collection.
  *
  * Usage:
  *   npx dotenv -e .env.production.local -- tsx scripts/wipe-prod.ts
+ *
+ * Per-specialty data goes first so per-collection indexes stay valid while
+ * specialty rows are still around for the wipe of any orphaned children.
+ * Then the global tables (sources, AMBOSS catalog, pipeline*).
+ *
+ * Skips `users` (auth identities) and `userApiKeys` — those belong to the
+ * humans, not the seed.
  */
-import { api } from '../convex/_generated/api';
-import { convexClient } from './_lib/convex';
+
+import type PocketBase from 'pocketbase';
+import { clearCollection, pbAdminClient } from './_lib/pb';
+
+const PER_SPECIALTY = [
+  'codes',
+  'codeCategories',
+  'consolidatedArticles',
+  'newArticleSuggestions',
+  'articleUpdateSuggestions',
+  'consolidatedSections',
+  'icd10Codes',
+  'hcupCodes',
+  'abimCodes',
+  'orphaCodes',
+  'mappingsInFlight',
+  'extractedCodes',
+];
+
+const GLOBAL = ['pipelineEvents', 'pipelineStages', 'pipelineRuns'];
+const CATALOG = ['ambossArticles', 'ambossSections', 'codeSources', 'milestoneSources'];
+
+async function deleteAll(pb: PocketBase, collection: string): Promise<number> {
+  let removed = 0;
+  while (true) {
+    const page = await pb.collection(collection).getList(1, 200);
+    if (page.items.length === 0) break;
+    await Promise.all(page.items.map((row) => pb.collection(collection).delete(row.id)));
+    removed += page.items.length;
+    if (page.items.length < 200) break;
+  }
+  return removed;
+}
 
 async function main() {
-  const convex = convexClient();
+  const pb = await pbAdminClient();
 
-  console.log('▶ wiping per-specialty Convex tables …');
-  const convexSpecialties = (await convex.query(api.specialties.list)) as Array<{
-    slug: string;
-  }>;
-  console.log(`  ${convexSpecialties.length} specialty rows`);
-  for (const s of convexSpecialties) {
-    const slug = s.slug;
-    // Cancel runs first so resetStage cascades cleanly.
-    await convex.mutation(api.pipeline.cancelStaleRunsForSpecialty, { slug });
-    await Promise.all([
-      convex.mutation(api.codes.deleteForSpecialty, { slug }),
-      convex.mutation(api.categories.deleteForSpecialty, { slug }),
-      convex.mutation(api.articles.deleteConsolidatedForSpecialty, { slug }),
-      convex.mutation(api.articles.deleteNewForSpecialty, { slug }),
-      convex.mutation(api.articles.deleteUpdatesForSpecialty, { slug }),
-      convex.mutation(api.sections.deleteForSpecialty, { slug }),
-      convex.mutation(api.ontology.clearIcd10ForSpecialty, { slug }),
-      convex.mutation(api.ontology.clearHcupForSpecialty, { slug }),
-      convex.mutation(api.ontology.clearAbimForSpecialty, { slug }),
-      convex.mutation(api.ontology.clearOrphaForSpecialty, { slug }),
-    ]);
-    // Iterate runs to drop their stages + events + extracted_codes.
-    const runs = await convex.query(api.pipeline.listRuns, { slug });
-    for (const r of runs) {
-      const stages = await convex.query(api.pipeline.listStages, { runId: r._id });
-      for (const st of stages) {
-        await convex.mutation(api.pipeline.resetStage, {
-          runId: r._id,
-          stage: st.stage,
-        });
-      }
+  const specialties = await pb.collection('specialties').getFullList({ fields: 'slug' });
+  console.log(`▶ wiping per-specialty data for ${specialties.length} specialties …`);
+  for (const s of specialties) {
+    const slug = (s as unknown as { slug: string }).slug;
+    const filter = `specialtySlug = "${slug}"`;
+    let total = 0;
+    for (const col of PER_SPECIALTY) {
+      total += await clearCollection(pb, col, filter);
     }
-    await convex.mutation(api.specialties.remove, { slug });
-    console.log(`  ✓ ${slug}`);
+    console.log(`  ✓ ${slug}: removed ${total} rows`);
   }
 
-  console.log('▶ wiping global Convex tables …');
-  for (const r of await convex.query(api.sources.listCode)) {
-    await convex.mutation(api.sources.removeCode, { slug: r.slug });
+  console.log('▶ wiping global pipeline tables …');
+  for (const col of GLOBAL) {
+    const removed = await deleteAll(pb, col);
+    console.log(`  ✓ ${col}: ${removed}`);
   }
-  for (const r of await convex.query(api.sources.listMilestone)) {
-    await convex.mutation(api.sources.removeMilestone, { slug: r.slug });
+
+  console.log('▶ wiping catalog/registry tables …');
+  for (const col of CATALOG) {
+    const removed = await deleteAll(pb, col);
+    console.log(`  ✓ ${col}: ${removed}`);
   }
-  await convex.mutation(api.amboss.pruneOlderThan, {
-    updatedAt: Number.MAX_SAFE_INTEGER,
-  });
-  console.log('  ✓ sources + amboss + pipelines cleared');
+
+  console.log('▶ wiping specialties …');
+  const removed = await deleteAll(pb, 'specialties');
+  console.log(`  ✓ specialties: ${removed}`);
 
   console.log('done.');
 }
