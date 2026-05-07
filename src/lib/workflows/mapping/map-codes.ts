@@ -1,14 +1,16 @@
 /**
- * Map-codes workflow.
+ * Map-codes pipeline step.
  *
  * Fans out per-code MCP agent calls with concurrency cap 10, writing each
  * mapping through to the `codes` row as soon as it resolves. When every
  * unmapped code is done, the stage transitions straight to `completed` —
  * results are visible row-by-row in the codes table as they land, so an
  * explicit approval gate doesn't add value here.
+ *
+ * Run as fire-and-forget from /api/workflows/map-codes; the route returns
+ * immediately and the work continues in the same Node process.
  */
 
-import { FatalError } from 'workflow';
 import { mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -80,7 +82,6 @@ async function mapAndWriteOne(input: {
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ code: string; attempts: number; model: string; unresolved: boolean }> {
-  'use step';
   const result = await mapAndValidateCode({
     code: input.code,
     description: input.description,
@@ -106,9 +107,7 @@ async function mapAndWriteOne(input: {
   };
 }
 
-export async function mapCodesWorkflow(input: MapCodesInput) {
-  'use workflow';
-
+export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
   console.log('[pipeline] mapCodesWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
@@ -218,10 +217,6 @@ export async function mapCodesWorkflow(input: MapCodesInput) {
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    if (e instanceof FatalError) {
-      await clearInFlightForRun(input.runId);
-      throw e;
-    }
     const msg = e instanceof Error ? e.message : String(e);
     await markStageFailed(input.runId, 'map_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);

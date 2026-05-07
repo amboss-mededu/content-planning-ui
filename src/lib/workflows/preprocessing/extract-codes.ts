@@ -1,5 +1,5 @@
 /**
- * Two-phase code extraction workflow (preprocessing stage).
+ * Two-phase code extraction (preprocessing stage).
  *
  * Mirrors the n8n pipeline at `n8n_workflows/code_extraction/`:
  *   1. Phase 1 — per PDF URL, identify module/chapter headings (Gemini call).
@@ -7,12 +7,13 @@
  *   3. Assemble `ab_<slug>_<nnnn>` codes, stage them, await user approval.
  *   4. On approval, promote staged rows into the canonical `codes` table.
  *
- * All Gemini calls are `"use step"` — a crash mid-run resumes with earlier
- * results served from the event log cache.
+ * Approval is a hard split: `extractCodesPhase1` runs to `awaiting_approval`
+ * and returns; the approve route handler invokes `extractCodesPhase2` to
+ * promote the staged rows into the canonical `codes` table. The route
+ * fires Phase 1 with `void` so the HTTP response returns immediately and
+ * the long-running extraction continues in the background.
  */
 
-import { createHook, FatalError } from 'workflow';
-import { type ApprovalPayload, approvalToken } from '../lib/approval';
 import {
   markStageAwaitingApproval,
   markStageCompleted,
@@ -42,10 +43,8 @@ export type ExtractCodesInput = {
   apiKeys: ProviderApiKeys;
 };
 
-export async function extractCodesWorkflow(input: ExtractCodesInput) {
-  'use workflow';
-
-  console.log('[pipeline] extractCodesWorkflow start', {
+export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void> {
+  console.log('[pipeline] extractCodesPhase1 start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
@@ -167,30 +166,50 @@ export async function extractCodesWorkflow(input: ExtractCodesInput) {
         costUsd: totals.costUsd,
       },
     });
-
-    using hook = createHook<ApprovalPayload>({
-      token: approvalToken(input.runId, 'extract_codes'),
-    });
-    const approval = await hook;
-
-    if (!approval.approved) {
-      const reason = approval.note ? `: ${approval.note}` : '';
-      await markStageFailed(input.runId, 'extract_codes', `Rejected${reason}`);
-      throw new FatalError('Code extraction rejected');
-    }
-
-    await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
-    await markStageCompleted(input.runId, 'extract_codes', approval.approvedBy);
-    // Single-stage pipeline for now — finalize the run so the UI stops showing
-    // it as active. When the preprocessing orchestrator + mapping/consolidation
-    // workflows land, this will move to the top-level orchestrator instead.
-    await updatePipelineRunStatus(input.runId, 'completed');
-    // Invalidate codes/specialty caches so Overview + Codes tabs reflect the
-    // promoted rows on the UI's next poll tick — workflows can't call
-    // revalidateTag directly, so this hits the internal revalidate endpoint.
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    if (e instanceof FatalError) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    await markStageFailed(input.runId, 'extract_codes', msg);
+    await updatePipelineRunStatus(input.runId, 'failed', msg);
+    await revalidateSpecialtyCache(input.specialtySlug);
+    throw e;
+  }
+}
+
+/**
+ * Continuation invoked by /api/workflows/approve once the operator approves
+ * (or rejects) the staged extraction. Promotes staged rows into the
+ * canonical `codes` table on approval; marks the stage failed on rejection.
+ */
+export async function extractCodesPhase2(input: {
+  runId: string;
+  specialtySlug: string;
+  approved: boolean;
+  approvedBy?: string;
+  note?: string;
+}): Promise<void> {
+  console.log('[pipeline] extractCodesPhase2', {
+    runId: input.runId,
+    specialtySlug: input.specialtySlug,
+    approved: input.approved,
+  });
+
+  try {
+    if (!input.approved) {
+      const reason = input.note ? `: ${input.note}` : '';
+      await markStageFailed(input.runId, 'extract_codes', `Rejected${reason}`);
+      await updatePipelineRunStatus(input.runId, 'cancelled', 'Rejected');
+      await revalidateSpecialtyCache(input.specialtySlug);
+      return;
+    }
+    await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
+    await markStageCompleted(input.runId, 'extract_codes', input.approvedBy);
+    // Single-stage pipeline for now — finalize the run so the UI stops showing
+    // it as active. When the preprocessing orchestrator + mapping/consolidation
+    // pieces land, this will move to a top-level orchestrator instead.
+    await updatePipelineRunStatus(input.runId, 'completed');
+    await revalidateSpecialtyCache(input.specialtySlug);
+  } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await markStageFailed(input.runId, 'extract_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);

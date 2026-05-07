@@ -21,11 +21,7 @@ import { createMCPClient } from '@ai-sdk/mcp';
 import { generateText } from 'ai';
 import { z } from 'zod';
 import { env } from '@/env';
-import {
-  getAmbossLibraryStats,
-  listAmbossArticleIds,
-  listAmbossSectionIds,
-} from '@/lib/data/amboss-library';
+import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-library';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
@@ -116,11 +112,6 @@ export type MappingResult = {
 
 export function hasMappingCreds(): boolean {
   return Boolean(env.AMBOSS_MCP_URL && env.AMBOSS_MCP_TOKEN);
-}
-
-export async function getMappingLibraryStats() {
-  'use step';
-  return getAmbossLibraryStats();
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +318,6 @@ export async function mapAndValidateCode(input: {
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<MappingResult> {
-  'use step';
-
   console.log('[pipeline] mapAndValidateCode', {
     code: input.code,
     checkAgainstLibrary: input.checkAgainstLibrary,

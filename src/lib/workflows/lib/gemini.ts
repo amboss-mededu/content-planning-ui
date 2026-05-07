@@ -85,7 +85,6 @@ export async function identifyModulesForUrl(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ category: string }[]> {
-  'use step';
   console.log('[pipeline] identifyModulesForUrl', {
     specialtySlug: input.specialtySlug,
     url: input.url,
@@ -191,7 +190,6 @@ export async function extractCodesForCategory(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ category: string; description: string }[]> {
-  'use step';
   console.log('[pipeline] extractCodesForCategory', {
     specialtySlug: input.specialtySlug,
     url: input.url,
@@ -310,7 +308,6 @@ export async function extractMilestonesForInputs(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<string> {
-  'use step';
   console.log('[pipeline] extractMilestonesForInputs', {
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,

@@ -51,7 +51,6 @@ export async function logEvent(input: {
   message: string;
   metrics?: EventMetrics;
 }): Promise<void> {
-  'use step';
   await logPipelineEventAsAdmin({
     runId: input.runId,
     stage: input.stage,
@@ -80,7 +79,6 @@ export async function aggregateStageMetrics(
   runId: string,
   stage: StageName,
 ): Promise<StageTotals> {
-  'use step';
   const events = await listEventsAsAdmin(runId);
   const stageRow = await getStageAsAdmin({ runId, stage });
 

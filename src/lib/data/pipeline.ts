@@ -480,17 +480,6 @@ async function findStageId(
   }
 }
 
-export async function getRunAsAdmin(runId: string): Promise<PipelineRunRow | null> {
-  const pb = await createAdminClient();
-  try {
-    const row = await pb.collection<PipelineRunRecord>('pipelineRuns').getOne(runId);
-    return toRun(row);
-  } catch (e) {
-    if (e instanceof ClientResponseError && e.status === 404) return null;
-    throw e;
-  }
-}
-
 export async function createPipelineRunAsAdmin(args: {
   specialtySlug: string;
   workflowRunId?: string;
