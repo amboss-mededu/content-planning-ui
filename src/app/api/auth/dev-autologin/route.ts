@@ -45,7 +45,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .getFirstListItem(`email = "${email}"`);
     userId = existing.id;
   } catch {
-    const randomPassword = crypto.randomUUID() + crypto.randomUUID();
+    // Single UUID stays under PB's 71-char password ceiling (bcrypt limit).
+    const randomPassword = crypto.randomUUID();
     const created = await admin.collection('users').create({
       email,
       password: randomPassword,

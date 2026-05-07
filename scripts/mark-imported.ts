@@ -78,6 +78,7 @@ async function main() {
     specialtySlug: slug,
     status: 'completed',
     startedAt: now,
+    updatedAt: now,
     finishedAt: now,
   });
   const runId = run.id;
