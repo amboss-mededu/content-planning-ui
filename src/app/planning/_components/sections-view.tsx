@@ -69,6 +69,7 @@ const columns: Column<ConsolidatedSection>[] = [
     accessor: (r) => r.category ?? null,
     type: 'string',
     filterable: true,
+    verticalAlign: 'top',
   },
   {
     key: 'importance',
@@ -116,6 +117,7 @@ const columns: Column<ConsolidatedSection>[] = [
     type: 'string',
     filterable: true,
     filterMode: 'contains',
+    verticalAlign: 'top',
   },
 ];
 

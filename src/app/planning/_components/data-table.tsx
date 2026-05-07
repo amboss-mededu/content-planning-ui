@@ -37,6 +37,12 @@ export interface Column<T> {
   render: (row: T) => ReactNode;
   width?: string | number;
   align?: 'left' | 'right' | 'center';
+  /** Vertical alignment for body cells. Defaults to `'middle'` so badges
+   *  and numbers stay centered in tall rows; set to `'top'` for columns
+   *  whose content can wrap to several lines (long descriptions,
+   *  justifications, category names) so the text starts at the top of
+   *  the cell instead of floating in the middle. */
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   accessor?: (row: T) => string | number | boolean | Date | null | undefined;
   type?: 'string' | 'number' | 'date' | 'boolean';
   /** Opts the column into the header dropdown's filter section. Number
@@ -1649,7 +1655,7 @@ function TableCells<T>({
           style={{
             padding: '10px 12px',
             borderBottom: '1px solid var(--ads-c-divider, rgba(0,0,0,0.05))',
-            verticalAlign: 'middle',
+            verticalAlign: c.verticalAlign ?? 'middle',
             textAlign: c.align ?? 'left',
             maxWidth: 360,
             background: stripe

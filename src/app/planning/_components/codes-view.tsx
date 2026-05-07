@@ -145,6 +145,7 @@ export function CodesView({
         // widths and the nowrap headers overflow into neighbors. Drag-resize
         // still overrides on a per-column basis.
         width: 320,
+        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             <span style={{ textAlign: 'left' }}>{r.description ?? ''}</span>
@@ -164,6 +165,7 @@ export function CodesView({
         label: 'Category',
         description: 'Category from the source ontology this code belongs to',
         width: 200,
+        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             {r.category ?? '—'}
@@ -179,6 +181,7 @@ export function CodesView({
         label: 'Consolidation category',
         description: 'Bucket this code was assigned to during consolidation/dedup',
         width: 220,
+        verticalAlign: 'top',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             {r.consolidationCategory ?? '—'}

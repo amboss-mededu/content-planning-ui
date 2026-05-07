@@ -25,6 +25,7 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       type: 'string',
       filterable: true,
       filterMode: 'contains',
+      verticalAlign: 'top',
     },
     {
       key: 'source',

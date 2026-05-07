@@ -37,6 +37,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     accessor: (r) => r.category ?? null,
     type: 'string',
     filterable: true,
+    verticalAlign: 'top',
   },
   {
     key: 'numCodes',
@@ -85,6 +86,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     type: 'string',
     filterable: true,
     filterMode: 'contains',
+    verticalAlign: 'top',
   },
 ];
 
@@ -164,6 +166,7 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     type: 'string',
     filterable: true,
     filterMode: 'contains',
+    verticalAlign: 'top',
   },
 ];
 
