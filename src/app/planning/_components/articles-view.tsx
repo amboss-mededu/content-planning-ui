@@ -9,12 +9,29 @@ import type {
 import { type Column, DataTable } from './data-table';
 
 const consolidatedColumns: Column<ConsolidatedArticle>[] = [
-  { key: 'title', label: 'Title', render: (r) => r.articleTitle ?? '—' },
-  { key: 'type', label: 'Type', render: (r) => r.articleType ?? '—', width: 160 },
-  { key: 'category', label: 'Category', render: (r) => r.category ?? '—' },
+  {
+    key: 'title',
+    label: 'Title',
+    description: 'Article title after consolidation/deduplication',
+    render: (r) => r.articleTitle ?? '—',
+  },
+  {
+    key: 'type',
+    label: 'Type',
+    description: 'Article type (e.g. disease, procedure, drug)',
+    render: (r) => r.articleType ?? '—',
+    width: 160,
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    description: 'Code category that anchors this article',
+    render: (r) => r.category ?? '—',
+  },
   {
     key: 'numCodes',
     label: 'Codes',
+    description: 'Number of source codes mapped to this article',
     render: (r) => r.numCodes ?? '—',
     width: 80,
     align: 'right',
@@ -22,6 +39,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'importance',
     label: 'Importance',
+    description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
     align: 'right',
@@ -29,6 +47,8 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'coverage',
     label: 'Coverage',
+    description:
+      'Existing AMBOSS coverage score for this article (higher = better covered)',
     render: (r) => r.overallCoverage ?? '—',
     width: 100,
     align: 'right',
@@ -36,6 +56,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'justification',
     label: 'Justification',
+    description: 'Why this consolidated article was proposed',
     render: (r) => (
       <Text color="secondary" size="s">
         {r.justification ?? ''}
@@ -45,11 +66,23 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
 ];
 
 const newColumns: Column<NewArticleSuggestion>[] = [
-  { key: 'title', label: 'Title', render: (r) => r.articleTitle ?? '—' },
-  { key: 'type', label: 'Type', render: (r) => r.articleType ?? '—', width: 160 },
+  {
+    key: 'title',
+    label: 'Title',
+    description: 'Suggested article title',
+    render: (r) => r.articleTitle ?? '—',
+  },
+  {
+    key: 'type',
+    label: 'Type',
+    description: 'Article type (e.g. disease, procedure, drug)',
+    render: (r) => r.articleType ?? '—',
+    width: 160,
+  },
   {
     key: 'importance',
     label: 'Importance',
+    description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
     align: 'right',
@@ -57,14 +90,28 @@ const newColumns: Column<NewArticleSuggestion>[] = [
   {
     key: 'coverage',
     label: 'Existing AMBOSS',
+    description: 'Free-text note on how this topic is covered in AMBOSS today',
     render: (r) => r.existingAmbossCoverage ?? '—',
     width: 140,
   },
-  { key: 'editor', label: 'Editor', render: (r) => r.assignedEditor ?? '—', width: 140 },
-  { key: 'verdict', label: 'Verdict', render: (r) => r.verdict ?? '—', width: 120 },
+  {
+    key: 'editor',
+    label: 'Editor',
+    description: 'Editor assigned to draft or update this article',
+    render: (r) => r.assignedEditor ?? '—',
+    width: 140,
+  },
+  {
+    key: 'verdict',
+    label: 'Verdict',
+    description: 'Editorial verdict on the suggestion (accept / reject / revise)',
+    render: (r) => r.verdict ?? '—',
+    width: 120,
+  },
   {
     key: 'justification',
     label: 'Justification',
+    description: 'Why this article should be created or updated',
     render: (r) => (
       <Text color="secondary" size="s">
         {r.justification ?? ''}

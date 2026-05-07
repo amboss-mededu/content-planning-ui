@@ -13,13 +13,36 @@ function kindBadge(row: ConsolidatedSection) {
 }
 
 const columns: Column<ConsolidatedSection>[] = [
-  { key: 'kind', label: 'Kind', render: kindBadge, width: 140 },
-  { key: 'article', label: 'Article', render: (r) => r.articleTitle ?? '—' },
-  { key: 'section', label: 'Section', render: (r) => r.sectionName ?? '—' },
-  { key: 'category', label: 'Category', render: (r) => r.category ?? '—' },
+  {
+    key: 'kind',
+    label: 'Kind',
+    description:
+      'Whether this row is a brand-new section or an update to an existing one',
+    render: kindBadge,
+    width: 140,
+  },
+  {
+    key: 'article',
+    label: 'Article',
+    description: 'Parent article this section belongs to',
+    render: (r) => r.articleTitle ?? '—',
+  },
+  {
+    key: 'section',
+    label: 'Section',
+    description: 'Suggested section name',
+    render: (r) => r.sectionName ?? '—',
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    description: 'Code category that anchors this section',
+    render: (r) => r.category ?? '—',
+  },
   {
     key: 'importance',
     label: 'Importance',
+    description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
     align: 'right',
@@ -27,14 +50,23 @@ const columns: Column<ConsolidatedSection>[] = [
   {
     key: 'coverage',
     label: 'Coverage',
+    description:
+      'Existing AMBOSS coverage score for this section (higher = better covered)',
     render: (r) => r.overallCoverage ?? '—',
     width: 100,
     align: 'right',
   },
-  { key: 'editor', label: 'Editor', render: (r) => r.assignedEditor ?? '—', width: 140 },
+  {
+    key: 'editor',
+    label: 'Editor',
+    description: 'Editor assigned to draft or update this section',
+    render: (r) => r.assignedEditor ?? '—',
+    width: 140,
+  },
   {
     key: 'justification',
     label: 'Justification',
+    description: 'Why this section should be created or updated',
     render: (r) => (
       <Text color="secondary" size="s">
         {r.justification ?? ''}

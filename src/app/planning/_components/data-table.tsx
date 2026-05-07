@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Text } from '@amboss/design-system';
+import { Button, Text, Tooltip } from '@amboss/design-system';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -31,6 +31,9 @@ export type ColumnGroup = 'metadata' | 'coverage' | 'suggestions' | 'actions';
 export interface Column<T> {
   key: string;
   label: string;
+  /** Plain-text description shown in a Tooltip when the user hovers on the
+   *  column-header label. Omit for columns whose label is self-explanatory. */
+  description?: string;
   render: (row: T) => ReactNode;
   width?: string | number;
   align?: 'left' | 'right' | 'center';
@@ -637,6 +640,17 @@ function HeaderCell<T>({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // fontWeight is set explicitly here (rather than inherited from the <th>)
+  // because the DS Tooltip wrapper introduces its own typography context
+  // that breaks `font-weight: inherit` — without this, the bold weight gets
+  // dropped on tooltip-wrapped headers.
+  const labelEl = <span style={{ fontWeight: 600 }}>{column.label}</span>;
+  const labelWithTooltip = column.description ? (
+    <Tooltip content={column.description}>{labelEl}</Tooltip>
+  ) : (
+    labelEl
+  );
+
   const startResize = (e: React.MouseEvent | React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -670,9 +684,11 @@ function HeaderCell<T>({
         // the right edge — without a divider users couldn't tell where one
         // column ended and the next began.
         borderRight: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
-        // Match the DS Tabs nav font (14 Lato), at normal weight rather
-        // than the tab's bold — same family/size as the rest of the table.
-        fontWeight: 400,
+        // Column-header labels are semibold so they stand off the body
+        // rows. The group-banner row (rendered separately in `Header`)
+        // intentionally stays at 400 — its colored band is the group
+        // affordance, and bolding both rows would flatten the hierarchy.
+        fontWeight: 600,
         whiteSpace: 'nowrap',
         width,
         // Opaque so rows don't bleed through when the header is sticky.
@@ -709,7 +725,6 @@ function HeaderCell<T>({
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
             aria-expanded={menuOpen}
-            title="Sort or filter this column"
             style={{
               background: filterActive
                 ? 'var(--ads-c-surface-accent, rgba(0, 90, 180, 0.12))'
@@ -718,7 +733,9 @@ function HeaderCell<T>({
               borderRadius: 3,
               padding: '1px 4px',
               font: 'inherit',
-              fontWeight: 'inherit',
+              // Explicit semibold so user-agent button styles don't reset
+              // back to normal weight inside the inflex of <button>.
+              fontWeight: 600,
               color: 'inherit',
               cursor: 'pointer',
               display: 'inline-flex',
@@ -726,7 +743,7 @@ function HeaderCell<T>({
               gap: 4,
             }}
           >
-            <span>{column.label}</span>
+            {labelWithTooltip}
             <span
               aria-hidden
               style={{
@@ -752,7 +769,7 @@ function HeaderCell<T>({
             ) : null}
           </button>
         ) : (
-          <span>{column.label}</span>
+          labelWithTooltip
         )}
       </div>
       {menuOpen ? (

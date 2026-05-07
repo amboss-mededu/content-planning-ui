@@ -106,6 +106,7 @@ export function CodesView({
       {
         key: 'source',
         label: 'Source',
+        description: 'Ontology this code came from (ICD10, HCUP, ABIM, Orpha)',
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
             {r.source ?? '—'}
@@ -120,6 +121,8 @@ export function CodesView({
       {
         key: 'code',
         label: 'Code',
+        description:
+          'Identifier of the code in its source ontology — click to open details',
         // Plain text — no <code> wrapper, which used to introduce UA-default
         // monospace styling that made this column read differently from its
         // metadata neighbors even after fontFamily overrides.
@@ -136,6 +139,7 @@ export function CodesView({
       {
         key: 'description',
         label: 'Description',
+        description: 'Human-readable description of the code from the source ontology',
         // Default widths matter under tableLayout: fixed — without them, the
         // table squeezes these columns to whatever's left after the explicit
         // widths and the nowrap headers overflow into neighbors. Drag-resize
@@ -158,6 +162,7 @@ export function CodesView({
       {
         key: 'category',
         label: 'Category',
+        description: 'Category from the source ontology this code belongs to',
         width: 200,
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
@@ -172,6 +177,7 @@ export function CodesView({
       {
         key: 'consolidationCategory',
         label: 'Consolidation category',
+        description: 'Bucket this code was assigned to during consolidation/dedup',
         width: 220,
         render: (r) => (
           <ClickableCell onClick={() => openMeta(r)} title="Open code details">
@@ -186,6 +192,7 @@ export function CodesView({
       {
         key: 'inAmboss',
         label: 'In AMBOSS',
+        description: 'Whether this code is already covered by an AMBOSS article',
         width: 110,
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
@@ -221,6 +228,8 @@ export function CodesView({
       {
         key: 'coverage',
         label: 'Coverage',
+        description:
+          'Audience level this code is covered for in AMBOSS (none → student → … → specialist)',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (!r.coverageLevel) return <EmptyChip />;
@@ -246,6 +255,8 @@ export function CodesView({
       {
         key: 'depth',
         label: 'Score',
+        description:
+          'Numeric depth-of-coverage score for this code (higher = better covered)',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (r.depthOfCoverage === undefined || r.depthOfCoverage === null) {
@@ -266,6 +277,7 @@ export function CodesView({
       {
         key: 'articlesWhereCoverageIs',
         label: 'Articles',
+        description: 'Existing AMBOSS articles (and sections) that cover this code',
         width: 180,
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
@@ -293,6 +305,7 @@ export function CodesView({
       {
         key: 'existingArticleUpdates',
         label: 'Updates',
+        description: 'Suggested updates to existing AMBOSS articles for this code',
         width: 130,
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
@@ -314,6 +327,7 @@ export function CodesView({
       {
         key: 'newArticlesNeeded',
         label: 'New articles',
+        description: 'Brand-new AMBOSS articles proposed to cover this code',
         width: 130,
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
