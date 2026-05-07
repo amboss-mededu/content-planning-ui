@@ -1,68 +1,130 @@
 # Schema migrations
 
-This project does not use a migration framework. Convex schema is the source
-of truth (`convex/schema/*.ts`); when a column type changes, the change
-becomes the migration. There are no production users, and the editor data is
-fully reproducible from xlsx fixtures + the `extract`/`map`/`consolidate`
-workflows, so the standard playbook is **wipe + reseed** rather than
-in-place data migration.
+PocketBase is the source of truth. Schema changes ship as JS migration files
+in [`pb_migrations/`](../pb_migrations), loaded automatically by
+`pocketbase serve` on startup. There are no production users yet, and the
+editor data is fully reproducible from xlsx fixtures + the `extract` /
+`map` / `consolidate` pipelines, so the standard playbook for an
+incompatible change is **wipe + reseed** rather than an in-place data
+migration.
 
-## When to migrate
+## Two paths
 
-- You changed a Convex validator (`convex/schema/<domain>.ts`).
-- You renamed or split a table.
-- You changed the on-the-wire shape of a field (e.g. dropped JSON-string
-  storage in favour of a typed array — see Phase B2).
+1. **Schema migration** — additive or rule-only changes (new collection,
+   new field, tightened access rule, new index). Write a new file in
+   `pb_migrations/` and let the next `pocketbase serve` apply it.
+2. **Wipe + reseed** — destructive changes (renamed field, changed type,
+   changed nesting shape) where existing rows would violate the new shape.
+   Write the schema migration anyway, but plan to drop and reseed the
+   affected collections.
 
-## Steps
+## When to write a migration file
 
-1. Make the schema change in `convex/schema/<domain>.ts`. Keep the change
-   tight — match the new shape on writers (`convex/<domain>.ts` mutations,
-   `src/lib/workflows/lib/db-writes.ts`, API routes that previously
-   stringified the value) and readers (`src/lib/data/<domain>.ts`, any UI
-   that consumed the old shape).
+- New collection.
+- New field on an existing collection.
+- Changed access rule (`listRule` / `viewRule` / `createRule` /
+  `updateRule` / `deleteRule`) or schema constraint.
+- New index.
+- Renamed field (do an additive rename: add new, dual-write, backfill,
+  drop old — only if there's data to preserve; otherwise just wipe +
+  reseed).
 
-2. Push the schema and regenerate the typed API:
+## Authoring a migration
 
-   ```sh
-   npx convex codegen        # validates + uploads dev deploy
-   npx convex dev --once     # alternative: also restores .env.local pieces
+1. Pick a millisecond timestamp prefix that comes *after* the latest
+   existing file (the directory sorts lexically). Filename pattern:
+   `<unix_seconds>_<short_description>.js` — e.g.
+   `1778122500_ontology_rich_schema.js`.
+
+2. Use the same skeleton as existing migrations:
+
+   ```js
+   /// <reference path="../pb_data/types.d.ts" />
+
+   migrate(
+     (app) => {
+       // forward: apply the change
+       const col = app.findCollectionByNameOrId('codes');
+       col.fields.add(new Field({ type: 'text', name: 'newField', max: 200 }));
+       app.save(col);
+     },
+     (app) => {
+       // backward: undo the change (best-effort)
+       const col = app.findCollectionByNameOrId('codes');
+       const f = col.fields.getByName('newField');
+       if (f) col.fields.remove(f.id);
+       app.save(col);
+     },
+   );
    ```
 
-   If existing rows in dev violate the new validator, the push fails with a
-   `Server Error` naming the offending field. Two options:
-   - **Wipe the affected tables and reseed** (preferred for ergonomic data).
-     The seed script handles editor data; pipeline tables can be wiped from
-     the dashboard or via a one-shot mutation.
-   - Edit rows by hand from the dashboard if the diff is tiny.
+   PocketBase records each applied migration in the `_migrations` system
+   collection. Don't rename or edit a migration after it's been applied
+   anywhere — write a follow-up migration instead.
 
-3. Reseed editor data from the xlsx fixtures:
+3. Update reads + writes that reference the field:
+   - `src/lib/pb/types.ts` (the typed record)
+   - `src/lib/data/<domain>.ts` (reads / writes)
+   - `src/lib/workflows/lib/db-writes.ts` (pipeline-side writes)
+   - any UI consuming the old shape
+
+4. Local apply: just restart the PB binary.
 
    ```sh
-   npm run seed:convex
+   ./bin/pocketbase serve
    ```
 
-   This calls `deleteForSpecialty` per table, then bulk-inserts. The seed
-   script normalises whatever the xlsx fixture happens to hold into the
-   current validator shape (see `normaliseCodeMappingShape` in
-   `scripts/seed-convex.ts` for the example pattern: strip extra keys,
-   convert any record-form blobs to the expected array form). When you
-   change a validator and the fixture data trips it, extend the normaliser
-   rather than mutating the xlsx.
+   PB applies pending migrations on startup. Check logs for
+   `Successfully migrated <file>`.
 
-4. Production deploys: the schema validator runs at deploy time, so a
-   prod deploy with no compatible migration path will fail. Until there
-   are real prod users, the answer is the same: wipe + reseed. When that
-   changes, this doc will get a "real migration" section.
+5. If existing rows in dev violate a new constraint, PB will refuse to
+   start. Two options:
+   - **Wipe the affected collections and reseed** (preferred for ergonomic
+     fixture data). See below.
+   - Run `pocketbase migrate down` and reauthor the migration to be
+     additive (add the new field alongside the old, dual-write, backfill).
+
+## Wipe + reseed (the destructive path)
+
+When a change makes existing rows invalid and there's no production data
+to preserve, drop the collection content and reseed from xlsx fixtures.
+
+1. Apply your migration (it'll empty rows that violate constraints, or
+   leave them in a quarantined state — depends on the change).
+
+2. Reseed editor data:
+
+   ```sh
+   npm run seed:local                                  # editor tables + ontology
+   npm run import-board                                # specialty registry
+   npm run import-milestones -- <slug> <file.txt>      # milestones for a specialty
+   ```
+
+   `seed-pocketbase.ts` deletes rows per collection then bulk-inserts. The
+   seed script normalises whatever the xlsx fixture happens to hold into
+   the current schema (see normalisation helpers in `scripts/_lib/`). When
+   you change a field shape and the fixture data trips it, **extend the
+   normaliser rather than mutating the xlsx**.
+
+3. Pipeline tables (`pipelineRuns`, `pipelineStages`, `pipelineEvents`,
+   `pipelineUploads`) are not in the seed. Wipe via the PB admin UI at
+   `:8090/_/` or by running `npm run wf:extract`-style flows that recreate
+   them.
 
 ## What we explicitly don't do
 
 - **No backwards-compat shims.** Don't dual-read both shapes; don't add a
   fallback path that parses the old encoding. Pick a cutover and ship it.
-- **No migration scripts.** A reseed is the migration. If a one-off data
-  edit is needed, run a Convex mutation from the dashboard or via
-  `npx convex run <fn> '<json>'` — don't commit a script that nobody will
+- **No standalone migration scripts.** A reseed is the migration. If a
+  one-off data edit is needed, run it from the PB admin UI or with
+  `pocketbase migrate <name>` — don't commit a script that nobody will
   use again.
-- **No xlsx fixture edits to dodge a validator.** The xlsx is the source
+- **No xlsx fixture edits to dodge a constraint.** The xlsx is the source
   of truth for fixture content; the seed normaliser bridges the gap to
   the current schema.
+
+## Production note
+
+There are no production users today. When that changes, this doc will
+get a "real migration" section: dual-write windows, backfill scripts,
+and a checklist for irreversible deploys.

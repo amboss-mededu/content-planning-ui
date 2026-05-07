@@ -2,13 +2,15 @@
 
 Single source of truth for how this app is structured, what each layer is responsible for, and where new features slot in. Read this before adding anything bigger than a one-file change.
 
-> Companion docs: [`AGENTS.md`](../AGENTS.md) (design-system + repo conventions for editors), [`docs/MIGRATIONS.md`](MIGRATIONS.md) (schema-change playbook), [`docs/amboss/llms-full.txt`](amboss/llms-full.txt) (DS component reference). For ad-hoc security review, see `/security-review` (slash command) or the GitHub Action on every PR.
+> Companion docs: [`AGENTS.md`](../AGENTS.md) (design-system + repo conventions), [`docs/MIGRATIONS.md`](MIGRATIONS.md) (schema-change playbook), [`docs/amboss/llms-full.txt`](amboss/llms-full.txt) (DS component reference), [`DEPLOYMENT_POCKETBASE.md`](../DEPLOYMENT_POCKETBASE.md) (runbook). For ad-hoc security review, see `/security-review` (slash command) or the GitHub Action on every PR.
+
+> Migrated from a Convex + Vercel Workflow + Vercel Blob stack. See [`MIGRATION_PROPOSAL.md`](../MIGRATION_PROPOSAL.md) and [`DEPLOYMENT.md`](../DEPLOYMENT.md) for the retired stack's history.
 
 ---
 
 ## What this is
 
-An internal AMBOSS staff tool for planning medical-content coverage **per specialty**. Editors trigger durable, multi-stage AI pipelines that:
+An internal AMBOSS staff tool for planning medical-content coverage **per specialty**. Editors trigger multi-stage AI pipelines that:
 
 1. Extract a specialty's clinical concepts ("codes") from board-review PDFs and milestone documents.
 2. Map each code against the existing AMBOSS library to identify coverage gaps.
@@ -16,7 +18,7 @@ An internal AMBOSS staff tool for planning medical-content coverage **per specia
 4. *(Planned)* Drive a literature-search → PDF-curation → article-generation pipeline for the gaps.
 5. *(Planned)* Surface progress + cost across specialties in dashboards.
 
-Workflows are **durable** (crash-safe, resumable), **human-gated** at every approval boundary, and **per-specialty siloed**.
+Pipelines are **human-gated** at every approval boundary and **per-specialty siloed**. They are *not* crash-resumable today — see [Pipeline durability](#pipeline-durability) for the trade-off.
 
 ---
 
@@ -24,45 +26,49 @@ Workflows are **durable** (crash-safe, resumable), **human-gated** at every appr
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Browser (React 19, Convex live queries, @amboss/design-system)           │
-│   └── /login, /planning/[specialty]/<codes|articles|sections|...>        │
+│ Browser (React 19, PocketBase live subscriptions, @amboss/design-system) │
+│   └── /login, /planning/[specialty]/<codes|articles|sections|…>          │
 └────────────┬─────────────────────────────────────────────────────────────┘
-             │ user JWT cookie  (Convex Auth, Password + OTP)
+             │ pb_auth cookie  (HttpOnly, JWT signed by PocketBase)
              ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Next.js (Vercel Functions, Fluid Compute) — RSC + route handlers          │
-│   ├── proxy.ts           sign-in gate on GET (non-GET = handler-gated)    │
-│   ├── api/workflows/*    triggers + lifecycle for pipeline runs           │
-│   ├── api/blob/*         Vercel Blob upload tokens                        │
-│   ├── api/internal/*     workflow ↔ Next bridge (cache invalidation)      │
-│   └── lib/{auth, convex/server, data}  user-token Convex wrappers         │
+│ Next.js 16 (long-lived `next start` Node server) — RSC + route handlers   │
+│   ├── proxy.ts            sign-in gate on GET (non-GET = handler-gated)   │
+│   ├── api/auth/*          Google OAuth begin/callback + dev-autologin     │
+│   ├── api/uploads         PDF upload (streamed into PB file storage)      │
+│   ├── api/workflows/*     pipeline triggers + approval/cancel/reset       │
+│   ├── api/settings/keys   per-user provider API key writes                │
+│   ├── api/sources/*       code/milestone source registries                │
+│   ├── api/internal/*      pipeline → Next cache bridge (revalidate)       │
+│   └── lib/pb/*            cookie-authed + admin PocketBase clients        │
 └──────┬──────────────────────────────────────────┬────────────────────────┘
-       │ user token                                │ start(workflow, …)
+       │ user cookie / admin auth                  │ void runAsync().catch(…)
        ▼                                           ▼
 ┌─────────────────────────────────┐     ┌─────────────────────────────────┐
-│ Convex (typed server + DB)       │◀───▶│ Vercel Workflow runtime          │
-│  • specialties / codes / …       │ _secret  • extractCodesWorkflow         │
-│  • pipelineRuns / stages / events│      │  • extractMilestonesWorkflow    │
-│  • ontology / amboss library     │      │  • mapCodesWorkflow             │
-│  • auth (users, sessions)        │      │  • [planned] literatureSearch   │
-│  • otpRateLimit                  │      │  • [planned] generateArticle    │
-└──────────────┬──────────────────┘     └──────────────┬──────────────────┘
-               │                                        │
-               │                                        ▼
-               │                          ┌─────────────────────────────┐
-               │                          │ External LLMs / APIs         │
-               │                          │  • Gemini (extract, map)     │
-               │                          │  • Anthropic (mapping ladder)│
-               │                          │  • Resend (OTP email)        │
-               │                          │  • AMBOSS MCP (article IDs)  │
-               │                          └─────────────────────────────┘
-               ▼
-       ┌──────────────────┐
-       │ Vercel Blob       │   PDF binaries (planned for literature/pdfs)
-       └──────────────────┘
+│ PocketBase (Go binary + SQLite)  │◀───▶│ Plain async pipeline functions   │
+│  • specialties / codes / …       │     │  • extractCodes Phase1/Phase2    │
+│  • pipelineRuns/Stages/Events    │     │  • extractMilestones P1/P2       │
+│  • ontology / amboss library     │     │  • mapCodes Phase1/Phase2        │
+│  • users (OAuth) + userApiKeys   │     │  • [planned] literatureSearch    │
+│  • pipelineUploads (file field)  │     │  • [planned] generateArticle     │
+│  • pb_hooks/main.pb.js (allowlist│     └──────────────┬──────────────────┘
+└──────────────────────────────────┘                    │
+                                                         ▼
+                                             ┌─────────────────────────────┐
+                                             │ External LLMs / APIs         │
+                                             │  • Gemini (extract, map)     │
+                                             │  • Anthropic (mapping ladder)│
+                                             │  • OpenAI (optional)         │
+                                             │  • AMBOSS MCP (article IDs)  │
+                                             └─────────────────────────────┘
 ```
 
-**Two callers, one Convex API.** Authentication is the shared currency: every public Convex function accepts either a user JWT (browser + RSC) or a `_secret` arg matching `WORKFLOW_SECRET` (workflow runtime + CLI scripts). See [Auth model](#auth-model).
+**One backend, one auth currency.** Every PocketBase write goes through one of two clients:
+
+- **`createServerClient(cookieHeader)`** — per-request, hydrated from the user's `pb_auth` cookie. Used by RSC pages and route handlers acting *as the signed-in user*.
+- **`createAdminClient()`** — superuser session, used by background pipeline code, OAuth provisioning, dev-autologin, and seed scripts. Never reaches the browser.
+
+PocketBase enforces row-level access via collection rules (see `pb_migrations/`). The two-client split is just convenience: admin code bypasses rules; user code is bound by them.
 
 ---
 
@@ -72,11 +78,11 @@ Workflows are **durable** (crash-safe, resumable), **human-gated** at every appr
 |---|---|---|
 | Frontend framework | Next.js 16 App Router + Cache Components | RSC defaults, PPR, edge-friendly without going edge-only |
 | UI components | `@amboss/design-system` (Emotion-based) | Org-mandated; forces `'use client'` wherever used |
-| Backend / DB | Convex | Reactive queries, typed end-to-end, integrated auth |
-| Auth | `@convex-dev/auth` (Password + Email OTP) | Same DB as everything else; no third-party sync |
-| Long-running pipelines | Vercel Workflow DevKit | Crash-resumable, step-cached, pause/resume hooks |
-| LLMs | Vercel AI SDK v6 + Gemini / Anthropic | Structured output, tool use, AMBOSS MCP integration |
-| Blob storage | Vercel Blob | PDF uploads (currently for input PDFs; future for ingested literature) |
+| Backend / DB / files / live queries | PocketBase 0.37 (Go binary + SQLite) | Single self-hosted process; built-in auth, OAuth, file storage, real-time subscriptions |
+| Auth | Google OAuth via PocketBase `authWithOAuth2Code` | Domain-restricted by `pb_hooks/main.pb.js`; HttpOnly `pb_auth` cookie, sync-validated by `proxy.ts` |
+| Pipelines | Plain async functions, fire-and-forget from route handlers | No durable workflow runtime — see [Pipeline durability](#pipeline-durability) |
+| LLMs | Vercel AI SDK v6 + Gemini / Anthropic / OpenAI (BYOK per user) | Structured output, tool use, AMBOSS MCP integration |
+| File storage | PocketBase file fields | PDF uploads streamed via `/api/uploads` into `pipelineUploads.file` |
 | Tests | Vitest (unit) + Playwright (e2e) | |
 | Lint / format | Biome | One tool, fast |
 | Env validation | `@t3-oss/env-nextjs` (Zod) | Builds fail on missing/malformed env |
@@ -85,31 +91,21 @@ Workflows are **durable** (crash-safe, resumable), **human-gated** at every appr
 
 ## Module map
 
-### Convex (`convex/`)
+### PocketBase (`pb_migrations/` + `pb_hooks/`)
 
-Domain-flat layout. Each domain owns its queries + mutations + (workflow-callable) writes in one file.
+Schema lives in JS migration files loaded automatically by `pocketbase serve`. Each migration is forward-only; rollback is by reverse migration or by replaying from xlsx fixtures (see [`docs/MIGRATIONS.md`](MIGRATIONS.md)).
 
 | File | Responsibility |
 |---|---|
-| `_lib/access.ts` | `requireUser`, `requireUserOrService`, `requireService` — auth helpers + `serviceSecretArg` validator |
-| `auth.ts` / `auth.config.ts` | Convex Auth setup + email-allowlist gate |
-| `http.ts` | Routes for `/api/auth/*` handshake |
-| `users.ts` | Current-user query |
-| `specialties.ts` | Specialty registry |
-| `codes.ts` | Per-specialty clinical concepts + mapping fields |
-| `categories.ts` | Code-category groupings |
-| `articles.ts` | Consolidated / new / update article suggestions |
-| `sections.ts` | Consolidated section suggestions |
-| `ontology.ts` | ICD-10 / HCUP / ABIM / Orpha lookups (read-only) |
-| `amboss.ts` | Local mirror of AMBOSS article + section IDs |
-| `sources.ts` | Source-slug registries (codes + milestones) |
-| `pipeline.ts` | Runs, stages, events, extracted-codes staging |
-| `overview.ts` | Per-specialty count rollups |
-| `ResendOTP.ts` / `ResendOTPPasswordReset.ts` | Email-OTP providers (rate-limited) |
-| `otpRateLimit.ts` | Internal rate-limit counter |
-| `schema.ts` | All Convex tables + indexes |
+| `pb_migrations/1746540000_initial_schema.js` | Every collection, field, index, and access rule. Ports the old Convex schema. |
+| `pb_migrations/1746540002_pipeline_uploads.js` | `pipelineUploads` collection (PDF file field + `uploadedBy`) |
+| `pb_migrations/1778118249_updated_codes.js` | Schema patch on `codes` |
+| `pb_migrations/1778118322_updated_specialties.js` | Schema patch on `specialties` |
+| `pb_migrations/1778122284_harden_tenant_rules.js` | Tightened collection rules (referential + immutable invariants) |
+| `pb_migrations/1778122500_ontology_rich_schema.js` | Per-specialty rich schema for icd10/hcup/abim/orpha lookups |
+| `pb_hooks/main.pb.js` | OAuth email allowlist (env-overridable; defaults to AMBOSS domains) and OAuth profile mirror onto user records |
 
-**Future slots** (`// TODO`): `literature.ts`, `pdfs.ts`, `drafts.ts`, `dashboard.ts`. See [Future modules](#future-modules).
+**Collections (current):** `users` (built-in, custom fields), `userApiKeys`, `specialties`, `codes`, `categories`, `articles*` (consolidated/new/update suggestions), `sections*` (consolidated section suggestions), `ontology*` (icd10/hcup/abim/orpha), `ambossLibrary` (article + section IDs), `codeSources` / `milestoneSources`, `pipelineRuns` / `pipelineStages` / `pipelineEvents`, `pipelineUploads` (PDF blobs).
 
 ### Next.js (`src/app/`)
 
@@ -117,121 +113,167 @@ Domain-flat layout. Each domain owns its queries + mutations + (workflow-callabl
 src/app/
   layout.tsx                          root, providers, security headers
   page.tsx                            home grid (specialty cards)
-  login/page.tsx                      sign-in / sign-up / OTP / reset
+  login/                              Google sign-in screen
+  auth/callback/google/route.ts       OAuth code → session cookie exchange
   planning/
     [specialty]/
       page.tsx                        specialty overview
       layout.tsx                      tab shell
-      codes/                          codes table (Convex live)
+      codes/                          codes table (PB live subscription)
       articles/                       article suggestions tabs
       sections/                       section suggestions tab
       milestones/                     milestone-extraction artifacts
       categories/                     code categories
       sources/                        per-source views (ICD-10, …)
       pipeline/                       pipeline dashboard
+  settings/                           per-user provider API keys
   api/
+    auth/login/google/route.ts        OAuth begin (PKCE state cookie)
+    auth/dev-autologin/route.ts       dev-only bypass (DEV_AUTOLOGIN_EMAIL)
+    auth/logout/route.ts
+    uploads/route.ts                  PDF → PocketBase file storage
     workflows/{extract,extract-milestones,map-codes,remap-code,
                 approve,cancel,reset-stage,clear-stale-runs}
-    blob/upload-token                 Vercel Blob token issuance
-    codes/[specialty]/[code]          per-code edits + run metadata
-    internal/revalidate               workflow → Next cache bridge
-    debug/sheet-schema                dev-only sheet inspection
+    settings/keys/{,status}/route.ts  provider API key CRUD + presence check
+    settings/test-key/route.ts        validate a provider key
+    sources/{code,milestone}/route.ts source-slug registries
+    specialties/route.ts              create-specialty
+    codes/[specialty]/[code]/         per-code edits + run metadata
+    internal/revalidate               pipeline → Next cache bridge
   proxy.ts                            sign-in gate (Next 16 middleware)
 ```
 
 **Future slots:** `planning/[specialty]/literature/`, `planning/[specialty]/pdfs/`, `planning/[specialty]/drafts/`, `dashboard/`.
 
-### Workflows (`src/lib/workflows/`)
+### PocketBase clients (`src/lib/pb/`)
+
+| File | Responsibility |
+|---|---|
+| `server.ts` | `createServerClient(cookieHeader)` (per-request, user-scoped) and `createAdminClient()` (superuser); also exports `PB_AUTH_COOKIE` |
+| `browser.ts` | `getBrowserClient()` — singleton browser PB client (real-time subscriptions, signed-in via `pb_auth` cookie) |
+| `types.ts` | TypeScript types for every collection record |
+| `use-live-collection.ts` | `useLiveCollection(name, initial, opts?)` — server snapshot + client subscription. Equivalent to the old `usePreloadedQuery` / `useQuery` pair. |
+
+**Rule:** only files in `src/lib/data/*` and `src/lib/pb/*` import `pocketbase` directly. UI never talks to PB except through the live-collection hook.
+
+### Data layer (`src/lib/data/`)
+
+Domain-flat. Each file owns reads + writes + admin-side helpers for a domain. RSC + route handlers import from here; pipeline code imports the `…AsAdmin` variants.
+
+| File | Domain |
+|---|---|
+| `specialties.ts` | Specialty registry |
+| `codes.ts` | Per-specialty clinical concepts + mapping fields |
+| `categories.ts` | Code-category groupings |
+| `articles.ts` | Consolidated / new / update article suggestions |
+| `sections.ts` | Consolidated section suggestions |
+| `code-sources.ts` / `milestone-sources.ts` | Source-slug registries |
+| `pipeline.ts` | Runs / stages / events / extracted-codes staging / `pipelineUploads` |
+| `code-run-metadata.ts` | Per-code run-history rollups |
+| `overview.ts` | Per-specialty count rollups |
+| `amboss-library.ts` | Mirror of AMBOSS article + section IDs |
+| `user-api-keys.ts` | Per-user provider API keys (read by `resolve-keys` at run start) |
+| `sources.ts` | Catalog of LLM ingestion source kinds |
+
+### Pipelines (`src/lib/workflows/`)
+
+Plain async functions — no `'use workflow'` / `'use step'` runtime. Trigger routes spawn them with `void runAsync().catch(log)`; long-lived `next start` keeps the promise alive past the HTTP response.
 
 ```
 lib/
-  approval.ts            deterministic hook tokens (approve:<runId>:<stage>)
-  db-writes.ts           every Convex write goes through these step fns
-  events.ts              logEvent + aggregate metrics
-  reset.ts               cascade reset across stages
+  approval.ts            deterministic per-stage token (UI ↔ approve route)
+  db-writes.ts           every PB write goes through these helpers
+  events.ts              logEvent + aggregateStageMetrics
+  reset.ts               cascade reset across stages + clear editor data
   revalidate.ts          POST → /api/internal/revalidate
-  gemini.ts              extract / map / milestone Gemini calls
-  amboss-mcp.ts          AMBOSS MCP tool client (mapping)
-  pricing.ts             token → $ for cost rollups
+  llm.ts                 unified provider wrapper (Gemini / Anthropic / OpenAI)
+  parse-model.ts         provider/model spec parser
+  resolve-keys.ts        merge per-user keys + env fallbacks at run start
   prompts.ts             default system prompts
+  pricing.ts             token → $ for cost rollups
+  amboss-mcp.ts          AMBOSS MCP tool client (mapping)
+  sources.ts             content-input typing
+  util.ts                chunk + small helpers
 preprocessing/
-  extract-codes.ts       'use workflow' — phase 1 + 2 over PDF URLs
-  extract-milestones.ts  'use workflow' — milestone summarisation
+  extract-codes.ts       Phase1 (LLM extract → staged codes → awaiting_approval)
+                         Phase2 (promote staged → canonical codes)
+  extract-milestones.ts  Phase1/Phase2 around milestone summarisation
 mapping/
-  map-codes.ts           'use workflow' — coverage analysis per code
+  map-codes.ts           Phase1 (per-code coverage analysis → awaiting_approval)
+                         Phase2 (write consolidated articles + sections)
 ```
 
 **Future slots:** `literature/search.ts`, `drafting/generate-article.ts`.
 
 ### Scripts (`scripts/`)
 
-CLI tools run locally with `npm run <script>`. All authenticate to Convex via `_lib/convex.ts` which injects `WORKFLOW_SECRET`.
+CLI tools run locally with `npm run <script>`. They authenticate to PB via `_lib/pb.ts`, which calls `createAdminClient()` after loading `.env.local`.
 
 | Script | Purpose |
 |---|---|
-| `seed-convex.ts` | Seed editor tables from xlsx fixtures |
-| `seed-from-xlsx.ts` | Seed ontology tables (ICD-10 / HCUP / ABIM / Orpha) |
-| `import-board-mapping.ts` | Import specialty registry rows from board xlsx |
+| `seed-pocketbase.ts` | Seed editor tables + ontology from `anesthesiology_mapping.xlsx` |
+| `import-board-mapping.ts` | Import specialty registry from `board_specialty_mapping_competencies.xlsx` |
 | `import-milestones.ts` | Write milestone text from a file into a specialty |
 | `mark-imported.ts` | Backfill synthetic completed runs after manual import |
 | `refresh-amboss-library.ts` | Re-mirror AMBOSS article + section IDs |
-| `wipe-prod.ts` | One-shot wipe of every Convex table (dev only) |
-| `start-extract.ts` | Trigger a workflow run from the CLI |
-| `generate-auth-keys.mjs` | Mint JWT keypair for Convex Auth |
+| `wipe-prod.ts` | One-shot wipe of every PB collection (dev only) |
+| `start-extract.ts` | Trigger an extract run from the CLI (smoke test) |
+| `configure-oauth.ts` | Push `GOOGLE_OAUTH_CLIENT_ID/SECRET` onto a PB instance |
 
 ### Shared `src/lib/`
 
 | Path | Responsibility |
 |---|---|
-| `auth/` | `getCurrentUser`, `isAuthenticated`, `requireUserResponse` |
-| `convex/server.ts` | `fetchQueryAsUser` / `fetchMutationAsUser` / `preloadQueryAsUser` (auto-attach JWT) |
-| `data/` | RSC-side typed adapters between Convex shapes and UI types **(scheduled for slimming in Phase A4)** |
+| `auth/index.ts` | `getCurrentUser`, `isAuthenticated`, `requireUserResponse` (route-handler guard) |
 | `phase.ts` | Runtime → display-phase mapping for the home grid |
-
-### Domain doc trail
-
-- `convex/schema.ts` — all tables + indexes (split per-domain in Phase B2)
-- `src/lib/repositories/` — **legacy multi-backend abstraction; scheduled for deletion in Phase A1**
 
 ---
 
 ## Auth model
 
-Two callers, one Convex API.
+Two callers, one PocketBase backend.
 
 ```
-┌─ Browser/RSC ─────────────────────┐    ┌─ Workflow runtime / CLI ─────────┐
-│ user signs in via Convex Auth      │    │ has WORKFLOW_SECRET env var       │
-│ JWT cookie attached to every       │    │ adds _secret: <env> to args       │
-│ Convex call                        │    │                                   │
+┌─ Browser / RSC / route handler ────┐    ┌─ Pipeline / scripts / OAuth setup ┐
+│ user signs in via Google OAuth     │    │ has POCKETBASE_ADMIN_EMAIL/PASSWD │
+│ pb_auth HttpOnly cookie set by     │    │ authWithPassword on _superusers   │
+│ /auth/callback/google              │    │                                   │
 └──────────────┬─────────────────────┘    └────────────────┬──────────────────┘
                │                                            │
                ▼                                            ▼
         ┌──────────────────────────────────────────────────────────┐
-        │ Convex public function                                   │
-        │   await requireUserOrService(ctx, args._secret)          │
-        │     • user JWT present  → allow                          │
-        │     • _secret matches WORKFLOW_SECRET → allow            │
-        │     • else → throw ConvexError('Unauthorized')           │
+        │ PocketBase collection rule check                         │
+        │   (built-in; rules declared in pb_migrations/*.js)       │
+        │     • cookie carries valid user JWT → user-scoped allow  │
+        │     • admin client → bypasses rules                      │
+        │     • else → 403/404                                     │
         └──────────────────────────────────────────────────────────┘
 ```
 
+**Sign-in path.** `LoginPage` links to `/api/auth/login/google?next=…`. That route asks PB for fresh OAuth state + PKCE verifier, stashes `{state, codeVerifier, next, redirectUri}` in a 5-minute HttpOnly cookie, and redirects to Google. The callback at `/auth/callback/google` validates state, exchanges the code via `authWithOAuth2Code`, and writes the long-lived `pb_auth` cookie. Domain restriction is enforced **in PocketBase** by `pb_hooks/main.pb.js` so it can't be bypassed by a Next.js bug.
+
+**Dev-only bypass.** When `NODE_ENV=development` and `DEV_AUTOLOGIN_EMAIL` is set, the proxy redirects unauthenticated users to `/api/auth/dev-autologin`, which mints a 7-day session via the admin client. The route returns 404 in production.
+
+**Sync validation in the proxy.** `proxy.ts` (Next 16 middleware) loads the `pb_auth` cookie into a `PocketBase` instance and reads `authStore.isValid` — a synchronous JWT exp check, no network call. Token rotation/refresh happens lazily on the next API call.
+
 **Required environment variables:**
 
-| Variable | Where set | Purpose |
-|---|---|---|
-| `WORKFLOW_SECRET` | Vercel (all envs) + Convex (dev + prod) | Service token for workflow / scripts → Convex |
-| `INTERNAL_REVALIDATE_SECRET` | Vercel (all envs) | Workflow → `/api/internal/revalidate` cache bust. Required in production. |
-| `STAFF_EMAIL_ALLOWLIST` | Convex (prod) | Comma-separated allowlist of sign-in addresses. Falls back to AMBOSS-domain whitelist when unset. |
-| `RESEND_API_KEY` | Convex | OTP email transport |
-| `JWT_PRIVATE_KEY` / `JWKS` | Convex | Convex Auth signing (one keypair per deployment) |
-| `SITE_URL` | Convex | Convex Auth callback URL |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Vercel | Gemini calls in extract/map workflows |
-| `ANTHROPIC_API_KEY` | Vercel | Anthropic Opus retry in mapping ladder (optional) |
-| `AMBOSS_MCP_URL` / `AMBOSS_MCP_TOKEN` | Vercel | AMBOSS MCP tool endpoint |
-| `BLOB_READ_WRITE_TOKEN` | Vercel | Vercel Blob (auto-provisioned by integration) |
+| Variable | Purpose |
+|---|---|
+| `POCKETBASE_URL` | Base URL of the PB instance (e.g. `http://localhost:8090`) |
+| `NEXT_PUBLIC_POCKETBASE_URL` | Same, exposed to the browser for live subscriptions |
+| `POCKETBASE_ADMIN_EMAIL` / `POCKETBASE_ADMIN_PASSWORD` | Superuser credentials (admin client + scripts) |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Configured into PB via `configure-oauth` script |
+| `STAFF_EMAIL_ALLOWLIST` *(set on the PB process)* | Comma-separated allowlist; falls back to AMBOSS-domain whitelist |
+| `INTERNAL_REVALIDATE_SECRET` | Pipeline → `/api/internal/revalidate` cache-bust |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Optional env fallback for Gemini |
+| `ANTHROPIC_API_KEY` | Optional env fallback for Anthropic |
+| `OPENAI_API_KEY` | Optional env fallback for OpenAI |
+| `AMBOSS_MCP_URL` / `AMBOSS_MCP_TOKEN` | AMBOSS MCP tool endpoint |
+| `DEV_AUTOLOGIN_EMAIL` | Dev-only auto-login |
+| `GOOGLE_SA_CLIENT_EMAIL` / `GOOGLE_SA_PRIVATE_KEY` / `MAPPING_SHEET_IDS` | Optional service account for spreadsheet imports |
 
-**Public Convex URL** (`NEXT_PUBLIC_CONVEX_URL`) is, by design, public. Authorization is enforced **inside** every public Convex function — never assume the URL alone is a security boundary.
+**Provider keys.** Every signed-in user can save their own Gemini / Anthropic / OpenAI keys via `/settings`. The pipeline picks per-user keys first and falls back to env-level keys (`resolveApiKeysForRun` in `src/lib/workflows/lib/resolve-keys.ts`).
 
 ---
 
@@ -240,37 +282,37 @@ Two callers, one Convex API.
 ```
 Browser
   │
-  │ 1.  GET /planning/anesthesiology/codes
+  │ 1. GET /planning/anesthesiology/codes
   ▼
 proxy.ts (Next 16 middleware)
-  │      • method !== GET → fall through (handler-gated)
-  │      • !signed-in    → redirect /login?next=…
-  │      • signed-in     → continue
+  │   • method !== GET  → fall through (handler-gated)
+  │   • cookie missing  → redirect /login?next=… (or /api/auth/dev-autologin)
+  │   • cookie invalid  → redirect /login
+  │   • cookie valid    → continue
   ▼
 Next.js RSC page (planning/[specialty]/codes/page.tsx)
   │
-  │ 2.  await Promise.all([
-  │       getConsolidationLockState(slug),
-  │       preloadQueryAsUser(api.codes.list, { slug }),
-  │       preloadQueryAsUser(api.codes.inFlight, { slug }),
-  │     ])
-  │
-  │   preloadQueryAsUser → reads convexAuthNextjsToken() cookie
+  │ 2. await Promise.all([
+  │      getConsolidationLockState(slug),
+  │      listCodes(slug),                ← createServerClient(cookies)
+  │      listInFlightMappings(slug),
+  │    ])
   ▼
-Convex
-  │   • requireUserOrService(ctx, undefined)   ← user-token path
-  │   • returns rows
+PocketBase (over HTTP, cookie-authed)
+  │   • collection rules vet the cookie
+  │   • return rows
   ▼
 Hydrated client component (CodesViewClient)
-  │   • usePreloadedQuery for static initial state
-  │   • useQuery(api.codes.inFlight, { slug })  ← live subscription
+  │   • initial: server-rendered rows
+  │   • useLiveCollection('codes', initial, { filter })
+  │     opens a PB WebSocket subscription, applies create/update/delete
   ▼
-Browser receives initial HTML + Convex WebSocket pushes for updates
+Browser receives initial HTML + PB realtime pushes for updates
 ```
 
 ---
 
-## Workflow flow (write + approval)
+## Pipeline flow (write + approval)
 
 ```
 User clicks "Start extract" in pipeline-dashboard
@@ -278,40 +320,40 @@ User clicks "Start extract" in pipeline-dashboard
   ▼
 POST /api/workflows/extract  (Next route handler)
   │   • requireUserResponse() — 401 if not signed in
-  │   • validate body
-  │   • fetchMutationAsUser(api.pipeline.createRun) — records createdByUserId
-  │   • start(extractCodesWorkflow, …)               — Vercel Workflow boundary
+  │   • validate body, resolve specialty via createServerClient
+  │   • createPipelineRun + initPipelineStage('extract_codes')
+  │   • resolveApiKeysForRun(user) — merge user keys + env fallbacks
+  │   • void extractCodesPhase1(...).catch(logErr)   — fire-and-forget
+  │   • respond 200 { runId, approvalToken }         — UI starts polling/subscribing
   ▼
-Vercel Workflow runtime (separate sandbox)
-  │
-  │   Each `'use step'` call ↓ is event-log-cached, retryable, replayable
-  │   Every Convex call ↓ passes _secret: WORKFLOW_SECRET
+Background promise (still in the same Node process)
   │
   ├── markStageRunning('extract_codes')
-  ├── identifyModulesForUrl(...)        ← Gemini, per PDF URL
+  ├── identifyModulesForUrl(...)        ← Gemini, per PDF URL, capped concurrency
   ├── extractCodesForCategory(...)      ← Gemini, per (URL, module)
-  ├── writeExtractedCodes(rows)         ← Convex insert (staging)
-  ├── markStageAwaitingApproval(...)
-  │
-  │   ┌────────────────────────────────────────────┐
-  │   │ createHook(token = approve:<runId>:<stage>)│   workflow paused
-  │   └────────────────────────────────────────────┘
-  │                       ▲
-  │                       │ resumeHook(token, payload)
-  │                       │
-  │   ┌────────────────────────────────────────────┐
-  │   │ POST /api/workflows/approve                │
-  │   │   • getCurrentUser()                       │
-  │   │   • approvedBy = user.email (server-stamped)│
-  │   │   • resumeHook(approvalToken(runId, stage))│
-  │   └────────────────────────────────────────────┘
-  │
+  ├── writeExtractedCodes(rows)         ← PB insert (staging)
+  └── markStageAwaitingApproval(...)
+                       │
+                       ▼ user clicks "Approve" in UI
+  ┌────────────────────────────────────────────┐
+  │ POST /api/workflows/approve                │
+  │   • getCurrentUser() — server-stamped      │
+  │   • approvedBy = user.email                │
+  │   • dispatch by stage:                     │
+  │       extract_codes → extractCodesPhase2() │
+  │       extract_milestones → …Phase2()       │
+  │       map_codes → mapCodesPhase2()         │
+  └────────────────────────────────────────────┘
+                       │
+                       ▼  (Phase 2, fire-and-forget again)
   ├── promoteExtractedCodesToCodes(...)
   ├── revalidateSpecialtyCache(...)     ← POST /api/internal/revalidate
   └── markStageCompleted(approvedBy)
 ```
 
-The **approval-hook pattern** (deterministic token, paused workflow, resume from authenticated route) is the same shape we'll reuse for future literature curation + draft review.
+The **two-phase split** replaces the old `createHook` / `resumeHook` pattern. `Phase1` runs to `awaiting_approval` and exits cleanly; `Phase2` is invoked from `/api/workflows/approve`. No persistent workflow state means a process restart between Phase 1 and approval is fine — the staged data is on `pipelineStages.draftPayload` in PB, and Phase 2 reads it back. A process restart **during** Phase 1 or Phase 2 loses the in-flight run; the stage stays `running` until cleaned up by `clear-stale-runs`.
+
+The **deterministic approval token** (`approve:<runId>:<stage>`) is now an opaque per-stage identifier the UI echoes back. The approve route looks at runId + stage directly to invoke the matching `*Phase2`.
 
 ---
 
@@ -334,49 +376,65 @@ pipelineStages (per stage in a run):
 
 **Resetting a stage** (`/api/workflows/reset-stage`) cascades to every downstream stage and clears editor data tied to it. Run status flips to `cancelled` so the dashboard stops treating it as active.
 
+**Stale runs.** Without a durable runtime, a deploy or crash can orphan a `running` stage. `/api/workflows/clear-stale-runs` flips runs older than a threshold to `cancelled`. There's no guarantee of partial-result cleanup; rerun the stage to overwrite.
+
+---
+
+## Pipeline durability
+
+The previous architecture used the Vercel Workflow runtime, which gave us crash-resumable, step-cached, replay-capable pipelines. We dropped it to remove a runtime dependency and simplify the deploy story (single Node process + PB binary).
+
+**What we lose:** if the process crashes mid-stage, the in-flight run is gone. Stages stay `running` until manually reset.
+
+**What we keep:** approval gates (split into `Phase1`/`Phase2`), event log, cost rollups, idempotent staged writes, deterministic approval tokens.
+
+**When this matters.** Today's runs are minutes-long and triggered manually by editors who can re-run on failure. If we add long-running ingestion or unattended scheduling, revisit by either:
+- Reintroducing a workflow runtime (Vercel Workflow / Inngest / Trigger.dev), **or**
+- Persisting per-step checkpoints to `pipelineEvents` and writing a resume helper.
+
 ---
 
 ## Conventions
 
 ### Naming + file layout
 
-- Convex domain files are flat under `convex/` and named for the table they own (`codes.ts` owns `codes`). Workflow-only helpers go in `convex/_lib/`.
+- PB collection rules + indexes live in `pb_migrations/<ts>_<name>.js`. New collections: add a migration; never edit a previous one.
 - Next.js routes follow App Router. Page-local components go in `_components/` siblings (`_components/` is excluded from routing). Client components end with `.tsx` and start with `'use client'`.
-- Workflow code lives under `src/lib/workflows/<phase>/<feature>.ts`. The top-level functions are `'use workflow'`; helpers used inside are `'use step'`.
+- Pipeline code lives under `src/lib/workflows/<phase>/<feature>.ts`. Approval-gated stages split into `*Phase1` / `*Phase2`.
 
 ### Server vs. client
 
-- **Default to server components.** Mark client only when needed (`useState`, browser APIs, Convex `useQuery` subscriptions, design-system components).
-- Pages that subscribe to live Convex data use the `preloadQuery` → `usePreloadedQuery` handoff so the first render is server-prepared, then live updates take over.
+- **Default to server components.** Mark client only when needed (`useState`, browser APIs, PB realtime subscriptions, design-system components).
+- Pages that subscribe to live data render an initial snapshot in the RSC and pass it to a `useLiveCollection`-driven client component. The hook seeds state from the snapshot once; from then on, the PB WebSocket owns updates. **Do not** resync state from a fresh `initial` reference in `useEffect` — it loops.
 - Heavy interactive widgets (codes table, pipeline dashboard) live in `_components/`, marked client; their data hydration comes from RSC parents.
 
 ### Auth boundary checklist
-
-When you add a new Convex function:
-
-1. **UI-callable + workflow-callable** → `serviceSecretArg` in args, `requireUserOrService(ctx, args._secret)` in handler.
-2. **UI-callable only** → `requireUser(ctx)` in handler.
-3. **Workflow-only** → `serviceSecretArg` + `requireService(args._secret)`.
 
 When you add a new Next.js API route:
 
 1. **Mutating route** (POST/PATCH/DELETE) → `requireUserResponse()` at the top, returns 401 if missing.
 2. **Read route** → relies on `proxy.ts` GET-redirect; no in-handler check needed (but doesn't hurt).
-3. **Service route** (workflow → Next, e.g. `internal/revalidate`) → secret check, fail-closed in production.
+3. **Service route** (pipeline → Next, e.g. `internal/revalidate`) → secret-header check, fail-closed in production.
+
+When you add a new PB collection:
+
+1. **User-scoped** → declare `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule` in the migration. Pattern: `@request.auth.id != "" && <ownership check>`.
+2. **Admin-only** → leave rules `null`; only `createAdminClient()` callers can read/write.
+3. **Read-only ontology** → `listRule = viewRule = "@request.auth.id != \"\""`; create/update/delete `null`.
 
 ### Storage choices
 
 | Kind | Storage |
 |---|---|
-| Structured data + relations | Convex |
-| Workflow event log | Convex (`pipelineEvents`) |
-| Binary artefacts (PDFs) | Vercel Blob |
-| Ephemeral cache state | `runtime-cache` API or Next.js `unstable_cache` |
-| Secrets | Vercel env (Next-side) + Convex env (Convex-side) |
+| Structured data + relations | PocketBase (SQLite) |
+| Pipeline event log | PocketBase (`pipelineEvents`) |
+| Binary artefacts (PDFs) | PocketBase file fields (`pipelineUploads.file`) |
+| Ephemeral cache state | Next.js `unstable_cache` / `revalidateTag` |
+| Secrets | Process env (`.env.local` → `src/env.ts`) for Next; PB env for hooks |
 
 ### LLM-output normalization
 
-LLM responses sometimes use natural-language strings as object keys (e.g. `{ "Vitamin B₁₂ deficiency": [...] }`). Convex requires ASCII-only field names, so we **never** store these shapes directly. Always transform at the workflow boundary:
+LLM responses sometimes use natural-language strings as object keys (e.g. `{ "Vitamin B₁₂ deficiency": [...] }`). PocketBase `json` fields *can* store these directly, but they're awful to query and validate. We always transform at the pipeline boundary:
 
 ```diff
 - { "Vitamin B₁₂": ["sec_a"], "Megaloblastic anaemia": ["sec_b"] }
@@ -384,57 +442,57 @@ LLM responses sometimes use natural-language strings as object keys (e.g. `{ "Vi
 +  { articleTitle: "Megaloblastic anaemia", sections: ["sec_b"] }]
 ```
 
-Validators on the Convex side enforce this — no string-blob columns for new fields.
+App-side validation enforces the array shape — no string-blob columns for new fields.
 
 ---
 
 ## Future modules
 
-These are placeholders. Each will get its own architecture-doc section once the feature spec is firm — for now, just know where they slot in.
+Placeholders. Each gets its own architecture-doc section once the feature spec is firm — for now, just know where they slot in.
 
-### `convex/literature.ts` + `src/lib/workflows/literature/search.ts`
+### `literature` collections + `src/lib/workflows/literature/search.ts`
 
 ```
 [approved article/section]
   └─ POST /api/workflows/literature-search
-       └─ runs literatureSearchWorkflow
-            ├─ webSearch(...) -- TBD provider
+       └─ runs literatureSearch (plain async, fire-and-forget)
+            ├─ webSearch(...)              -- TBD provider
             ├─ filterByLicense(...)
             └─ writes literatureCandidates rows (per article/section)
 ```
 
 Tables: `literatureSearches` (one per article/section, status), `literatureCandidates` (many per search; title, authors, abstract, source URL, license-flag).
 
-### `convex/pdfs.ts` + Blob
+### `pdfDocuments` collection + PB file storage
 
 ```
 [user picks candidate]
-  └─ drag-drop PDF (or paste URL) → /api/blob/upload-token (already exists)
-       └─ Convex pdfDocuments insert
-            ├─ blobUrl, sha256
+  └─ drag-drop PDF (or paste URL) → /api/uploads (already exists)
+       └─ pdfDocuments insert
+            ├─ file (PB file field), sha256
             ├─ metadata: title, authors, journal, year, doi, pubmedId, license, …
             └─ status: pending | reviewed | approved | rejected
 ```
 
-The metadata schema is shaped by your CMS workflow — to be filled in when that's specced.
+The metadata schema is shaped by the CMS workflow — to be filled in when that's specced.
 
-### `src/lib/workflows/drafting/generate-article.ts` + `convex/drafts.ts`
+### `src/lib/workflows/drafting/generate-article.ts` + `articleDrafts` collection
 
 ```
 [approved PDFs for an article topic]
   └─ POST /api/workflows/generate-article
-       └─ runs generateArticleWorkflow
+       └─ runs generateArticle Phase1 / Phase2
             ├─ summarisePdfs(...)
             ├─ assembleAmbossArticle(...)
             ├─ writes articleDrafts row (status=awaiting_approval)
-            └─ pauses on approval hook  (same pattern as today's stages)
+            └─ Phase2 invoked from /api/workflows/approve-draft
 ```
 
-The **review loop is the same shape as today's `awaiting_approval` stages** — workflow paused via `createHook`, dashboard surfaces the draft, human approves/rejects via `/api/workflows/approve-draft`, workflow resumes.
+The **review loop is the same Phase1/Phase2 shape** as today's stages — pause at `awaiting_approval`, dashboard surfaces the draft, human approves/rejects via `/api/workflows/approve-draft`, Phase 2 fires.
 
-### `convex/dashboard.ts` + `src/app/dashboard/`
+### `dashboard` collection(s) + `src/app/dashboard/`
 
-Aggregation queries reading from `pipelineRuns`, `pipelineEvents`, `codes`, `consolidatedArticles`, `pdfDocuments`, `articleDrafts`. KPIs surface as live charts using existing Convex live-query infra.
+Aggregation queries reading from `pipelineRuns`, `pipelineEvents`, `codes`, `articles*`, `pdfDocuments`, `articleDrafts`. KPIs surface as live charts using `useLiveCollection`.
 
 KPIs (starter): codes-mapped %, articles consolidated, sections consolidated, PDFs ingested, articles generated, articles published, pipeline cost (USD), throughput by stage. Refined when dashboards are built.
 
@@ -444,11 +502,11 @@ KPIs (starter): codes-mapped %, articles consolidated, sections consolidated, PD
 
 | Task | Touch |
 |---|---|
-| New Convex table + UI tab | `schema.ts` + `convex/<domain>.ts` + `src/lib/data/<domain>.ts` (only if shape translation needed) + `src/app/planning/[specialty]/<feature>/` |
-| New workflow stage | `src/lib/workflows/<phase>/<stage>.ts` + new `pipelineStages.stage` constant + UI dashboard card |
+| New PB collection + UI tab | `pb_migrations/<ts>_<name>.js` + `src/lib/pb/types.ts` + `src/lib/data/<domain>.ts` + `src/app/planning/[specialty]/<feature>/` |
+| New pipeline stage | `src/lib/workflows/<phase>/<stage>.ts` (split `Phase1` / `Phase2` if approval-gated) + new `pipelineStages.stage` value + UI dashboard card + add dispatch case in `/api/workflows/approve` |
 | New API route | `src/app/api/<…>/route.ts` + auth guard from [Auth boundary checklist](#auth-boundary-checklist) |
-| New script | `scripts/<name>.ts` using `convexClient()` from `scripts/_lib/convex.ts` + `package.json` script entry |
-| New env var | `src/env.ts` (Next-side) **and** document here |
+| New script | `scripts/<name>.ts` using `createAdminClient` from `scripts/_lib/pb.ts` + `package.json` script entry |
+| New env var | `src/env.ts` (Next-side) **and** document here. PB-process env vars (`STAFF_EMAIL_ALLOWLIST`, OAuth credentials) go in `DEPLOYMENT_POCKETBASE.md`. |
 
 ---
 
@@ -459,5 +517,6 @@ KPIs (starter): codes-mapped %, articles consolidated, sections consolidated, PD
 - **Mapping** — the LLM-driven decision per code about whether AMBOSS already covers it, and what gaps remain.
 - **Consolidation** — merging per-code mapping output into per-article and per-section editorial decisions.
 - **Stage** — one step of a pipeline run (`extract_codes`, `extract_milestones`, `map_codes`, `consolidate_*`).
-- **Approval hook** — a paused-workflow checkpoint waiting for human approval. Resumed via `/api/workflows/approve` with the deterministic `approve:<runId>:<stage>` token.
-- **Run** — one execution of the pipeline for a specialty, end-to-end. Owns N stages and writes to `pipelineEvents`.
+- **Approval token** — opaque per-stage identifier (`approve:<runId>:<stage>`) the UI echoes back to `/api/workflows/approve` to trigger the matching Phase 2.
+- **Run** — one execution of the pipeline for a specialty. Owns N stages and writes to `pipelineEvents`.
+- **Phase 1 / Phase 2** — the split of an approval-gated stage. Phase 1 produces a draft and parks the stage at `awaiting_approval`; Phase 2 promotes/persists it after the human approves.

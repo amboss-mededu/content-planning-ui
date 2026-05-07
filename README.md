@@ -83,10 +83,8 @@ The previous Convex + Vercel + Workflow + Blob stack is documented for reference
 
 - **Default to server components.** Mark `'use client'` only when needed — see `AGENTS.md` for design-system caveats.
 - **PocketBase is the source of truth.** RSC + route handlers use the cookie-authed client (`src/lib/pb/server.ts#createServerClient`); background pipeline code uses `createAdminClient`. The data-layer wrappers in `src/lib/data/*` are the only files that talk to PB directly.
-- **Pipeline stages run as plain async functions.** Trigger routes in `src/app/api/workflows/*` spawn them fire-and-forget (`void runAsync().catch(log)`); approval-gated stages split into `*Phase1` / `*Phase2`, with phase1 stashing the draft on `pipelineStages.draftPayload` and phase2 invoked from `/api/workflows/approve`. The Vercel Workflow runtime is gone.
+- **Pipeline stages run as plain async functions.** Trigger routes in `src/app/api/workflows/*` spawn them fire-and-forget (`void runAsync().catch(log)`); approval-gated stages split into `*Phase1` / `*Phase2`, with phase1 stashing the draft on `pipelineStages.draftPayload` and phase2 invoked from `/api/workflows/approve`. No durable workflow runtime — see [`docs/ARCHITECTURE.md#pipeline-durability`](docs/ARCHITECTURE.md#pipeline-durability) for the trade-off.
 - **No string-blob columns for new data.** LLM output that uses natural-language keys must be transformed to array-of-records before storage. PB `json` fields hold the parsed shape directly — no JSON.stringify/parse boundary.
-
-> The architecture and migrations docs under `docs/` were written against the Convex stack and have not yet been refreshed. Trust this README and `DEPLOYMENT_POCKETBASE.md` for the current setup until those are rewritten.
 
 ---
 

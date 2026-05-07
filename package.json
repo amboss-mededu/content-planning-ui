@@ -34,8 +34,6 @@
     "@emotion/styled": "^11.14.1",
     "@t3-oss/env-nextjs": "^0.13.11",
     "@tanstack/react-virtual": "^3.13.24",
-    "@vercel/analytics": "^2.0.1",
-    "@vercel/speed-insights": "^2.0.0",
     "ai": "^6.0.168",
     "emotion-theming": "^11.0.0",
     "exceljs": "^4.4.0",
