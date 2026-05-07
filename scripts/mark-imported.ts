@@ -1,8 +1,8 @@
 /**
  * Backfill a synthetic completed pipeline run so the dashboard reflects state
- * imported outside of the workflow (e.g. seed-convex + import-milestones).
+ * imported outside of the workflow (e.g. seed:local + import-milestones).
  *
- * Inserts one Convex pipelineRuns row + one pipelineStages row per requested
+ * Inserts one PB pipelineRuns row + one pipelineStages row per requested
  * stage (status='completed', approvedBy='import'). Output summaries record
  * what was imported (codes count, milestones length).
  *
@@ -11,8 +11,7 @@
  *   npm run mark-imported -- anesthesiology codes
  */
 
-import { api } from '../convex/_generated/api';
-import { convexClient } from './_lib/convex';
+import { pbAdminClient } from './_lib/pb';
 
 type Stage = 'codes' | 'milestones' | 'mapping';
 const STAGE_NAME: Record<Stage, 'extract_codes' | 'extract_milestones' | 'map_codes'> = {
@@ -24,7 +23,7 @@ const STAGE_NAME: Record<Stage, 'extract_codes' | 'extract_milestones' | 'map_co
 async function main() {
   const [slug, ...stageArgs] = process.argv.slice(2);
   if (!slug || stageArgs.length === 0) {
-    console.error('Usage: db:mark-imported -- <slug> <codes|milestones|mapping> [...]');
+    console.error('Usage: mark-imported -- <slug> <codes|milestones|mapping> [...]');
     process.exit(1);
   }
   const stages = stageArgs.map((s) => {
@@ -36,25 +35,31 @@ async function main() {
     return s as Stage;
   });
 
-  const convex = convexClient();
+  const pb = await pbAdminClient();
 
-  const spec = await convex.query(api.specialties.get, { slug });
+  const spec = await pb
+    .collection('specialties')
+    .getFirstListItem(`slug = "${slug}"`)
+    .catch(() => null);
   if (!spec) {
-    console.error(`No specialty '${slug}' in Convex.`);
+    console.error(`No specialty '${slug}' in PocketBase.`);
     process.exit(1);
   }
 
   const codeCount =
     stages.includes('codes') || stages.includes('mapping')
-      ? (await convex.query(api.codes.list, { slug })).length
+      ? (
+          await pb
+            .collection('codes')
+            .getList(1, 1, { filter: `specialtySlug = "${slug}"`, fields: 'id' })
+        ).totalItems
       : 0;
-  const milestoneChars = stages.includes('milestones')
-    ? (spec.milestones?.length ?? 0)
-    : 0;
+  const milestonesText = (spec as { milestones?: string }).milestones ?? '';
+  const milestoneChars = stages.includes('milestones') ? milestonesText.length : 0;
 
   if (stages.includes('codes') && codeCount === 0) {
     console.warn(
-      '[mark-imported] codes stage requested but Convex has no codes for this specialty.',
+      '[mark-imported] codes stage requested but PB has no codes for this specialty.',
     );
   }
   if (stages.includes('mapping') && codeCount === 0) {
@@ -64,18 +69,18 @@ async function main() {
   }
   if (stages.includes('milestones') && milestoneChars === 0) {
     console.warn(
-      '[mark-imported] milestones stage requested but specialty has no milestones text in Convex.',
+      '[mark-imported] milestones stage requested but specialty has no milestones text in PB.',
     );
   }
 
-  const { id: runId } = await convex.mutation(api.pipeline.createRun, {
-    specialtySlug: slug,
-  });
   const now = Date.now();
-  await convex.mutation(api.pipeline.updateRun, {
-    runId,
-    patch: { status: 'completed', finishedAt: now },
+  const run = await pb.collection('pipelineRuns').create({
+    specialtySlug: slug,
+    status: 'completed',
+    startedAt: now,
+    finishedAt: now,
   });
+  const runId = run.id;
 
   for (const stage of stages) {
     const stageName = STAGE_NAME[stage];
@@ -85,18 +90,15 @@ async function main() {
         : stage === 'milestones'
           ? { source: 'manual_import', milestones_chars: milestoneChars }
           : { source: 'manual_import', mapped: codeCount };
-    await convex.mutation(api.pipeline.initStage, { runId, stage: stageName });
-    await convex.mutation(api.pipeline.updateStage, {
+    await pb.collection('pipelineStages').create({
       runId,
       stage: stageName,
-      patch: {
-        status: 'completed',
-        startedAt: now,
-        finishedAt: now,
-        approvedAt: now,
-        approvedBy: 'import',
-        outputSummary: JSON.stringify(outputSummary),
-      },
+      status: 'completed',
+      startedAt: now,
+      finishedAt: now,
+      approvedAt: now,
+      approvedBy: 'import',
+      outputSummary,
     });
   }
 

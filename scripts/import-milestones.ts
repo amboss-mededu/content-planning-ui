@@ -1,5 +1,6 @@
 /**
- * Write milestone text from a local file into specialties.milestones in Convex.
+ * Write milestone text from a local file into specialties.milestones in
+ * PocketBase.
  *
  * Usage:
  *   npm run import-milestones -- anesthesiology anesthesiology_milestones.txt
@@ -7,23 +8,30 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { api } from '../convex/_generated/api';
-import { convexClient } from './_lib/convex';
+import { pbAdminClient } from './_lib/pb';
 
 async function main() {
   const [slug, file] = process.argv.slice(2);
   if (!slug || !file) {
-    console.error('Usage: db:import-milestones -- <slug> <file>');
+    console.error('Usage: import-milestones -- <slug> <file>');
     process.exit(1);
   }
   const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
   const text = (await readFile(abs, 'utf8')).trim();
 
-  const convex = convexClient();
-  await convex.mutation(api.specialties.updateMilestones, {
-    slug,
+  const pb = await pbAdminClient();
+  const row = await pb
+    .collection('specialties')
+    .getFirstListItem(`slug = "${slug}"`)
+    .catch(() => null);
+  if (!row) {
+    throw new Error(
+      `No specialty '${slug}' in PocketBase. Run import-board (or seed:local) first.`,
+    );
+  }
+  await pb.collection('specialties').update(row.id, {
     milestones: text,
-    bumpSeedTimestamp: true,
+    lastSeededAt: Date.now(),
   });
 
   console.log(
