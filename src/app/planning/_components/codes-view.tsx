@@ -443,6 +443,12 @@ function ClickableCell({
         textAlign: 'inherit',
         display: 'inline-flex',
         alignItems: 'center',
+        // Center the badge / chip inside the button by default. If the
+        // button is content-sized this is a no-op; if it's been forced
+        // to fill the cell width (UA defaults on <button>, fixed table
+        // layout, etc.) the inner badge stops sitting flush-left and
+        // sits in the visual center.
+        justifyContent: 'center',
       }}
     >
       {children}

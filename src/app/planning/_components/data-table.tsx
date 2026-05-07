@@ -1655,6 +1655,10 @@ function TableCells<T>({
           style={{
             padding: '10px 12px',
             borderBottom: '1px solid var(--ads-c-divider, rgba(0,0,0,0.05))',
+            // Vertical column dividers, matching the header row's
+            // `borderRight` so the grid lines are continuous from the
+            // sticky header through every body cell.
+            borderRight: '1px solid var(--ads-c-divider, rgba(0,0,0,0.08))',
             verticalAlign: c.verticalAlign ?? 'middle',
             textAlign: c.align ?? 'left',
             maxWidth: 360,
