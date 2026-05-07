@@ -63,6 +63,10 @@ async function main(): Promise<void> {
     const filter = `specialtySlug = "${slug}"`;
     console.log(`\n→ ${slug} (${fx.xlsxPath})`);
 
+    // Ontology collections (icd10Codes / hcupCodes / abimCodes / orphaCodes)
+    // are global in the PB schema (no specialtySlug field), so per-specialty
+    // wipe-and-reseed doesn't apply. They're a reference catalog seeded
+    // separately by a future script.
     const collections = [
       'codes',
       'codeCategories',
@@ -70,39 +74,21 @@ async function main(): Promise<void> {
       'newArticleSuggestions',
       'articleUpdateSuggestions',
       'consolidatedSections',
-      'icd10Codes',
-      'hcupCodes',
-      'abimCodes',
-      'orphaCodes',
     ];
     for (const col of collections) {
       const removed = await clearCollection(pb, col, filter);
       if (removed > 0) console.log(`  cleared ${removed} ${col}`);
     }
 
-    const [
-      codes,
-      categories,
-      consolidatedArticles,
-      newArticles,
-      updateArticles,
-      sections,
-      icd10,
-      hcup,
-      abim,
-      orpha,
-    ] = await Promise.all([
-      repos.codes.list(slug),
-      repos.categories.list(slug),
-      repos.articles.listConsolidated(slug),
-      repos.articles.listNew(slug),
-      repos.articles.listUpdates(slug),
-      repos.sections.listConsolidated(slug),
-      repos.sources.icd10(slug),
-      repos.sources.hcup(slug),
-      repos.sources.abim(slug),
-      repos.sources.orpha(slug),
-    ]);
+    const [codes, categories, consolidatedArticles, newArticles, updateArticles, sections] =
+      await Promise.all([
+        repos.codes.list(slug),
+        repos.categories.list(slug),
+        repos.articles.listConsolidated(slug),
+        repos.articles.listNew(slug),
+        repos.articles.listUpdates(slug),
+        repos.sections.listConsolidated(slug),
+      ]);
 
     // Editor data ------------------------------------------------------
     if (categories.length > 0) {
@@ -167,61 +153,9 @@ async function main(): Promise<void> {
       console.log(`  inserted ${sections.length} consolidatedSections`);
     }
 
-    // Ontology ----------------------------------------------------------
-    if (icd10.length > 0) {
-      await bulkCreate(
-        pb,
-        'icd10Codes',
-        icd10.map((r) => ({ ...stripUndef(r), specialtySlug: slug })),
-      );
-      console.log(`  inserted ${icd10.length} icd10Codes`);
-    }
-    if (hcup.length > 0) {
-      await bulkCreate(
-        pb,
-        'hcupCodes',
-        hcup.map((r) => ({ ...stripUndef(r), specialtySlug: slug })),
-      );
-      console.log(`  inserted ${hcup.length} hcupCodes`);
-    }
-    if (abim.length > 0) {
-      await bulkCreate(
-        pb,
-        'abimCodes',
-        abim.map((r) => ({
-          abimIndex: r.Index,
-          primaryCategory: r.primaryCategory,
-          secondaryCategory: r.secondaryCategory,
-          tertiaryCategory: r.tertiaryCategory,
-          disease: r.disease,
-          specialty: r.Specialty,
-          code: r.code,
-          item: r.item,
-          choice: r.choice,
-          category: r.category,
-          count: r.count,
-          specialtySlug: slug,
-        })),
-      );
-      console.log(`  inserted ${abim.length} abimCodes`);
-    }
-    if (orpha.length > 0) {
-      await bulkCreate(
-        pb,
-        'orphaCodes',
-        orpha.map((r) => ({
-          orphaCode: r.orphaCode,
-          parentOrphaCode: r.parentOrphaCode,
-          specificName: r.specificName,
-          parentCategory: r.parentCategory,
-          orphaTargetFilenamesToInclude: r.orphaTargetFilenamesToInclude,
-          icd10LettersToInclude: r.icd10lettersToInclude,
-          count: r.count,
-          specialtySlug: slug,
-        })),
-      );
-      console.log(`  inserted ${orpha.length} orphaCodes`);
-    }
+    // Ontology (icd10/hcup/abim/orpha) is global in the PB schema today —
+    // no per-specialty fanout. Skipped here; if/when the schema gains a
+    // specialtySlug field, restore the old fanout in this slot.
   }
 
   console.log('\n✓ Seed complete.');

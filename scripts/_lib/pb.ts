@@ -29,6 +29,11 @@ export async function pbAdminClient(): Promise<ScriptPbClient> {
   const email = require_('POCKETBASE_ADMIN_EMAIL');
   const password = require_('POCKETBASE_ADMIN_PASSWORD');
   const pb = new PocketBase(url);
+  // The SDK auto-cancels concurrent same-method requests by default. Bulk
+  // seeds fan out via Promise.all and trip that — disable it so the seed
+  // can fire dozens of parallel creates without each one cancelling the
+  // last. Safe in CLI scripts; never enable in user-facing code.
+  pb.autoCancellation(false);
   await pb.collection('_superusers').authWithPassword(email, password);
   return pb;
 }
