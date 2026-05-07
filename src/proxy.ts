@@ -4,7 +4,15 @@ import { env } from './env';
 import { PB_AUTH_COOKIE } from './lib/pb/server';
 
 // Paths that must remain reachable without an auth cookie.
-const PUBLIC_PREFIXES = ['/login', '/auth/callback/', '/api/auth/login/'];
+const PUBLIC_PREFIXES = [
+  '/login',
+  '/auth/callback/',
+  '/api/auth/login/',
+  '/api/auth/dev-autologin',
+];
+
+const DEV_AUTOLOGIN_ENABLED =
+  env.NODE_ENV === 'development' && Boolean(env.DEV_AUTOLOGIN_EMAIL);
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
@@ -38,7 +46,10 @@ export default function proxy(request: NextRequest): NextResponse | undefined {
 
   if (!isAuthenticated) {
     const next = encodeURIComponent(pathname + search);
-    return NextResponse.redirect(new URL(`/login?next=${next}`, request.nextUrl.origin));
+    const target = DEV_AUTOLOGIN_ENABLED
+      ? `/api/auth/dev-autologin?next=${next}`
+      : `/login?next=${next}`;
+    return NextResponse.redirect(new URL(target, request.nextUrl.origin));
   }
 
   return; // authenticated → continue
