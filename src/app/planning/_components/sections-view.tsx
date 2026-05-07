@@ -12,6 +12,18 @@ function kindBadge(row: ConsolidatedSection) {
   return <Badge text="—" color="gray" />;
 }
 
+const KIND_FILTER_OPTIONS = [
+  { value: 'new-section', label: 'New section' },
+  { value: 'section-update', label: 'Section update' },
+  { value: 'none', label: '—' },
+];
+
+function kindOf(row: ConsolidatedSection): 'new-section' | 'section-update' | 'none' {
+  if (row.newSection) return 'new-section';
+  if (row.sectionUpdate) return 'section-update';
+  return 'none';
+}
+
 const columns: Column<ConsolidatedSection>[] = [
   {
     key: 'kind',
@@ -20,24 +32,43 @@ const columns: Column<ConsolidatedSection>[] = [
       'Whether this row is a brand-new section or an update to an existing one',
     render: kindBadge,
     width: 140,
+    // Sort/filter on the derived kind string; the toolbar Select above the
+    // table uses the same axis but tracks its choice in URL params, so the
+    // two are independent — applying both intersects.
+    accessor: kindOf,
+    type: 'string',
+    filterable: true,
+    filterValue: kindOf,
+    filterOptions: KIND_FILTER_OPTIONS,
   },
   {
     key: 'article',
     label: 'Article',
     description: 'Parent article this section belongs to',
     render: (r) => r.articleTitle ?? '—',
+    accessor: (r) => r.articleTitle ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
   {
     key: 'section',
     label: 'Section',
     description: 'Suggested section name',
     render: (r) => r.sectionName ?? '—',
+    accessor: (r) => r.sectionName ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
   {
     key: 'category',
     label: 'Category',
     description: 'Code category that anchors this section',
     render: (r) => r.category ?? '—',
+    accessor: (r) => r.category ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'importance',
@@ -46,6 +77,9 @@ const columns: Column<ConsolidatedSection>[] = [
     render: (r) => r.overallImportance ?? '—',
     width: 100,
     align: 'right',
+    accessor: (r) => r.overallImportance ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'coverage',
@@ -55,6 +89,9 @@ const columns: Column<ConsolidatedSection>[] = [
     render: (r) => r.overallCoverage ?? '—',
     width: 100,
     align: 'right',
+    accessor: (r) => r.overallCoverage ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'editor',
@@ -62,6 +99,9 @@ const columns: Column<ConsolidatedSection>[] = [
     description: 'Editor assigned to draft or update this section',
     render: (r) => r.assignedEditor ?? '—',
     width: 140,
+    accessor: (r) => r.assignedEditor ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'justification',
@@ -72,6 +112,10 @@ const columns: Column<ConsolidatedSection>[] = [
         {r.justification ?? ''}
       </Text>
     ),
+    accessor: (r) => r.justification ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
 ];
 

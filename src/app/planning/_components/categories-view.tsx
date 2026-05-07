@@ -21,6 +21,10 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
         ) : (
           '—'
         ),
+      accessor: (r) => r.codeCategory ?? null,
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
     },
     {
       key: 'source',
@@ -28,6 +32,9 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       description: 'Ontology this category came from (ICD10, HCUP, ABIM, Orpha)',
       render: (r) => r.source ?? '—',
       width: 80,
+      accessor: (r) => r.source ?? null,
+      type: 'string',
+      filterable: true,
     },
     {
       key: 'numCodes',
@@ -37,6 +44,9 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       render: (r) => r.numCodes ?? '—',
       width: 80,
       align: 'right',
+      accessor: (r) => r.numCodes ?? null,
+      type: 'number',
+      filterable: true,
     },
     {
       key: 'included',
@@ -45,6 +55,9 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       render: (r) => r.numIncludedCodes ?? '—',
       width: 90,
       align: 'right',
+      accessor: (r) => r.numIncludedCodes ?? null,
+      type: 'number',
+      filterable: true,
     },
     {
       key: 'articles',
@@ -54,6 +67,11 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       render: (r) => `${r.numIncludedArticleCodes ?? 0} / ${r.totalArticleCodes ?? 0}`,
       width: 130,
       align: 'right',
+      // Sort/filter on the included count — that's the editorial signal,
+      // not the raw total.
+      accessor: (r) => r.numIncludedArticleCodes ?? null,
+      type: 'number',
+      filterable: true,
     },
     {
       key: 'sections',
@@ -63,6 +81,9 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
       render: (r) => `${r.numIncludedSectionCodes ?? 0} / ${r.totalSectionCodes ?? 0}`,
       width: 130,
       align: 'right',
+      accessor: (r) => r.numIncludedSectionCodes ?? null,
+      type: 'number',
+      filterable: true,
     },
     {
       key: 'consolidated',
@@ -71,6 +92,16 @@ export function CategoriesView({ rows, slug }: { rows: CodeCategory[]; slug: str
         'Whether the category has been deduped through the consolidation pipeline',
       render: (r) => (r.isConsolidated ? 'yes' : 'no'),
       width: 120,
+      accessor: (r) =>
+        r.isConsolidated === true ? 1 : r.isConsolidated === false ? 0 : null,
+      type: 'boolean',
+      filterable: true,
+      filterValue: (r) =>
+        r.isConsolidated === true ? 'yes' : r.isConsolidated === false ? 'no' : undefined,
+      filterOptions: [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+      ],
     },
   ];
 

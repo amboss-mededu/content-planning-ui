@@ -676,7 +676,11 @@ function HeaderCell<T>({
       ref={thRef}
       scope="col"
       style={{
-        textAlign: column.align ?? 'left',
+        // Header labels always left-align even when the cell content is
+        // right- or center-aligned (e.g. numeric columns). Cell alignment
+        // is handled separately in the body so numbers still line up on
+        // the right while their header reads naturally on the left.
+        textAlign: 'left',
         padding: '10px 12px',
         borderBottom: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
         // Vertical divider between columns so the resize handle's position
@@ -711,12 +715,9 @@ function HeaderCell<T>({
           alignItems: 'center',
           gap: 6,
           width: '100%',
-          justifyContent:
-            column.align === 'right'
-              ? 'flex-end'
-              : column.align === 'center'
-                ? 'center'
-                : 'flex-start',
+          // Always start-align the header content (label + sort/filter
+          // glyph) regardless of the column's body alignment.
+          justifyContent: 'flex-start',
         }}
       >
         {interactable ? (
