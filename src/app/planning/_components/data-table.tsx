@@ -970,6 +970,10 @@ function HeaderMenu<T>({
         flexDirection: 'column',
         gap: 4,
         minWidth: 220,
+        // Cap the popover width so long category names (e.g. "Disorders of
+        // the autonomic nervous system") wrap to multiple lines instead of
+        // making the dropdown grow horizontally across the table.
+        maxWidth: 320,
         maxHeight: '60vh',
         overflowY: 'auto',
       }}
@@ -1250,7 +1254,10 @@ function CategoricalFilter({
                 key={opt.value}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  // Top-align so the checkbox lines up with the first line
+                  // of a wrapped label rather than centering against the
+                  // whole multi-line block.
+                  alignItems: 'flex-start',
                   gap: 8,
                   padding: '5px 8px',
                   borderRadius: 4,
@@ -1271,8 +1278,21 @@ function CategoricalFilter({
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggle(opt.value)}
+                  // Prevent the checkbox from shrinking when the label
+                  // wraps to multiple lines.
+                  style={{ flexShrink: 0, marginTop: 2 }}
                 />
-                <span>{opt.label}</span>
+                <span
+                  style={{
+                    // Wrap long values (e.g. multi-word category names)
+                    // instead of forcing the popover to grow horizontally.
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {opt.label}
+                </span>
               </label>
             );
           })
