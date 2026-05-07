@@ -109,6 +109,11 @@ const GROUP_STYLES: Record<
   },
 };
 
+// Default zebra stripe applied to odd rows in cells that don't belong to a
+// `ColumnGroup`. Same shade as the metadata-group stripe so tables with and
+// without groups share the same baseline readability.
+const DEFAULT_ROW_STRIPE = 'rgba(15, 23, 42, 0.035)';
+
 type SortState = { key: string; dir: 'asc' | 'desc' } | null;
 
 type NumOp = '>' | '>=' | '<' | '<=' | '=' | '!=';
@@ -1629,9 +1634,12 @@ function TableCells<T>({
   columns: Column<T>[];
   rowIndex: number;
 }) {
-  // Odd rows pick up the column group's stripe tint (light grey for metadata,
-  // light green for coverage, light orange for suggestions). Even rows stay
-  // white. The stripe is per-group so each band reads as its own column block.
+  // Odd rows pick up a stripe tint so the table reads as a zebra pattern.
+  // For grouped columns the tint is the group's color (light blue-grey for
+  // metadata, light green for coverage, light orange for suggestions); for
+  // ungrouped columns and tables without groups, fall back to the default
+  // grey so every table has the same readability without each call site
+  // having to opt in. Even rows stay plain white.
   const stripe = rowIndex % 2 === 1;
   return (
     <>
@@ -1644,7 +1652,11 @@ function TableCells<T>({
             verticalAlign: 'middle',
             textAlign: c.align ?? 'left',
             maxWidth: 360,
-            background: stripe && c.group ? GROUP_STYLES[c.group].stripe : 'transparent',
+            background: stripe
+              ? c.group
+                ? GROUP_STYLES[c.group].stripe
+                : DEFAULT_ROW_STRIPE
+              : 'transparent',
           }}
         >
           {c.editable ? (
