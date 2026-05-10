@@ -114,7 +114,7 @@ export interface SectionReviewRecord extends PbRecord {
 
 // --- Collection: reviewComments --------------------------------------------
 
-export type ReviewRecordKind = 'article' | 'section';
+export type ReviewRecordKind = 'article' | 'section' | 'parent-article';
 
 export interface ReviewCommentRecord extends PbRecord {
   specialtySlug: string;

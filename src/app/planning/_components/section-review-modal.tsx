@@ -53,6 +53,7 @@ export function SectionReviewModal({
   sections,
   initialReviews,
   initialCommentsBySection,
+  initialCommentsByParentArticle,
   categoryLookup,
   titleOriginLookup,
   onClose,
@@ -62,6 +63,7 @@ export function SectionReviewModal({
   sections: SectionRow[];
   initialReviews: ReviewMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
+  initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   onClose: () => void;
@@ -307,11 +309,18 @@ export function SectionReviewModal({
           ) : (
             <ArticleViewBody
               articleSections={articleSections}
+              articleKey={current.articleId ?? current.articleTitle ?? '_'}
               reviews={reviews}
               categoryLookup={categoryLookup}
               submitting={submitting}
               onApprove={toggleApproveRow}
               onReject={toggleRejectRow}
+              slug={slug}
+              initialComments={
+                initialCommentsByParentArticle[
+                  current.articleId ?? current.articleTitle ?? '_'
+                ] ?? []
+              }
             />
           )}
         </div>
@@ -569,109 +578,128 @@ function decideButton(active: boolean, kind: 'approve' | 'reject') {
 
 function ArticleViewBody({
   articleSections,
+  articleKey,
   reviews,
   categoryLookup,
   submitting,
   onApprove,
   onReject,
+  slug,
+  initialComments,
 }: {
   articleSections: SortedRow[];
+  /** Stable key for the current AMBOSS article. Used as the
+   *  `recordId` for per-article comments and as the React `key` so
+   *  the comment thread re-mounts on article navigation. */
+  articleKey: string;
   reviews: ReviewMap;
   categoryLookup: CategoryLookup;
   submitting: boolean;
   onApprove: (rowId: string) => void;
   onReject: (rowId: string) => void;
+  slug: string;
+  initialComments: ReviewCommentRecord[];
 }) {
   return (
-    <div
-      style={{
-        border: '1px solid rgba(0, 0, 0, 0.12)',
-        borderRadius: 6,
-        overflow: 'auto',
-      }}
-    >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        <thead>
-          <tr>
-            <th style={headStyle}>Section title</th>
-            <th style={{ ...headStyle, width: 90 }}>Update type</th>
-            <th style={headStyle}>Codes</th>
-            <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Importance</th>
-            <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Coverage</th>
-            <th style={headStyle}>Justification</th>
-            <th style={{ ...headStyle, width: 80, textAlign: 'center' }}>Decision</th>
-          </tr>
-        </thead>
-        <tbody>
-          {articleSections.map((s) => {
-            const status = reviews[s.id];
-            const tint =
-              status === 'approved'
-                ? APPROVED_TINT
-                : status === 'rejected'
-                  ? REJECTED_TINT
-                  : 'transparent';
-            return (
-              <tr key={s.id} style={{ background: tint }}>
-                <td style={cellStyle}>{s.sectionName ?? '—'}</td>
-                <td style={cellStyle}>
-                  {s.updateType === 'new' ? (
-                    <Badge text="new" color="blue" />
-                  ) : s.updateType === 'update' ? (
-                    <Badge text="update" color="purple" />
-                  ) : (
+    <>
+      <div
+        style={{
+          border: '1px solid rgba(0, 0, 0, 0.12)',
+          borderRadius: 6,
+          overflow: 'auto',
+        }}
+      >
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={headStyle}>Section title</th>
+              <th style={{ ...headStyle, width: 90 }}>Update type</th>
+              <th style={headStyle}>Codes</th>
+              <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Importance</th>
+              <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Coverage</th>
+              <th style={headStyle}>Justification</th>
+              <th style={{ ...headStyle, width: 80, textAlign: 'center' }}>Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            {articleSections.map((s) => {
+              const status = reviews[s.id];
+              const tint =
+                status === 'approved'
+                  ? APPROVED_TINT
+                  : status === 'rejected'
+                    ? REJECTED_TINT
+                    : 'transparent';
+              return (
+                <tr key={s.id} style={{ background: tint }}>
+                  <td style={cellStyle}>{s.sectionName ?? '—'}</td>
+                  <td style={cellStyle}>
+                    {s.updateType === 'new' ? (
+                      <Badge text="new" color="blue" />
+                    ) : s.updateType === 'update' ? (
+                      <Badge text="update" color="purple" />
+                    ) : (
+                      <Text size="xs" color="secondary">
+                        —
+                      </Text>
+                    )}
+                  </td>
+                  <td style={cellStyle}>
+                    <CodeChipList codes={s.codes} categoryLookup={categoryLookup} />
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                    {s.overallImportance ?? '—'}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                    {s.overallCoverage ?? '—'}
+                  </td>
+                  <td style={cellStyle}>
                     <Text size="xs" color="secondary">
-                      —
+                      {s.justification ?? ''}
                     </Text>
-                  )}
-                </td>
-                <td style={cellStyle}>
-                  <CodeChipList codes={s.codes} categoryLookup={categoryLookup} />
-                </td>
-                <td style={{ ...cellStyle, textAlign: 'right' }}>
-                  {s.overallImportance ?? '—'}
-                </td>
-                <td style={{ ...cellStyle, textAlign: 'right' }}>
-                  {s.overallCoverage ?? '—'}
-                </td>
-                <td style={cellStyle}>
-                  <Text size="xs" color="secondary">
-                    {s.justification ?? ''}
-                  </Text>
-                </td>
-                <td style={{ ...cellStyle, textAlign: 'center' }}>
-                  <div
-                    style={{
-                      display: 'inline-flex',
-                      gap: 4,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <button
-                      type="button"
-                      title={status === 'approved' ? 'Clear approval' : 'Approve'}
-                      style={decideButton(status === 'approved', 'approve')}
-                      disabled={submitting}
-                      onClick={() => onApprove(s.id)}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'center' }}>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        gap: 4,
+                        alignItems: 'center',
+                      }}
                     >
-                      ✓
-                    </button>
-                    <button
-                      type="button"
-                      title={status === 'rejected' ? 'Clear rejection' : 'Reject'}
-                      style={decideButton(status === 'rejected', 'reject')}
-                      disabled={submitting}
-                      onClick={() => onReject(s.id)}
-                    >
-                      ✗
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                      <button
+                        type="button"
+                        title={status === 'approved' ? 'Clear approval' : 'Approve'}
+                        style={decideButton(status === 'approved', 'approve')}
+                        disabled={submitting}
+                        onClick={() => onApprove(s.id)}
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        title={status === 'rejected' ? 'Clear rejection' : 'Reject'}
+                        style={decideButton(status === 'rejected', 'reject')}
+                        disabled={submitting}
+                        onClick={() => onReject(s.id)}
+                      >
+                        ✗
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <CommentsSection
+        key={articleKey}
+        slug={slug}
+        recordKind="parent-article"
+        recordId={articleKey}
+        initialComments={initialComments}
+      />
+    </>
   );
 }

@@ -54,14 +54,21 @@ function projectSection(r: ConsolidatedSection): SectionRow {
 }
 
 async function SectionsData({ slug }: { slug: string }) {
-  const [sectionRecs, codeRecs, reviewRecs, articleRecs, commentsBySection] =
-    await Promise.all([
-      listConsolidatedSections(slug),
-      listCodes(slug),
-      listSectionReviews(slug),
-      listConsolidatedArticles(slug),
-      listReviewComments(slug, 'section'),
-    ]);
+  const [
+    sectionRecs,
+    codeRecs,
+    reviewRecs,
+    articleRecs,
+    commentsBySection,
+    commentsByParentArticle,
+  ] = await Promise.all([
+    listConsolidatedSections(slug),
+    listCodes(slug),
+    listSectionReviews(slug),
+    listConsolidatedArticles(slug),
+    listReviewComments(slug, 'section'),
+    listReviewComments(slug, 'parent-article'),
+  ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
@@ -88,6 +95,7 @@ async function SectionsData({ slug }: { slug: string }) {
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
       initialCommentsBySection={commentsBySection}
+      initialCommentsByParentArticle={commentsByParentArticle}
     />
   );
 }
