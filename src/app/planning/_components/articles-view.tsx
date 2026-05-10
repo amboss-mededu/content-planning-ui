@@ -180,6 +180,9 @@ export function ArticlesView({
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Articles the open review modal walks. Set when the user clicks one
+  // of the Start review / Review all buttons — see scope handlers below.
+  const [reviewArticles, setReviewArticles] = useState<ArticleRow[]>([]);
   // Visible row set after the DataTable's filters + sort have been
   // applied. Drives the review modal so editors can scope a review
   // pass to whatever's currently filtered.
@@ -245,13 +248,27 @@ export function ArticlesView({
           />
           <Button
             variant="primary"
-            onClick={() => setReviewOpen(true)}
+            onClick={() => {
+              setReviewArticles(visibleRows);
+              setReviewOpen(true);
+            }}
             disabled={visibleRows.length === 0}
           >
             {visibleRows.length === activeRows.length || activeRows.length === 0
               ? 'Start review'
               : `Review ${visibleRows.length.toLocaleString()} filtered`}
           </Button>
+          {visibleRows.length !== activeRows.length && activeRows.length > 0 && (
+            <Button
+              variant="tertiary"
+              onClick={() => {
+                setReviewArticles(activeRows);
+                setReviewOpen(true);
+              }}
+            >
+              Review all {activeRows.length.toLocaleString()}
+            </Button>
+          )}
         </Inline>
         <DataTable
           rows={activeRows}
@@ -283,7 +300,7 @@ export function ArticlesView({
       {reviewOpen && (
         <ReviewModal
           slug={slug}
-          articles={visibleRows}
+          articles={reviewArticles}
           passLabel={pass === 'first' ? '1st pass' : '2nd pass'}
           initialReviews={reviews}
           initialCommentsByArticle={initialCommentsByArticle}

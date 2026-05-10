@@ -199,6 +199,9 @@ export function SectionsView({
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Sections the open review modal walks. Set when the user clicks
+  // one of the Start review / Review all buttons.
+  const [reviewSections, setReviewSections] = useState<SectionRow[]>([]);
   // Visible row set after DataTable's column-level filters + sort,
   // intersected with the toolbar `kind` and `article` filters above.
   // Drives the review modal so editors can scope to whatever's
@@ -291,13 +294,27 @@ export function SectionsView({
         </div>
         <Button
           variant="primary"
-          onClick={() => setReviewOpen(true)}
+          onClick={() => {
+            setReviewSections(visibleRows);
+            setReviewOpen(true);
+          }}
           disabled={visibleRows.length === 0}
         >
           {visibleRows.length === rows.length || rows.length === 0
             ? 'Start review'
             : `Review ${visibleRows.length.toLocaleString()} filtered`}
         </Button>
+        {visibleRows.length !== rows.length && rows.length > 0 && (
+          <Button
+            variant="tertiary"
+            onClick={() => {
+              setReviewSections(rows);
+              setReviewOpen(true);
+            }}
+          >
+            Review all {rows.length.toLocaleString()}
+          </Button>
+        )}
       </Inline>
       <DataTable
         rows={filtered}
@@ -311,7 +328,7 @@ export function SectionsView({
       {reviewOpen && (
         <SectionReviewModal
           slug={slug}
-          sections={visibleRows}
+          sections={reviewSections}
           initialReviews={reviews}
           initialCommentsBySection={initialCommentsBySection}
           initialCommentsByParentArticle={initialCommentsByParentArticle}
