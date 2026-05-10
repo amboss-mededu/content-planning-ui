@@ -38,6 +38,7 @@ function sortForReview(rows: ArticleRow[]): SortedRow[] {
 export function ReviewModal({
   slug,
   articles,
+  passLabel,
   initialReviews,
   initialCommentsByArticle,
   categoryLookup,
@@ -47,8 +48,12 @@ export function ReviewModal({
   onReviewsChange,
 }: {
   slug: string;
-  /** 1st-pass articles to review. */
+  /** Articles to review (whichever lens the user is on — 1st-pass
+   *  consolidatedArticles or 2nd-pass newArticleSuggestions). */
   articles: ArticleRow[];
+  /** Short label for the active consolidation pass, surfaced in the
+   *  modal header so editors know which set they're stamping. */
+  passLabel?: string;
   initialReviews: ReviewMap;
   /** Existing comment threads keyed by consolidatedArticles record id.
    *  Each row's CommentsSection mounts with the matching thread (or an
@@ -186,7 +191,11 @@ export function ReviewModal({
 
   return (
     <Modal
-      header={`Review · ${index + 1} of ${total}`}
+      header={
+        passLabel
+          ? `Review · ${passLabel} · ${index + 1} of ${total}`
+          : `Review · ${index + 1} of ${total}`
+      }
       subHeader={`${current.category} — ${bucketStats?.indexInBucket}/${bucketStats?.bucketSize} in bucket · ${bucketStats?.approved} approved · ${bucketStats?.rejected} rejected · ${bucketStats?.unreviewed} unreviewed`}
       size="l"
       isDismissible

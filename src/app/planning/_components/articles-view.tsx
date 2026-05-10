@@ -200,21 +200,30 @@ export function ArticlesView({
 
   const activeRows = pass === 'first' ? consolidated : newOnes;
 
-  const reviewCounts = useMemo(() => {
-    let approved = 0;
-    let rejected = 0;
-    for (const r of consolidated) {
-      if (!r.id) continue;
-      const s = reviews[r.id];
-      if (s === 'approved') approved++;
-      else if (s === 'rejected') rejected++;
+  // Per-pass review counts. PB record ids are unique across collections,
+  // so the same `reviews` map covers both 1st-pass (consolidatedArticles)
+  // and 2nd-pass (newArticleSuggestions) — we just slice it by which
+  // rows we're counting.
+  const reviewCountsByPass = useMemo(() => {
+    function count(rows: ArticleRow[]) {
+      let approved = 0;
+      let rejected = 0;
+      for (const r of rows) {
+        if (!r.id) continue;
+        const s = reviews[r.id];
+        if (s === 'approved') approved++;
+        else if (s === 'rejected') rejected++;
+      }
+      return {
+        approved,
+        rejected,
+        unreviewed: rows.length - approved - rejected,
+      };
     }
-    return {
-      approved,
-      rejected,
-      unreviewed: consolidated.length - approved - rejected,
-    };
-  }, [consolidated, reviews]);
+    return { first: count(consolidated), second: count(newOnes) };
+  }, [consolidated, newOnes, reviews]);
+  const reviewCounts =
+    pass === 'first' ? reviewCountsByPass.first : reviewCountsByPass.second;
 
   return (
     <Stack space="xl">
@@ -230,26 +239,20 @@ export function ArticlesView({
               { name: 'pass', value: 'second', label: '2nd pass' },
             ]}
           />
-          {pass === 'first' && (
-            <Button
-              variant="primary"
-              onClick={() => setReviewOpen(true)}
-              disabled={consolidated.length === 0}
-            >
-              Start review
-            </Button>
-          )}
+          <Button
+            variant="primary"
+            onClick={() => setReviewOpen(true)}
+            disabled={activeRows.length === 0}
+          >
+            Start review
+          </Button>
         </Inline>
         <DataTable
           rows={activeRows}
           columns={columns}
           getRowKey={(_r, i) => `${pass}-${i}`}
-          getRowStyle={pass === 'first' ? getRowStyle : undefined}
-          leadingNote={
-            pass === 'first'
-              ? `${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`
-              : undefined
-          }
+          getRowStyle={getRowStyle}
+          leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
           emptyText={
             pass === 'first'
               ? 'No 1st-pass articles for this specialty.'
@@ -273,7 +276,8 @@ export function ArticlesView({
       {reviewOpen && (
         <ReviewModal
           slug={slug}
-          articles={consolidated}
+          articles={pass === 'first' ? consolidated : newOnes}
+          passLabel={pass === 'first' ? '1st pass' : '2nd pass'}
           initialReviews={reviews}
           initialCommentsByArticle={initialCommentsByArticle}
           categoryLookup={categoryLookup}
