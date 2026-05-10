@@ -112,6 +112,20 @@ export interface SectionReviewRecord extends PbRecord {
   notes?: string;
 }
 
+// --- Collection: reviewComments --------------------------------------------
+
+export type ReviewRecordKind = 'article' | 'section';
+
+export interface ReviewCommentRecord extends PbRecord {
+  specialtySlug: string;
+  recordKind: ReviewRecordKind;
+  /** PB id of the consolidatedArticles or consolidatedSections row this
+   *  comment is attached to. */
+  recordId: string;
+  authorEmail?: string;
+  body: string;
+}
+
 // --- Collection: mappingsInFlight ------------------------------------------
 
 export interface MappingInFlightRecord extends PbRecord {

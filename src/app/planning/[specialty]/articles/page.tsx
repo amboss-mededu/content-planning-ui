@@ -6,6 +6,7 @@ import {
   listNewArticleSuggestions,
 } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { listReviewComments } from '@/lib/data/review-comments';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type {
   ArticleUpdateSuggestion,
@@ -73,15 +74,23 @@ function projectSuggestion(
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [consolidatedRecs, newRecs, updateRecs, codeRecs, reviewRecs, sectionRecs] =
-    await Promise.all([
-      listConsolidatedArticles(slug),
-      listNewArticleSuggestions(slug),
-      listArticleUpdateSuggestions(slug),
-      listCodes(slug),
-      listArticleReviews(slug),
-      listConsolidatedSections(slug),
-    ]);
+  const [
+    consolidatedRecs,
+    newRecs,
+    updateRecs,
+    codeRecs,
+    reviewRecs,
+    sectionRecs,
+    commentsByArticle,
+  ] = await Promise.all([
+    listConsolidatedArticles(slug),
+    listNewArticleSuggestions(slug),
+    listArticleUpdateSuggestions(slug),
+    listCodes(slug),
+    listArticleReviews(slug),
+    listConsolidatedSections(slug),
+    listReviewComments(slug, 'article'),
+  ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
@@ -112,6 +121,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
+      initialCommentsByArticle={commentsByArticle}
     />
   );
 }

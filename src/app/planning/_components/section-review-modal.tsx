@@ -2,9 +2,11 @@
 
 import { Badge, Button, Inline, Modal, Stack, Text } from '@amboss/design-system';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { resetSectionReview, submitSectionReview } from '../[specialty]/actions';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
+import { CommentsSection } from './comments-section';
 import type { ReviewMap, ReviewStatus } from './review-modal';
 import type { SectionRow } from './sections-view';
 
@@ -37,6 +39,7 @@ export function SectionReviewModal({
   slug,
   sections,
   initialReviews,
+  initialCommentsBySection,
   categoryLookup,
   titleOriginLookup,
   onClose,
@@ -45,6 +48,7 @@ export function SectionReviewModal({
   slug: string;
   sections: SectionRow[];
   initialReviews: ReviewMap;
+  initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   onClose: () => void;
@@ -79,6 +83,14 @@ export function SectionReviewModal({
   // biome-ignore lint/correctness/useExhaustiveDependencies: handlers close over latest state via the listed deps; adding decide/goNext/goPrev/onClose would re-bind every render.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+          if (e.key === 'Escape') onClose();
+          return;
+        }
+      }
       if (submitting) return;
       if (e.key === 'ArrowRight') goNext();
       else if (e.key === 'ArrowLeft') goPrev();
@@ -266,6 +278,14 @@ export function SectionReviewModal({
               </Text>
             </Stack>
           )}
+
+          <CommentsSection
+            key={current.id}
+            slug={slug}
+            recordKind="section"
+            recordId={current.id}
+            initialComments={initialCommentsBySection[current.id] ?? []}
+          />
         </div>
 
         <div

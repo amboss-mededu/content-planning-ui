@@ -3,6 +3,7 @@
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
@@ -179,12 +180,14 @@ export function SectionsView({
   categoryLookup,
   titleOriginLookup,
   initialReviews,
+  initialCommentsBySection,
 }: {
   slug: string;
   rows: SectionRow[];
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
+  initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
@@ -294,6 +297,7 @@ export function SectionsView({
           slug={slug}
           sections={rows}
           initialReviews={reviews}
+          initialCommentsBySection={initialCommentsBySection}
           categoryLookup={categoryLookup}
           titleOriginLookup={titleOriginLookup}
           onClose={() => setReviewOpen(false)}

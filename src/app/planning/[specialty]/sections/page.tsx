@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { ConsolidatedSection } from '@/lib/types';
@@ -53,12 +54,14 @@ function projectSection(r: ConsolidatedSection): SectionRow {
 }
 
 async function SectionsData({ slug }: { slug: string }) {
-  const [sectionRecs, codeRecs, reviewRecs, articleRecs] = await Promise.all([
-    listConsolidatedSections(slug),
-    listCodes(slug),
-    listSectionReviews(slug),
-    listConsolidatedArticles(slug),
-  ]);
+  const [sectionRecs, codeRecs, reviewRecs, articleRecs, commentsBySection] =
+    await Promise.all([
+      listConsolidatedSections(slug),
+      listCodes(slug),
+      listSectionReviews(slug),
+      listConsolidatedArticles(slug),
+      listReviewComments(slug, 'section'),
+    ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
@@ -84,6 +87,7 @@ async function SectionsData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
+      initialCommentsBySection={commentsBySection}
     />
   );
 }

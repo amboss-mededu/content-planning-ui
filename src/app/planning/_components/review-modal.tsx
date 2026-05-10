@@ -2,10 +2,12 @@
 
 import { Badge, Button, Inline, Modal, Stack, Text } from '@amboss/design-system';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { resetArticleReview, submitArticleReview } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
+import { CommentsSection } from './comments-section';
 
 export type ReviewStatus = 'approved' | 'rejected';
 export type ReviewMap = Record<string, ReviewStatus>;
@@ -37,6 +39,7 @@ export function ReviewModal({
   slug,
   articles,
   initialReviews,
+  initialCommentsByArticle,
   categoryLookup,
   titleOriginLookup,
   onClose,
@@ -46,6 +49,10 @@ export function ReviewModal({
   /** 1st-pass articles to review. */
   articles: ArticleRow[];
   initialReviews: ReviewMap;
+  /** Existing comment threads keyed by consolidatedArticles record id.
+   *  Each row's CommentsSection mounts with the matching thread (or an
+   *  empty array) and accumulates locally on submit. */
+  initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   onClose: () => void;
@@ -84,6 +91,17 @@ export function ReviewModal({
   // biome-ignore lint/correctness/useExhaustiveDependencies: handlers close over latest state via the listed deps; adding decide/goNext/goPrev/onClose would re-bind the listener every render.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Don't intercept while typing in a text field — the comments
+      // textarea would otherwise capture every "a"/"r"/"y"/"n" as a
+      // decision shortcut and fire approve/reject on each character.
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+          if (e.key === 'Escape') onClose();
+          return;
+        }
+      }
       if (submitting) return;
       if (e.key === 'ArrowRight') goNext();
       else if (e.key === 'ArrowLeft') goPrev();
@@ -270,6 +288,14 @@ export function ReviewModal({
               </Text>
             </Stack>
           )}
+
+          <CommentsSection
+            key={current.id}
+            slug={slug}
+            recordKind="article"
+            recordId={current.id}
+            initialComments={initialCommentsByArticle[current.id] ?? []}
+          />
         </div>
 
         <div

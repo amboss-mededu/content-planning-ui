@@ -11,6 +11,7 @@ import {
 } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
@@ -159,6 +160,7 @@ export function ArticlesView({
   categoryLookup,
   titleOriginLookup,
   initialReviews,
+  initialCommentsByArticle,
 }: {
   slug: string;
   consolidated: ArticleRow[];
@@ -167,6 +169,7 @@ export function ArticlesView({
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
+  initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
@@ -270,6 +273,7 @@ export function ArticlesView({
           slug={slug}
           articles={consolidated}
           initialReviews={reviews}
+          initialCommentsByArticle={initialCommentsByArticle}
           categoryLookup={categoryLookup}
           titleOriginLookup={titleOriginLookup}
           onClose={() => setReviewOpen(false)}
