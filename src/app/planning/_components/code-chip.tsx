@@ -83,8 +83,6 @@ export function CodeChip({
         title={label}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        onFocus={() => setHover(true)}
-        onBlur={() => setHover(false)}
       >
         {label}
       </button>

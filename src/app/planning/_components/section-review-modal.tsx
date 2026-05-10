@@ -15,7 +15,13 @@ import { resetSectionReview, submitSectionReview } from '../[specialty]/actions'
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
-import type { ReviewMap, ReviewStatus } from './review-modal';
+import {
+  type ReviewerInfo,
+  type ReviewerMap,
+  type ReviewMap,
+  type ReviewStatus,
+  reviewerLabel,
+} from './review-modal';
 import type { SectionRow } from './sections-view';
 
 type ViewMode = 'section' | 'article';
@@ -52,6 +58,7 @@ export function SectionReviewModal({
   slug,
   sections,
   initialReviews,
+  initialReviewers,
   initialCommentsBySection,
   initialCommentsByParentArticle,
   categoryLookup,
@@ -59,10 +66,12 @@ export function SectionReviewModal({
   viewerEmail,
   onClose,
   onReviewsChange,
+  onReviewersChange,
 }: {
   slug: string;
   sections: SectionRow[];
   initialReviews: ReviewMap;
+  initialReviewers: ReviewerMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
@@ -70,9 +79,11 @@ export function SectionReviewModal({
   viewerEmail?: string;
   onClose: () => void;
   onReviewsChange: (next: ReviewMap) => void;
+  onReviewersChange: (next: ReviewerMap) => void;
 }) {
   const sorted = useMemo(() => sortForReview(sections), [sections]);
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [index, setIndex] = useState(() => {
     const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;
@@ -171,16 +182,26 @@ export function SectionReviewModal({
   async function setRowStatus(rowId: string, status: ReviewStatus) {
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
+    const nextReviewers: ReviewerMap = {
+      ...reviewers,
+      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+    };
     setReviews(next);
+    setReviewers(nextReviewers);
     onReviewsChange(next);
+    onReviewersChange(nextReviewers);
     try {
       await submitSectionReview(slug, rowId, status);
     } catch (err) {
       console.error('submitSectionReview failed', err);
-      const reverted = { ...reviews };
-      delete reverted[rowId];
-      setReviews(reverted);
-      onReviewsChange(reverted);
+      const revertedReviews = { ...reviews };
+      const revertedReviewers = { ...reviewers };
+      delete revertedReviews[rowId];
+      delete revertedReviewers[rowId];
+      setReviews(revertedReviews);
+      setReviewers(revertedReviewers);
+      onReviewsChange(revertedReviews);
+      onReviewersChange(revertedReviewers);
     } finally {
       setSubmitting(false);
     }
@@ -189,9 +210,13 @@ export function SectionReviewModal({
   async function clearRowStatus(rowId: string) {
     setSubmitting(true);
     const next = { ...reviews };
+    const nextReviewers = { ...reviewers };
     delete next[rowId];
+    delete nextReviewers[rowId];
     setReviews(next);
+    setReviewers(nextReviewers);
     onReviewsChange(next);
+    onReviewersChange(nextReviewers);
     try {
       await resetSectionReview(slug, rowId);
     } catch (err) {
@@ -302,6 +327,7 @@ export function SectionReviewModal({
             <SectionViewBody
               current={current}
               currentStatus={currentStatus}
+              currentReviewer={reviewers[current.id]}
               previousNames={previousNames}
               titleOriginLookup={titleOriginLookup}
               categoryLookup={categoryLookup}
@@ -314,6 +340,7 @@ export function SectionReviewModal({
               articleSections={articleSections}
               articleKey={current.articleId ?? current.articleTitle ?? '_'}
               reviews={reviews}
+              reviewers={reviewers}
               categoryLookup={categoryLookup}
               submitting={submitting}
               onApprove={toggleApproveRow}
@@ -414,6 +441,7 @@ export function SectionReviewModal({
 function SectionViewBody({
   current,
   currentStatus,
+  currentReviewer,
   previousNames,
   titleOriginLookup,
   categoryLookup,
@@ -423,6 +451,7 @@ function SectionViewBody({
 }: {
   current: SortedRow;
   currentStatus: ReviewStatus | undefined;
+  currentReviewer: ReviewerInfo | undefined;
   previousNames: string[] | undefined;
   titleOriginLookup: TitleOriginLookup;
   categoryLookup: CategoryLookup;
@@ -439,8 +468,16 @@ function SectionViewBody({
           </Text>
           {current.updateType === 'new' && <Badge text="new" color="blue" />}
           {current.updateType === 'update' && <Badge text="update" color="purple" />}
-          {currentStatus === 'approved' && <Badge text="approved" color="green" />}
-          {currentStatus === 'rejected' && <Badge text="rejected" color="red" />}
+          {currentStatus === 'approved' && (
+            <span title={reviewerLabel(currentReviewer, 'approved')}>
+              <Badge text="approved" color="green" />
+            </span>
+          )}
+          {currentStatus === 'rejected' && (
+            <span title={reviewerLabel(currentReviewer, 'rejected')}>
+              <Badge text="rejected" color="red" />
+            </span>
+          )}
         </Inline>
         <Inline space="s">
           {current.articleTitle && (
@@ -587,6 +624,7 @@ function ArticleViewBody({
   articleSections,
   articleKey,
   reviews,
+  reviewers,
   categoryLookup,
   submitting,
   onApprove,
@@ -601,6 +639,7 @@ function ArticleViewBody({
    *  the comment thread re-mounts on article navigation. */
   articleKey: string;
   reviews: ReviewMap;
+  reviewers: ReviewerMap;
   categoryLookup: CategoryLookup;
   submitting: boolean;
   onApprove: (rowId: string) => void;
@@ -677,7 +716,11 @@ function ArticleViewBody({
                     >
                       <button
                         type="button"
-                        title={status === 'approved' ? 'Clear approval' : 'Approve'}
+                        title={
+                          status === 'approved'
+                            ? `${reviewerLabel(reviewers[s.id], 'approved')} — click to clear`
+                            : 'Approve'
+                        }
                         style={decideButton(status === 'approved', 'approve')}
                         disabled={submitting}
                         onClick={() => onApprove(s.id)}
@@ -686,7 +729,11 @@ function ArticleViewBody({
                       </button>
                       <button
                         type="button"
-                        title={status === 'rejected' ? 'Clear rejection' : 'Reject'}
+                        title={
+                          status === 'rejected'
+                            ? `${reviewerLabel(reviewers[s.id], 'rejected')} — click to clear`
+                            : 'Reject'
+                        }
                         style={decideButton(status === 'rejected', 'reject')}
                         disabled={submitting}
                         onClick={() => onReject(s.id)}

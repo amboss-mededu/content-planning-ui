@@ -12,7 +12,7 @@ import {
   extractCodes,
   type TitleOriginLookup,
 } from '../../_components/code-utils';
-import type { ReviewMap } from '../../_components/review-modal';
+import type { ReviewerMap, ReviewMap } from '../../_components/review-modal';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -97,8 +97,13 @@ async function SectionsData({ slug }: { slug: string }) {
   );
 
   const initialReviews: ReviewMap = {};
+  const initialReviewers: ReviewerMap = {};
   for (const [id, r] of Object.entries(reviewRecs)) {
     initialReviews[id] = r.status;
+    initialReviewers[id] = {
+      reviewerEmail: r.reviewerEmail,
+      reviewedAt: r.reviewedAt,
+    };
   }
 
   const rows = sectionRecs.map(projectSection);
@@ -110,6 +115,7 @@ async function SectionsData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
+      initialReviewers={initialReviewers}
       initialCommentsBySection={commentsBySection}
       initialCommentsByParentArticle={commentsByParentArticle}
       viewerEmail={user?.email ?? undefined}

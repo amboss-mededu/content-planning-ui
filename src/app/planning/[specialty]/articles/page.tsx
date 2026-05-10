@@ -21,7 +21,7 @@ import {
   extractCodes,
   type TitleOriginLookup,
 } from '../../_components/code-utils';
-import type { ReviewMap } from '../../_components/review-modal';
+import type { ReviewerMap, ReviewMap } from '../../_components/review-modal';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({
@@ -107,8 +107,13 @@ async function ArticlesData({ slug }: { slug: string }) {
   );
 
   const initialReviews: ReviewMap = {};
+  const initialReviewers: ReviewerMap = {};
   for (const [id, r] of Object.entries(reviewRecs)) {
     initialReviews[id] = r.status;
+    initialReviewers[id] = {
+      reviewerEmail: r.reviewerEmail,
+      reviewedAt: r.reviewedAt,
+    };
   }
 
   const consolidated = consolidatedRecs.map(projectConsolidated);
@@ -124,6 +129,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
+      initialReviewers={initialReviewers}
       initialCommentsByArticle={commentsByArticle}
       viewerEmail={user?.email ?? undefined}
     />

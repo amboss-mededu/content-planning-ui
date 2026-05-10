@@ -15,7 +15,7 @@ import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
-import { type ReviewMap, ReviewModal } from './review-modal';
+import { type ReviewerMap, type ReviewMap, ReviewModal } from './review-modal';
 
 /**
  * Unified row shape for the New Articles tab. Both 1st-pass
@@ -160,6 +160,7 @@ export function ArticlesView({
   categoryLookup,
   titleOriginLookup,
   initialReviews,
+  initialReviewers,
   initialCommentsByArticle,
   viewerEmail,
 }: {
@@ -170,6 +171,7 @@ export function ArticlesView({
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
+  initialReviewers: ReviewerMap;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail?: string;
 }) {
@@ -179,6 +181,7 @@ export function ArticlesView({
     params.get('pass') === 'second' ? 'second' : 'first',
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
   // Articles the open review modal walks. Set when the user clicks one
   // of the Start review / Review all buttons — see scope handlers below.
@@ -303,12 +306,14 @@ export function ArticlesView({
           articles={reviewArticles}
           passLabel={pass === 'first' ? '1st pass' : '2nd pass'}
           initialReviews={reviews}
+          initialReviewers={reviewers}
           initialCommentsByArticle={initialCommentsByArticle}
           categoryLookup={categoryLookup}
           titleOriginLookup={titleOriginLookup}
           viewerEmail={viewerEmail}
           onClose={() => setReviewOpen(false)}
           onReviewsChange={setReviews}
+          onReviewersChange={setReviewers}
         />
       )}
     </Stack>

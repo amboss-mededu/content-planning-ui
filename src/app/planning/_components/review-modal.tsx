@@ -12,6 +12,26 @@ import { CommentsSection } from './comments-section';
 export type ReviewStatus = 'approved' | 'rejected';
 export type ReviewMap = Record<string, ReviewStatus>;
 
+/** Per-record reviewer trail surfaced via the approved/rejected
+ *  hover tooltip and the article-view toggle's `title` attribute. */
+export type ReviewerInfo = { reviewerEmail?: string; reviewedAt?: number };
+export type ReviewerMap = Record<string, ReviewerInfo>;
+
+function reviewerHandle(email?: string): string {
+  if (!email) return 'unknown';
+  const at = email.indexOf('@');
+  return at > 0 ? email.slice(0, at) : email;
+}
+
+export function reviewerLabel(
+  info: ReviewerInfo | undefined,
+  status: ReviewStatus,
+): string {
+  const handle = reviewerHandle(info?.reviewerEmail);
+  const when = info?.reviewedAt ? new Date(info.reviewedAt).toLocaleString() : null;
+  return when ? `${status} by ${handle} · ${when}` : `${status} by ${handle}`;
+}
+
 type SortedRow = ArticleRow & {
   /** Always set — review pass operates only on 1st-pass rows that have an id. */
   id: string;
@@ -40,12 +60,14 @@ export function ReviewModal({
   articles,
   passLabel,
   initialReviews,
+  initialReviewers,
   initialCommentsByArticle,
   categoryLookup,
   titleOriginLookup,
   viewerEmail,
   onClose,
   onReviewsChange,
+  onReviewersChange,
 }: {
   slug: string;
   /** Articles to review (whichever lens the user is on — 1st-pass
@@ -55,6 +77,7 @@ export function ReviewModal({
    *  modal header so editors know which set they're stamping. */
   passLabel?: string;
   initialReviews: ReviewMap;
+  initialReviewers: ReviewerMap;
   /** Existing comment threads keyed by consolidatedArticles record id.
    *  Each row's CommentsSection mounts with the matching thread (or an
    *  empty array) and accumulates locally on submit. */
@@ -66,9 +89,11 @@ export function ReviewModal({
   /** Called whenever a review is recorded so the parent can re-tint rows
    *  optimistically without waiting for a server round-trip. */
   onReviewsChange: (next: ReviewMap) => void;
+  onReviewersChange: (next: ReviewerMap) => void;
 }) {
   const sorted = useMemo(() => sortForReview(articles), [articles]);
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [index, setIndex] = useState(() => {
     // Open at the first unreviewed row if any; otherwise the first row.
     const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
@@ -134,17 +159,27 @@ export function ReviewModal({
     const rowId = current.id;
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
+    const nextReviewers: ReviewerMap = {
+      ...reviewers,
+      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+    };
     setReviews(next);
+    setReviewers(nextReviewers);
     onReviewsChange(next);
+    onReviewersChange(nextReviewers);
     try {
       await submitArticleReview(slug, rowId, status);
     } catch (err) {
       console.error('submitArticleReview failed', err);
       // Revert on failure.
-      const reverted = { ...reviews };
-      delete reverted[rowId];
-      setReviews(reverted);
-      onReviewsChange(reverted);
+      const revertedReviews = { ...reviews };
+      const revertedReviewers = { ...reviewers };
+      delete revertedReviews[rowId];
+      delete revertedReviewers[rowId];
+      setReviews(revertedReviews);
+      setReviewers(revertedReviewers);
+      onReviewsChange(revertedReviews);
+      onReviewersChange(revertedReviewers);
     } finally {
       setSubmitting(false);
       // Auto-advance.
@@ -157,9 +192,13 @@ export function ReviewModal({
     const rowId = current.id;
     setSubmitting(true);
     const next = { ...reviews };
+    const nextReviewers = { ...reviewers };
     delete next[rowId];
+    delete nextReviewers[rowId];
     setReviews(next);
+    setReviewers(nextReviewers);
     onReviewsChange(next);
+    onReviewersChange(nextReviewers);
     try {
       await resetArticleReview(slug, rowId);
     } catch (err) {
@@ -227,8 +266,16 @@ export function ReviewModal({
               <Text size="m" weight="bold">
                 {current.articleTitle ?? '(untitled)'}
               </Text>
-              {currentStatus === 'approved' && <Badge text="approved" color="green" />}
-              {currentStatus === 'rejected' && <Badge text="rejected" color="red" />}
+              {currentStatus === 'approved' && (
+                <span title={reviewerLabel(reviewers[current.id], 'approved')}>
+                  <Badge text="approved" color="green" />
+                </span>
+              )}
+              {currentStatus === 'rejected' && (
+                <span title={reviewerLabel(reviewers[current.id], 'rejected')}>
+                  <Badge text="rejected" color="red" />
+                </span>
+              )}
             </Inline>
             <Inline space="s">
               {current.articleType && (

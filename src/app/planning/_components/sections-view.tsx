@@ -7,7 +7,7 @@ import type { ReviewCommentRecord } from '@/lib/pb/types';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
-import type { ReviewMap } from './review-modal';
+import type { ReviewerMap, ReviewMap } from './review-modal';
 import { SectionReviewModal } from './section-review-modal';
 
 /**
@@ -180,6 +180,7 @@ export function SectionsView({
   categoryLookup,
   titleOriginLookup,
   initialReviews,
+  initialReviewers,
   initialCommentsBySection,
   initialCommentsByParentArticle,
   viewerEmail,
@@ -189,6 +190,7 @@ export function SectionsView({
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
+  initialReviewers: ReviewerMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail?: string;
@@ -198,6 +200,7 @@ export function SectionsView({
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
   // Sections the open review modal walks. Set when the user clicks
   // one of the Start review / Review all buttons.
@@ -330,6 +333,7 @@ export function SectionsView({
           slug={slug}
           sections={reviewSections}
           initialReviews={reviews}
+          initialReviewers={reviewers}
           initialCommentsBySection={initialCommentsBySection}
           initialCommentsByParentArticle={initialCommentsByParentArticle}
           categoryLookup={categoryLookup}
@@ -337,6 +341,7 @@ export function SectionsView({
           viewerEmail={viewerEmail}
           onClose={() => setReviewOpen(false)}
           onReviewsChange={setReviews}
+          onReviewersChange={setReviewers}
         />
       )}
     </Stack>
