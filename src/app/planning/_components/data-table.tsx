@@ -182,6 +182,7 @@ export function DataTable<T>({
   emptyText = 'No rows to display.',
   getRowKey,
   getRowStyle,
+  onVisibleRowsChange,
   leadingNote,
   countAddendum,
   storageKey,
@@ -194,6 +195,11 @@ export function DataTable<T>({
    *  and override the default zebra stripe — used by review-pass tinting
    *  to show approved (green) / rejected (red) rows. */
   getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  /** Fires whenever the currently-visible row set changes (after the
+   *  table's filters + sort are applied). The parent can plumb this
+   *  into a review modal so editors can stamp through "what's
+   *  filtered" rather than the full list. */
+  onVisibleRowsChange?: (rows: T[]) => void;
   /** Short caption appended after the row count with a `·` separator. Use
    *  `countAddendum` instead when you want a parenthetical that depends on
    *  the live filtered set. */
@@ -487,6 +493,15 @@ export function DataTable<T>({
   const onSortSet = (key: string, dir: 'asc' | 'desc' | null) => {
     setSort(dir === null ? null : { key, dir });
   };
+
+  // Notify parent of the live visible-rows set whenever it changes.
+  // Used by callers wiring the review modal to "review what's filtered"
+  // — the modal walks `sortedRows` order so the editor sees rows in
+  // the same order the table just sorted them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: stable callback signature; we deliberately don't include onVisibleRowsChange to allow inline functions without churn.
+  useEffect(() => {
+    onVisibleRowsChange?.(sortedRows);
+  }, [sortedRows]);
 
   if (rows.length === 0) {
     return <Text color="secondary">{emptyText}</Text>;

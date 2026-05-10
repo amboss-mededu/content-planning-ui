@@ -180,6 +180,10 @@ export function ArticlesView({
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Visible row set after the DataTable's filters + sort have been
+  // applied. Drives the review modal so editors can scope a review
+  // pass to whatever's currently filtered.
+  const [visibleRows, setVisibleRows] = useState<ArticleRow[]>([]);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -242,9 +246,11 @@ export function ArticlesView({
           <Button
             variant="primary"
             onClick={() => setReviewOpen(true)}
-            disabled={activeRows.length === 0}
+            disabled={visibleRows.length === 0}
           >
-            Start review
+            {visibleRows.length === activeRows.length || activeRows.length === 0
+              ? 'Start review'
+              : `Review ${visibleRows.length.toLocaleString()} filtered`}
           </Button>
         </Inline>
         <DataTable
@@ -252,6 +258,7 @@ export function ArticlesView({
           columns={columns}
           getRowKey={(_r, i) => `${pass}-${i}`}
           getRowStyle={getRowStyle}
+          onVisibleRowsChange={setVisibleRows}
           leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
           emptyText={
             pass === 'first'
@@ -276,7 +283,7 @@ export function ArticlesView({
       {reviewOpen && (
         <ReviewModal
           slug={slug}
-          articles={pass === 'first' ? consolidated : newOnes}
+          articles={visibleRows}
           passLabel={pass === 'first' ? '1st pass' : '2nd pass'}
           initialReviews={reviews}
           initialCommentsByArticle={initialCommentsByArticle}
