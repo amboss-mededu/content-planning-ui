@@ -26,6 +26,13 @@ import { StartRunForm } from './start-run-form';
 
 type StagesMap = Record<StageName, StageContext | null>;
 
+export type ArticleApprovalStats = {
+  total: number;
+  approved: number;
+  rejected: number;
+  unreviewed: number;
+};
+
 export function PipelineDashboard({
   specialtySlug,
   run,
@@ -38,6 +45,7 @@ export function PipelineDashboard({
   codeCategories,
   unmappedCodePicker,
   mapCodesHistory,
+  articleApprovalStats,
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -50,6 +58,7 @@ export function PipelineDashboard({
   codeCategories: CodeCategorySummary[];
   unmappedCodePicker: UnmappedCodePickerRow[];
   mapCodesHistory: MapCodesHistory;
+  articleApprovalStats: ArticleApprovalStats;
 }) {
   const runActive =
     run !== null &&
@@ -372,7 +381,11 @@ export function PipelineDashboard({
           />
           <StageCard
             title="Articles (secondary)"
-            description="Dedupe new-article candidates across the specialty."
+            description={
+              articleApprovalStats.total === 0
+                ? 'Dedupe new-article candidates across the specialty. Only approved 1st-pass articles flow into this pass — review them on the New Articles tab first.'
+                : `Dedupe new-article candidates across the specialty. Only approved 1st-pass articles flow into this pass — currently ${articleApprovalStats.approved}/${articleApprovalStats.total} approved · ${articleApprovalStats.rejected} rejected · ${articleApprovalStats.unreviewed} unreviewed. Review the unreviewed ones on the New Articles tab before kicking off this stage.`
+            }
             stage={stages.consolidate_articles?.stage ?? null}
             specialtySlug={specialtySlug}
             stageName="consolidate_articles"

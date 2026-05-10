@@ -1,5 +1,7 @@
 import { Suspense } from 'react';
 import { getAmbossLibraryStats } from '@/lib/data/amboss-library';
+import { listArticleReviews } from '@/lib/data/article-reviews';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
 import {
   listCodeCategories,
@@ -75,6 +77,8 @@ async function PipelineData({ slug }: { slug: string }) {
     codeCategories,
     unmappedCodePicker,
     mapCodesHistory,
+    consolidatedArticleRecs,
+    articleReviewRecs,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
@@ -86,7 +90,28 @@ async function PipelineData({ slug }: { slug: string }) {
     listCodeCategories(slug),
     listUnmappedCodesForPicker(slug),
     getMapCodesHistory(slug),
+    listConsolidatedArticles(slug),
+    listArticleReviews(slug),
   ]);
+
+  // Stats for the "Articles (secondary)" card — the 2nd consolidation
+  // pass should only ingest approved 1st-pass articles. Surface the
+  // current approval state on the card so the editor sees what's gated.
+  let approved = 0;
+  let rejected = 0;
+  for (const a of consolidatedArticleRecs) {
+    const id = a.id;
+    if (!id) continue;
+    const r = articleReviewRecs[id];
+    if (r?.status === 'approved') approved++;
+    else if (r?.status === 'rejected') rejected++;
+  }
+  const articleApprovalStats = {
+    total: consolidatedArticleRecs.length,
+    approved,
+    rejected,
+    unreviewed: consolidatedArticleRecs.length - approved - rejected,
+  };
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
@@ -117,6 +142,7 @@ async function PipelineData({ slug }: { slug: string }) {
       codeCategories={codeCategories}
       unmappedCodePicker={unmappedCodePicker}
       mapCodesHistory={mapCodesHistory}
+      articleApprovalStats={articleApprovalStats}
     />
   );
 }

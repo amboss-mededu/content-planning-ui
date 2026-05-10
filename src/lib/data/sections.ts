@@ -24,9 +24,9 @@ export async function listConsolidatedSections(
   const rows = await pb
     .collection<ConsolidatedSectionRecord>('consolidatedSections')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
+  // Keep `id` (PB record id) — the review pass keys reviews on it.
   return rows.map((row) => {
     const {
-      id: _id,
       created: _created,
       updated: _updated,
       collectionId: _ci,

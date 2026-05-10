@@ -9,8 +9,8 @@ const TABS = [
   { label: 'Codes', segment: 'codes' },
   { label: 'Milestones', segment: 'milestones' },
   { label: 'Categories', segment: 'categories' },
-  { label: 'Articles', segment: 'articles' },
-  { label: 'Sections', segment: 'sections' },
+  { label: 'New Articles', segment: 'articles' },
+  { label: 'Article Updates', segment: 'sections' },
   { label: 'Sources', segment: 'sources' },
 ] as const;
 
