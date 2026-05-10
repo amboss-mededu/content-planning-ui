@@ -12,7 +12,7 @@ import type {
   NewArticleSuggestion,
 } from '@/lib/types';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
-import { extractCodeStrings } from '../../_components/code-chip';
+import { extractCodeStrings } from '../../_components/code-utils';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({

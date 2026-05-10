@@ -3,7 +3,7 @@ import { listCodes } from '@/lib/data/codes';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { CodeRecord } from '@/lib/pb/types';
 import type { ConsolidatedSection } from '@/lib/types';
-import { extractCodeStrings } from '../../_components/code-chip';
+import { extractCodeStrings } from '../../_components/code-utils';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
