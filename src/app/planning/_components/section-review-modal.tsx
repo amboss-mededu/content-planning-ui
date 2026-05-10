@@ -569,7 +569,7 @@ function SectionViewBody({
 const cellStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderTop: '1px solid rgba(0, 0, 0, 0.06)',
-  verticalAlign: 'top',
+  verticalAlign: 'middle',
   fontSize: 13,
   textAlign: 'left',
 };
@@ -663,8 +663,8 @@ function ArticleViewBody({
               <th style={headStyle}>Section title</th>
               <th style={{ ...headStyle, width: 90 }}>Update type</th>
               <th style={headStyle}>Codes</th>
-              <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Importance</th>
-              <th style={{ ...headStyle, width: 90, textAlign: 'right' }}>Coverage</th>
+              <th style={{ ...headStyle, width: 90, textAlign: 'center' }}>Importance</th>
+              <th style={{ ...headStyle, width: 90, textAlign: 'center' }}>Coverage</th>
               <th style={headStyle}>Justification</th>
               <th style={{ ...headStyle, width: 80, textAlign: 'center' }}>Decision</th>
             </tr>
@@ -695,10 +695,10 @@ function ArticleViewBody({
                   <td style={cellStyle}>
                     <CodeChipList codes={s.codes} categoryLookup={categoryLookup} />
                   </td>
-                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                  <td style={{ ...cellStyle, textAlign: 'center' }}>
                     {s.overallImportance ?? '—'}
                   </td>
-                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                  <td style={{ ...cellStyle, textAlign: 'center' }}>
                     {s.overallCoverage ?? '—'}
                   </td>
                   <td style={cellStyle}>
