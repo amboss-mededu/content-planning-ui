@@ -1,7 +1,7 @@
 'use client';
 
 import { Popover, Stack, Text } from '@amboss/design-system';
-import type { CSSProperties } from 'react';
+import { type CSSProperties, useState } from 'react';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 
 const buttonStyle: CSSProperties = {
@@ -31,6 +31,12 @@ export function CodeChip({
   category?: string;
 }) {
   const label = entry.description ?? entry.code;
+  // Hover-triggered popover. Click is intentionally not wired — the
+  // content is read-only metadata, so hover/focus is the right
+  // interaction. `isVisible` makes Popover controlled; the user
+  // moving off the chip dismisses immediately (no need to keep the
+  // popup open since there's nothing to click inside it).
+  const [hover, setHover] = useState(false);
   const content = (
     <div style={{ padding: 12, maxWidth: 360 }}>
       <Stack space="s">
@@ -65,8 +71,21 @@ export function CodeChip({
   );
 
   return (
-    <Popover content={content}>
-      <button type="button" style={buttonStyle} title={label}>
+    <Popover
+      content={content}
+      isVisible={hover}
+      dismissOnOutsideClick={false}
+      disableInitialFocus
+    >
+      <button
+        type="button"
+        style={buttonStyle}
+        title={label}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+      >
         {label}
       </button>
     </Popover>
