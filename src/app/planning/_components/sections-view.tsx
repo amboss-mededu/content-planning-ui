@@ -3,127 +3,46 @@
 import { Badge, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import type { ConsolidatedSection } from '@/lib/types';
+import { CodeChipList, type CodeMap } from './code-chip';
 import { type Column, DataTable } from './data-table';
 
-function kindBadge(row: ConsolidatedSection) {
-  if (row.newSection) return <Badge text="new-section" color="blue" />;
-  if (row.sectionUpdate) return <Badge text="section-update" color="purple" />;
-  return <Badge text="—" color="gray" />;
-}
+/**
+ * Unified row shape for the Sections tab. ConsolidatedSection records are
+ * projected into this shape upstream so the table can render code chips
+ * and a derived `updateType` without re-deriving on every render.
+ */
+export type SectionRow = {
+  articleTitle?: string;
+  articleId?: string;
+  sectionName?: string;
+  updateType: 'new' | 'update' | null;
+  category?: string;
+  codes: string[];
+  numCodes: number;
+  overallImportance?: number;
+  overallCoverage?: number;
+  justification?: string;
+};
 
-const KIND_FILTER_OPTIONS = [
-  { value: 'new-section', label: 'New section' },
-  { value: 'section-update', label: 'Section update' },
+const UPDATE_TYPE_FILTER_OPTIONS = [
+  { value: 'new', label: 'new' },
+  { value: 'update', label: 'update' },
   { value: 'none', label: '—' },
 ];
 
-function kindOf(row: ConsolidatedSection): 'new-section' | 'section-update' | 'none' {
-  if (row.newSection) return 'new-section';
-  if (row.sectionUpdate) return 'section-update';
-  return 'none';
+function updateTypeBadge(r: SectionRow) {
+  if (r.updateType === 'new') return <Badge text="new" color="blue" />;
+  if (r.updateType === 'update') return <Badge text="update" color="purple" />;
+  return <Badge text="—" color="gray" />;
 }
 
-const columns: Column<ConsolidatedSection>[] = [
-  {
-    key: 'kind',
-    label: 'Kind',
-    description:
-      'Whether this row is a brand-new section or an update to an existing one',
-    render: kindBadge,
-    width: 140,
-    align: 'center',
-    // Sort/filter on the derived kind string; the toolbar Select above the
-    // table uses the same axis but tracks its choice in URL params, so the
-    // two are independent — applying both intersects.
-    accessor: kindOf,
-    type: 'string',
-    filterable: true,
-    filterValue: kindOf,
-    filterOptions: KIND_FILTER_OPTIONS,
-  },
-  {
-    key: 'article',
-    label: 'Article',
-    description: 'Parent article this section belongs to',
-    render: (r) => r.articleTitle ?? '—',
-    align: 'center',
-    accessor: (r) => r.articleTitle ?? null,
-    type: 'string',
-    filterable: true,
-    filterMode: 'contains',
-  },
-  {
-    key: 'section',
-    label: 'Section',
-    description: 'Suggested section name',
-    render: (r) => r.sectionName ?? '—',
-    align: 'center',
-    accessor: (r) => r.sectionName ?? null,
-    type: 'string',
-    filterable: true,
-    filterMode: 'contains',
-  },
-  {
-    key: 'category',
-    label: 'Category',
-    description: 'Code category that anchors this section',
-    render: (r) => r.category ?? '—',
-    accessor: (r) => r.category ?? null,
-    type: 'string',
-    filterable: true,
-  },
-  {
-    key: 'importance',
-    label: 'Importance',
-    description: 'Editorial importance score (higher = higher priority)',
-    render: (r) => r.overallImportance ?? '—',
-    width: 100,
-    align: 'center',
-    accessor: (r) => r.overallImportance ?? null,
-    type: 'number',
-    filterable: true,
-  },
-  {
-    key: 'coverage',
-    label: 'Coverage',
-    description:
-      'Existing AMBOSS coverage score for this section (higher = better covered)',
-    render: (r) => r.overallCoverage ?? '—',
-    width: 100,
-    align: 'center',
-    accessor: (r) => r.overallCoverage ?? null,
-    type: 'number',
-    filterable: true,
-  },
-  {
-    key: 'editor',
-    label: 'Editor',
-    description: 'Editor assigned to draft or update this section',
-    render: (r) => r.assignedEditor ?? '—',
-    width: 140,
-    align: 'center',
-    accessor: (r) => r.assignedEditor ?? null,
-    type: 'string',
-    filterable: true,
-  },
-  {
-    key: 'justification',
-    label: 'Justification',
-    description: 'Why this section should be created or updated',
-    render: (r) => (
-      <Text color="secondary" size="s">
-        {r.justification ?? ''}
-      </Text>
-    ),
-    accessor: (r) => r.justification ?? null,
-    type: 'string',
-    filterable: true,
-    filterMode: 'contains',
-  },
-];
-
-export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
+export function SectionsView({
+  rows,
+  codeMap,
+}: {
+  rows: SectionRow[];
+  codeMap: CodeMap;
+}) {
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
@@ -137,9 +56,9 @@ export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
     window.history.replaceState(null, '', next);
   }, [kind, article]);
 
-  // Article options come from the full row set (not the kind-filtered subset)
-  // so the dropdown is stable when the kind filter changes. Counts shown are
-  // the per-article totals across all kinds.
+  // Article options come from the full row set so the dropdown is stable
+  // when the kind filter changes. Counts are per-article totals across
+  // all kinds.
   const articleOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows) {
@@ -154,11 +73,137 @@ export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
 
   const filtered = useMemo(() => {
     let out = rows;
-    if (kind === 'new') out = out.filter((r) => r.newSection === true);
-    else if (kind === 'update') out = out.filter((r) => r.sectionUpdate === true);
+    if (kind === 'new') out = out.filter((r) => r.updateType === 'new');
+    else if (kind === 'update') out = out.filter((r) => r.updateType === 'update');
     if (article) out = out.filter((r) => r.articleTitle === article);
     return out;
   }, [rows, kind, article]);
+
+  const columns: Column<SectionRow>[] = useMemo(
+    () => [
+      {
+        key: 'articleTitle',
+        label: 'Article Title',
+        description: 'Existing AMBOSS article this section belongs to',
+        render: (r) => r.articleTitle ?? '—',
+        align: 'center',
+        accessor: (r) => r.articleTitle ?? null,
+        type: 'string',
+        filterable: true,
+        filterMode: 'contains',
+      },
+      {
+        key: 'articleId',
+        label: 'Article ID',
+        description: 'AMBOSS article ID',
+        render: (r) => r.articleId ?? '—',
+        width: 140,
+        align: 'center',
+        accessor: (r) => r.articleId ?? null,
+        type: 'string',
+        filterable: true,
+        filterMode: 'contains',
+      },
+      {
+        key: 'sectionName',
+        label: 'Section Title',
+        description: 'Suggested section title',
+        render: (r) => r.sectionName ?? '—',
+        align: 'center',
+        accessor: (r) => r.sectionName ?? null,
+        type: 'string',
+        filterable: true,
+        filterMode: 'contains',
+      },
+      {
+        key: 'updateType',
+        label: 'Update Type',
+        description: 'Whether this is a new section or an update to an existing one',
+        render: updateTypeBadge,
+        width: 130,
+        align: 'center',
+        accessor: (r) => r.updateType ?? 'none',
+        type: 'string',
+        filterable: true,
+        filterValue: (r) => r.updateType ?? 'none',
+        filterOptions: UPDATE_TYPE_FILTER_OPTIONS,
+      },
+      {
+        key: 'category',
+        label: 'Category',
+        description: 'Source code category that anchors this section',
+        render: (r) => r.category ?? '—',
+        width: 160,
+        align: 'center',
+        accessor: (r) => r.category ?? null,
+        type: 'string',
+        filterable: true,
+      },
+      {
+        key: 'codes',
+        label: 'Codes',
+        description:
+          'Codes included in this section. Click a chip for the code description, source category, existing AMBOSS coverage, and coverage score.',
+        render: (r) => <CodeChipList codes={r.codes} codeMap={codeMap} />,
+        verticalAlign: 'top',
+        align: 'left',
+        accessor: (r) => r.codes.join(' '),
+        type: 'string',
+        filterable: true,
+        filterMode: 'contains',
+      },
+      {
+        key: 'numCodes',
+        label: '# Codes',
+        description: 'Count of unique codes in this section',
+        render: (r) => r.numCodes,
+        width: 90,
+        align: 'center',
+        accessor: (r) => r.numCodes,
+        type: 'number',
+        filterable: true,
+      },
+      {
+        key: 'importance',
+        label: 'Importance',
+        description: 'Editorial importance score (higher = higher priority)',
+        render: (r) => r.overallImportance ?? '—',
+        width: 110,
+        align: 'center',
+        accessor: (r) => r.overallImportance ?? null,
+        type: 'number',
+        filterable: true,
+      },
+      {
+        key: 'coverage',
+        label: 'Coverage',
+        description:
+          'Existing AMBOSS coverage score for this section (higher = better covered)',
+        render: (r) => r.overallCoverage ?? '—',
+        width: 110,
+        align: 'center',
+        accessor: (r) => r.overallCoverage ?? null,
+        type: 'number',
+        filterable: true,
+      },
+      {
+        key: 'justification',
+        label: 'Justification',
+        description: 'Why this section should be created or updated',
+        render: (r) => (
+          <Text color="secondary" size="s">
+            {r.justification ?? ''}
+          </Text>
+        ),
+        verticalAlign: 'top',
+        accessor: (r) => r.justification ?? null,
+        type: 'string',
+        filterable: true,
+        filterMode: 'contains',
+      },
+    ],
+    [codeMap],
+  );
 
   return (
     <Stack space="m">
@@ -166,7 +211,7 @@ export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
         <div className="filter-cell">
           <Select
             name="kind"
-            label="Kind"
+            label="Update Type"
             value={kind}
             options={[
               { value: '', label: 'All' },
@@ -190,11 +235,7 @@ export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
         {filtered.length.toLocaleString()} of {rows.length.toLocaleString()} section
         suggestions (Section_Suggestions tab).
       </Text>
-      <DataTable
-        rows={filtered}
-        columns={columns}
-        getRowKey={(r, i) => `${i}-${r.uniqueId ?? r.index ?? ''}`}
-      />
+      <DataTable rows={filtered} columns={columns} getRowKey={(_r, i) => `${i}`} />
     </Stack>
   );
 }
