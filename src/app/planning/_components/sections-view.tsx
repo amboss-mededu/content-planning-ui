@@ -231,16 +231,19 @@ export function SectionsView({
   const reviewCounts = useMemo(() => {
     let approved = 0;
     let rejected = 0;
+    const unreviewedArticles = new Set<string>();
     for (const r of rows) {
       if (!r.id) continue;
       const s = reviews[r.id];
       if (s === 'approved') approved++;
       else if (s === 'rejected') rejected++;
+      else if (r.articleTitle) unreviewedArticles.add(r.articleTitle);
     }
     return {
       approved,
       rejected,
       unreviewed: rows.length - approved - rejected,
+      unreviewedArticleCount: unreviewedArticles.size,
     };
   }, [rows, reviews]);
 
@@ -290,7 +293,8 @@ export function SectionsView({
         columns={columns}
         getRowKey={(_r, i) => `${i}`}
         getRowStyle={getRowStyle}
-        leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
+        countAddendum={() => 'sections'}
+        leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
       />
       {reviewOpen && (
         <SectionReviewModal
