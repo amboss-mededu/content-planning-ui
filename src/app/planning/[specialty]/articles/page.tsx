@@ -4,15 +4,13 @@ import {
   listConsolidatedArticles,
   listNewArticleSuggestions,
 } from '@/lib/data/articles';
-import { listCodes } from '@/lib/data/codes';
-import type { CodeRecord } from '@/lib/pb/types';
 import type {
   ArticleUpdateSuggestion,
   ConsolidatedArticle,
   NewArticleSuggestion,
 } from '@/lib/types';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
-import { extractCodeStrings } from '../../_components/code-utils';
+import { extractCodes } from '../../_components/code-utils';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({
@@ -29,7 +27,7 @@ export default async function ArticlesPage({
 }
 
 function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
-  const codes = extractCodeStrings(r.codes);
+  const codes = extractCodes(r.codes);
   return {
     articleTitle: r.articleTitle,
     articleType: r.articleType,
@@ -46,7 +44,7 @@ function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
 function projectSuggestion(
   r: NewArticleSuggestion | ArticleUpdateSuggestion,
 ): ArticleRow {
-  const codes = extractCodeStrings(r.codes);
+  const codes = extractCodes(r.codes);
   return {
     articleTitle: r.articleTitle,
     articleType: r.articleType,
@@ -62,26 +60,15 @@ function projectSuggestion(
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [consolidatedRecs, newRecs, updateRecs, codeRecs] = await Promise.all([
+  const [consolidatedRecs, newRecs, updateRecs] = await Promise.all([
     listConsolidatedArticles(slug),
     listNewArticleSuggestions(slug),
     listArticleUpdateSuggestions(slug),
-    listCodes(slug),
   ]);
-
-  const codeMap: Record<string, CodeRecord> = {};
-  for (const c of codeRecs) codeMap[c.code] = c;
 
   const consolidated = consolidatedRecs.map(projectConsolidated);
   const newOnes = newRecs.map(projectSuggestion);
   const updates = updateRecs.map(projectSuggestion);
 
-  return (
-    <ArticlesView
-      consolidated={consolidated}
-      newOnes={newOnes}
-      updates={updates}
-      codeMap={codeMap}
-    />
-  );
+  return <ArticlesView consolidated={consolidated} newOnes={newOnes} updates={updates} />;
 }

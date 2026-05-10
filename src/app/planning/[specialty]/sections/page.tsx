@@ -1,9 +1,7 @@
 import { Suspense } from 'react';
-import { listCodes } from '@/lib/data/codes';
 import { listConsolidatedSections } from '@/lib/data/sections';
-import type { CodeRecord } from '@/lib/pb/types';
 import type { ConsolidatedSection } from '@/lib/types';
-import { extractCodeStrings } from '../../_components/code-utils';
+import { extractCodes } from '../../_components/code-utils';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -21,7 +19,7 @@ export default async function SectionsPage({
 }
 
 function projectSection(r: ConsolidatedSection): SectionRow {
-  const codes = extractCodeStrings(r.codes);
+  const codes = extractCodes(r.codes);
   const updateType: 'new' | 'update' | null = r.newSection
     ? 'new'
     : r.sectionUpdate
@@ -42,15 +40,7 @@ function projectSection(r: ConsolidatedSection): SectionRow {
 }
 
 async function SectionsData({ slug }: { slug: string }) {
-  const [sectionRecs, codeRecs] = await Promise.all([
-    listConsolidatedSections(slug),
-    listCodes(slug),
-  ]);
-
-  const codeMap: Record<string, CodeRecord> = {};
-  for (const c of codeRecs) codeMap[c.code] = c;
-
-  const rows = sectionRecs.map(projectSection);
-
-  return <SectionsView rows={rows} codeMap={codeMap} />;
+  const recs = await listConsolidatedSections(slug);
+  const rows = recs.map(projectSection);
+  return <SectionsView rows={rows} />;
 }

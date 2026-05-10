@@ -9,8 +9,9 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import { CodeChipList, type CodeMap } from './code-chip';
+import { useEffect, useState } from 'react';
+import { CodeChipList } from './code-chip';
+import type { EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
 
 /**
@@ -26,7 +27,7 @@ export type ArticleRow = {
   articleTitle?: string;
   articleType?: string;
   category?: string;
-  codes: string[];
+  codes: EmbeddedCode[];
   numCodes: number;
   overallCoverage?: number;
   existingAmbossCoverage?: string;
@@ -37,16 +38,113 @@ export type ArticleRow = {
 
 type Pass = 'first' | 'second';
 
+const columns: Column<ArticleRow>[] = [
+  {
+    key: 'title',
+    label: 'Title',
+    description: 'Article title',
+    render: (r) => r.articleTitle ?? '—',
+    align: 'center',
+    accessor: (r) => r.articleTitle ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
+  },
+  {
+    key: 'type',
+    label: 'Type',
+    description: 'Article type (e.g. disease, procedure, drug)',
+    render: (r) => r.articleType ?? '—',
+    width: 140,
+    align: 'center',
+    accessor: (r) => r.articleType ?? null,
+    type: 'string',
+    filterable: true,
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    description:
+      'Source code category that anchors this article (1st-pass only — empty for 2nd-pass cross-category records).',
+    render: (r) => r.category ?? '—',
+    width: 160,
+    align: 'center',
+    accessor: (r) => r.category ?? null,
+    type: 'string',
+    filterable: true,
+  },
+  {
+    key: 'codes',
+    label: 'Codes',
+    description:
+      'Codes included in this article. Click a chip for the per-code mapping info: description, previously suggested article, coverage score, importance.',
+    render: (r) => <CodeChipList codes={r.codes} />,
+    verticalAlign: 'top',
+    align: 'left',
+    accessor: (r) => r.codes.map((c) => c.description ?? c.code).join(' '),
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
+  },
+  {
+    key: 'numCodes',
+    label: '# Codes',
+    description: 'Count of unique codes in this article',
+    render: (r) => r.numCodes,
+    width: 90,
+    align: 'center',
+    accessor: (r) => r.numCodes,
+    type: 'number',
+    filterable: true,
+  },
+  {
+    key: 'importance',
+    label: 'Importance',
+    description: 'Editorial importance score (higher = higher priority)',
+    render: (r) => r.overallImportance ?? '—',
+    width: 110,
+    align: 'center',
+    accessor: (r) => r.overallImportance ?? null,
+    type: 'number',
+    filterable: true,
+  },
+  {
+    key: 'coverage',
+    label: 'Coverage',
+    description:
+      '1st pass: numeric AMBOSS coverage score (overallCoverage). 2nd pass: free-text coverage note (existingAmbossCoverage).',
+    render: (r) => r.overallCoverage ?? r.existingAmbossCoverage ?? '—',
+    width: 140,
+    align: 'center',
+    accessor: (r) => r.overallCoverage ?? null,
+    type: 'number',
+    filterable: true,
+  },
+  {
+    key: 'justification',
+    label: 'Justification',
+    description: 'Why this article was proposed',
+    render: (r) => (
+      <Text color="secondary" size="s">
+        {r.justification ?? ''}
+      </Text>
+    ),
+    verticalAlign: 'top',
+    accessor: (r) => r.justification ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
+  },
+];
+
 export function ArticlesView({
   consolidated,
   newOnes,
   updates,
-  codeMap,
 }: {
   consolidated: ArticleRow[];
   newOnes: ArticleRow[];
   updates: ArticleRow[];
-  codeMap: CodeMap;
 }) {
   const params = useSearchParams();
   const [pass, setPass] = useState<Pass>(() =>
@@ -60,113 +158,6 @@ export function ArticlesView({
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
   }, [pass]);
-
-  const columns: Column<ArticleRow>[] = useMemo(
-    () => [
-      {
-        key: 'title',
-        label: 'Title',
-        description: 'Article title',
-        render: (r) => r.articleTitle ?? '—',
-        align: 'center',
-        accessor: (r) => r.articleTitle ?? null,
-        type: 'string',
-        filterable: true,
-        filterMode: 'contains',
-      },
-      {
-        key: 'type',
-        label: 'Type',
-        description: 'Article type (e.g. disease, procedure, drug)',
-        render: (r) => r.articleType ?? '—',
-        width: 140,
-        align: 'center',
-        accessor: (r) => r.articleType ?? null,
-        type: 'string',
-        filterable: true,
-      },
-      {
-        key: 'category',
-        label: 'Category',
-        description:
-          'Source code category that anchors this article (1st-pass only — empty for 2nd-pass cross-category records).',
-        render: (r) => r.category ?? '—',
-        width: 160,
-        align: 'center',
-        accessor: (r) => r.category ?? null,
-        type: 'string',
-        filterable: true,
-      },
-      {
-        key: 'codes',
-        label: 'Codes',
-        description:
-          'Codes included in this article. Click a chip for the code description, source category, existing AMBOSS coverage, and coverage score.',
-        render: (r) => <CodeChipList codes={r.codes} codeMap={codeMap} />,
-        verticalAlign: 'top',
-        align: 'left',
-        accessor: (r) => r.codes.join(' '),
-        type: 'string',
-        filterable: true,
-        filterMode: 'contains',
-      },
-      {
-        key: 'numCodes',
-        label: '# Codes',
-        description: 'Count of unique codes in this article',
-        render: (r) => r.numCodes,
-        width: 90,
-        align: 'center',
-        accessor: (r) => r.numCodes,
-        type: 'number',
-        filterable: true,
-      },
-      {
-        key: 'importance',
-        label: 'Importance',
-        description: 'Editorial importance score (higher = higher priority)',
-        render: (r) => r.overallImportance ?? '—',
-        width: 110,
-        align: 'center',
-        accessor: (r) => r.overallImportance ?? null,
-        type: 'number',
-        filterable: true,
-      },
-      {
-        key: 'coverage',
-        label: 'Coverage',
-        description:
-          '1st pass: numeric AMBOSS coverage score (overallCoverage). 2nd pass: free-text coverage note (existingAmbossCoverage).',
-        render: (r) => r.overallCoverage ?? r.existingAmbossCoverage ?? '—',
-        width: 140,
-        align: 'center',
-        accessor: (r) => r.overallCoverage ?? null,
-        type: 'number',
-        filterable: true,
-      },
-      {
-        key: 'justification',
-        label: 'Justification',
-        description: 'Why this article was proposed',
-        render: (r) => (
-          <Text color="secondary" size="s">
-            {r.justification ?? ''}
-          </Text>
-        ),
-        verticalAlign: 'top',
-        accessor: (r) => r.justification ?? null,
-        type: 'string',
-        filterable: true,
-        filterMode: 'contains',
-      },
-    ],
-    [codeMap],
-  );
-
-  const summary =
-    pass === 'first'
-      ? `${consolidated.length.toLocaleString()} 1st-pass articles — per-category aggregation (consolidatedArticles).`
-      : `${newOnes.length.toLocaleString()} 2nd-pass articles — cross-category, editor-facing (newArticleSuggestions).`;
 
   const activeRows = pass === 'first' ? consolidated : newOnes;
 
@@ -185,7 +176,6 @@ export function ArticlesView({
             ]}
           />
         </Inline>
-        <Text color="secondary">{summary}</Text>
         <DataTable
           rows={activeRows}
           columns={columns}

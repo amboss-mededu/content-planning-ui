@@ -2,9 +2,7 @@
 
 import { Popover, Stack, Text } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
-import type { CodeRecord, CoveredSection } from '@/lib/pb/types';
-
-export type CodeMap = Record<string, CodeRecord>;
+import type { EmbeddedCode } from './code-utils';
 
 const buttonStyle: CSSProperties = {
   display: 'inline-block',
@@ -19,59 +17,34 @@ const buttonStyle: CSSProperties = {
   fontSize: '0.85em',
   lineHeight: 1.5,
   whiteSpace: 'nowrap',
+  maxWidth: 320,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  verticalAlign: 'top',
 };
 
-function CoveredArticles({ records }: { records: CoveredSection[] | undefined }) {
-  if (!records || records.length === 0) return null;
-  return (
-    <Stack space="xxs">
-      <Text size="xs" color="secondary" weight="bold">
-        Existing AMBOSS coverage
-      </Text>
-      {records.map((r) => (
-        <Text size="xs" key={`${r.articleId ?? ''}|${r.articleTitle ?? ''}`}>
-          {r.articleTitle ?? r.articleId ?? '(unknown article)'}
-        </Text>
-      ))}
-    </Stack>
-  );
-}
-
-export function CodeChip({ code, info }: { code: string; info?: CodeRecord }) {
-  const hasCoverage = info?.coverageLevel || typeof info?.depthOfCoverage === 'number';
+export function CodeChip({ entry }: { entry: EmbeddedCode }) {
+  const label = entry.description ?? entry.code;
   const content = (
     <div style={{ padding: 12, maxWidth: 360 }}>
       <Stack space="s">
-        <Text weight="bold">{code}</Text>
-        {info?.description && <Text size="s">{info.description}</Text>}
-        {info?.category && (
-          <Text size="xs" color="secondary">
-            Category: {info.category}
-          </Text>
-        )}
-        {info?.consolidationCategory && (
-          <Text size="xs" color="secondary">
-            Consolidation: {info.consolidationCategory}
-          </Text>
-        )}
-        <CoveredArticles records={info?.articlesWhereCoverageIs} />
-        {hasCoverage && (
+        <Text weight="bold">{entry.description ?? entry.code}</Text>
+        <Text size="xs" color="secondary">
+          {entry.code}
+        </Text>
+        {entry.previouslySuggestedArticleTitle && (
           <Stack space="xxs">
             <Text size="xs" color="secondary" weight="bold">
-              Coverage score
+              Previously suggested article
             </Text>
-            <Text size="xs">
-              {info?.coverageLevel ?? '—'}
-              {typeof info?.depthOfCoverage === 'number'
-                ? ` (depth ${info.depthOfCoverage})`
-                : ''}
-            </Text>
+            <Text size="xs">{entry.previouslySuggestedArticleTitle}</Text>
           </Stack>
         )}
-        {!info && (
-          <Text size="xs" color="secondary">
-            No code-level info — not in the codes table for this specialty.
-          </Text>
+        {entry.coverageScore !== undefined && (
+          <Text size="xs">Coverage score: {String(entry.coverageScore)}</Text>
+        )}
+        {entry.importance !== undefined && (
+          <Text size="xs">Importance: {String(entry.importance)}</Text>
         )}
       </Stack>
     </div>
@@ -79,14 +52,14 @@ export function CodeChip({ code, info }: { code: string; info?: CodeRecord }) {
 
   return (
     <Popover content={content}>
-      <button type="button" style={buttonStyle}>
-        {code}
+      <button type="button" style={buttonStyle} title={label}>
+        {label}
       </button>
     </Popover>
   );
 }
 
-export function CodeChipList({ codes, codeMap }: { codes: string[]; codeMap: CodeMap }) {
+export function CodeChipList({ codes }: { codes: EmbeddedCode[] }) {
   if (codes.length === 0) return <span>—</span>;
   return (
     <div
@@ -98,7 +71,7 @@ export function CodeChipList({ codes, codeMap }: { codes: string[]; codeMap: Cod
       }}
     >
       {codes.map((c) => (
-        <CodeChip key={c} code={c} info={codeMap[c]} />
+        <CodeChip key={c.code} entry={c} />
       ))}
     </div>
   );
