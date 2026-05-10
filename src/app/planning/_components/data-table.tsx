@@ -26,7 +26,12 @@ export interface EditableConfig<T> {
   multiline?: boolean;
 }
 
-export type ColumnGroup = 'metadata' | 'coverage' | 'suggestions' | 'actions';
+export type ColumnGroup =
+  | 'metadata'
+  | 'coverage'
+  | 'consolidation'
+  | 'suggestions'
+  | 'actions';
 
 export interface Column<T> {
   key: string;
@@ -98,6 +103,13 @@ const GROUP_STYLES: Record<
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
     stripe: 'rgba(34, 139, 80, 0.06)',
+  },
+  consolidation: {
+    label: 'Consolidation',
+    bg: 'rgb(231, 235, 247)',
+    fg: 'rgb(40, 60, 130)',
+    border: 'rgb(79, 102, 184)',
+    stripe: 'rgba(79, 102, 184, 0.06)',
   },
   suggestions: {
     label: 'Suggestions',

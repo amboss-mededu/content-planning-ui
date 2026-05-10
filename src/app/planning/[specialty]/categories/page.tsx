@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { listCategories } from '@/lib/data/categories';
+import { listCategoryOrchestration } from '@/lib/data/categories';
 import { CategoriesView } from '../../_components/categories-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -10,13 +10,13 @@ export default async function CategoriesPage({
 }) {
   const { specialty: slug } = await params;
   return (
-    <Suspense fallback={<TableSkeleton columns={5} rows={10} />}>
+    <Suspense fallback={<TableSkeleton columns={7} rows={10} />}>
       <CategoriesData slug={slug} />
     </Suspense>
   );
 }
 
 async function CategoriesData({ slug }: { slug: string }) {
-  const rows = await listCategories(slug);
+  const rows = await listCategoryOrchestration(slug);
   return <CategoriesView rows={rows} slug={slug} />;
 }
