@@ -100,6 +100,18 @@ export interface ArticleReviewRecord extends PbRecord {
   notes?: string;
 }
 
+// --- Collection: sectionReviews --------------------------------------------
+
+export interface SectionReviewRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the consolidatedSections row this review covers. */
+  sectionRecordId: string;
+  status: ArticleReviewStatus;
+  reviewerEmail?: string;
+  reviewedAt?: number;
+  notes?: string;
+}
+
 // --- Collection: mappingsInFlight ------------------------------------------
 
 export interface MappingInFlightRecord extends PbRecord {

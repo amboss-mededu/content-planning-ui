@@ -152,6 +152,8 @@ export type ArticleUpdateSuggestion = NewArticleSuggestion;
 // --- Sections --------------------------------------------------------------
 
 export type ConsolidatedSection = {
+  /** PB record id (preserved for the review-pass keying). */
+  id?: string;
   index?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;

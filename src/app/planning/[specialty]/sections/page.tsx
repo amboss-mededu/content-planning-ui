@@ -1,8 +1,16 @@
 import { Suspense } from 'react';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { ConsolidatedSection } from '@/lib/types';
-import { type CategoryLookup, extractCodes } from '../../_components/code-utils';
+import {
+  buildTitleOriginLookup,
+  type CategoryLookup,
+  extractCodes,
+  type TitleOriginLookup,
+} from '../../_components/code-utils';
+import type { ReviewMap } from '../../_components/review-modal';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -21,12 +29,15 @@ export default async function SectionsPage({
 
 function projectSection(r: ConsolidatedSection): SectionRow {
   const codes = extractCodes(r.codes);
-  const updateType: 'new' | 'update' | null = r.newSection
-    ? 'new'
-    : r.sectionUpdate
-      ? 'update'
-      : null;
+  // `exists` reflects whether the section already lives in AMBOSS today.
+  // True → this proposal updates the existing section; false → it's a
+  // brand-new section to be added under the parent article. The legacy
+  // `newSection` / `sectionUpdate` booleans on the raw record are kept
+  // for compatibility with seed scripts but no longer drive the UI.
+  const updateType: 'new' | 'update' | null =
+    r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
+    id: r.id,
     articleTitle: r.articleTitle,
     articleId: r.articleId,
     sectionName: r.sectionName,
@@ -37,16 +48,42 @@ function projectSection(r: ConsolidatedSection): SectionRow {
     overallImportance: r.overallImportance,
     overallCoverage: r.overallCoverage,
     justification: r.justification,
+    previousSectionNames: r.previousSectionNames,
   };
 }
 
 async function SectionsData({ slug }: { slug: string }) {
-  const [recs, codeRecs] = await Promise.all([
+  const [sectionRecs, codeRecs, reviewRecs, articleRecs] = await Promise.all([
     listConsolidatedSections(slug),
     listCodes(slug),
+    listSectionReviews(slug),
+    listConsolidatedArticles(slug),
   ]);
+
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
-  const rows = recs.map(projectSection);
-  return <SectionsView rows={rows} categoryLookup={categoryLookup} />;
+
+  // Annotate "previousSectionNames" entries with where they came from
+  // (article in its own right, or a section in a specific article).
+  const titleOriginLookup: TitleOriginLookup = buildTitleOriginLookup(
+    articleRecs,
+    sectionRecs,
+  );
+
+  const initialReviews: ReviewMap = {};
+  for (const [id, r] of Object.entries(reviewRecs)) {
+    initialReviews[id] = r.status;
+  }
+
+  const rows = sectionRecs.map(projectSection);
+
+  return (
+    <SectionsView
+      slug={slug}
+      rows={rows}
+      categoryLookup={categoryLookup}
+      titleOriginLookup={titleOriginLookup}
+      initialReviews={initialReviews}
+    />
+  );
 }

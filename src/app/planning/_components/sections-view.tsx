@@ -1,11 +1,13 @@
 'use client';
 
-import { Badge, Inline, Select, Stack, Text } from '@amboss/design-system';
+import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { CodeChipList } from './code-chip';
-import type { CategoryLookup, EmbeddedCode } from './code-utils';
+import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import type { ReviewMap } from './review-modal';
+import { SectionReviewModal } from './section-review-modal';
 
 /**
  * Unified row shape for the Article Updates tab. ConsolidatedSection records
@@ -13,6 +15,9 @@ import { type Column, DataTable } from './data-table';
  * and a derived `updateType` without re-deriving on every render.
  */
 export type SectionRow = {
+  /** PB record id of the underlying consolidatedSections row. The
+   *  review pass keys reviews on this. */
+  id?: string;
   articleTitle?: string;
   articleId?: string;
   sectionName?: string;
@@ -23,6 +28,9 @@ export type SectionRow = {
   overallImportance?: number;
   overallCoverage?: number;
   justification?: string;
+  /** Previous section names emitted by the LLM for this section.
+   *  Surfaced in the review modal. */
+  previousSectionNames?: string[];
 };
 
 const UPDATE_TYPE_FILTER_OPTIONS = [
@@ -162,17 +170,28 @@ function buildColumns(categoryLookup: CategoryLookup): Column<SectionRow>[] {
   ];
 }
 
+const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
+const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+
 export function SectionsView({
+  slug,
   rows,
   categoryLookup,
+  titleOriginLookup,
+  initialReviews,
 }: {
+  slug: string;
   rows: SectionRow[];
   categoryLookup: CategoryLookup;
+  titleOriginLookup: TitleOriginLookup;
+  initialReviews: ReviewMap;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
+  const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -206,6 +225,30 @@ export function SectionsView({
     return out;
   }, [rows, kind, article]);
 
+  const reviewCounts = useMemo(() => {
+    let approved = 0;
+    let rejected = 0;
+    for (const r of rows) {
+      if (!r.id) continue;
+      const s = reviews[r.id];
+      if (s === 'approved') approved++;
+      else if (s === 'rejected') rejected++;
+    }
+    return {
+      approved,
+      rejected,
+      unreviewed: rows.length - approved - rejected,
+    };
+  }, [rows, reviews]);
+
+  const getRowStyle = (r: SectionRow) => {
+    if (!r.id) return undefined;
+    const s = reviews[r.id];
+    if (s === 'approved') return { background: APPROVED_TINT };
+    if (s === 'rejected') return { background: REJECTED_TINT };
+    return undefined;
+  };
+
   return (
     <Stack space="m">
       <Inline space="s" vAlignItems="bottom">
@@ -231,8 +274,32 @@ export function SectionsView({
             onChange={(e) => setArticle(e.target.value)}
           />
         </div>
+        <Button
+          variant="primary"
+          onClick={() => setReviewOpen(true)}
+          disabled={rows.length === 0}
+        >
+          Start review
+        </Button>
       </Inline>
-      <DataTable rows={filtered} columns={columns} getRowKey={(_r, i) => `${i}`} />
+      <DataTable
+        rows={filtered}
+        columns={columns}
+        getRowKey={(_r, i) => `${i}`}
+        getRowStyle={getRowStyle}
+        leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
+      />
+      {reviewOpen && (
+        <SectionReviewModal
+          slug={slug}
+          sections={rows}
+          initialReviews={reviews}
+          categoryLookup={categoryLookup}
+          titleOriginLookup={titleOriginLookup}
+          onClose={() => setReviewOpen(false)}
+          onReviewsChange={setReviews}
+        />
+      )}
     </Stack>
   );
 }
