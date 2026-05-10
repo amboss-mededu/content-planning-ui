@@ -176,10 +176,20 @@ export function ArticlesView({
   viewerEmail?: string;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
+  // 2nd-pass articles are cross-category — newArticleSuggestions
+  // records don't carry a category field — so the column would
+  // always render `—`. Drop it from the lens's column set (and from
+  // the article-update-suggestions block below, which is the same
+  // 2nd-pass shape).
+  const secondPassColumns = useMemo(
+    () => columns.filter((c) => c.key !== 'category'),
+    [columns],
+  );
   const params = useSearchParams();
   const [pass, setPass] = useState<Pass>(() =>
     params.get('pass') === 'second' ? 'second' : 'first',
   );
+  const tableColumns = pass === 'first' ? columns : secondPassColumns;
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -275,7 +285,7 @@ export function ArticlesView({
         </Inline>
         <DataTable
           rows={activeRows}
-          columns={columns}
+          columns={tableColumns}
           getRowKey={(_r, i) => `${pass}-${i}`}
           getRowStyle={getRowStyle}
           onVisibleRowsChange={setVisibleRows}
@@ -296,7 +306,11 @@ export function ArticlesView({
             text="Article_Update_Suggestions is empty for this specialty."
           />
         ) : (
-          <DataTable rows={updates} columns={columns} getRowKey={(_r, i) => `upd-${i}`} />
+          <DataTable
+            rows={updates}
+            columns={secondPassColumns}
+            getRowKey={(_r, i) => `upd-${i}`}
+          />
         )}
       </Stack>
 
