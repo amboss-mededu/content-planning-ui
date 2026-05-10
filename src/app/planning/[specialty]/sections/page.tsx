@@ -1,7 +1,8 @@
 import { Suspense } from 'react';
+import { listCodes } from '@/lib/data/codes';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { ConsolidatedSection } from '@/lib/types';
-import { extractCodes } from '../../_components/code-utils';
+import { type CategoryLookup, extractCodes } from '../../_components/code-utils';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -40,7 +41,12 @@ function projectSection(r: ConsolidatedSection): SectionRow {
 }
 
 async function SectionsData({ slug }: { slug: string }) {
-  const recs = await listConsolidatedSections(slug);
+  const [recs, codeRecs] = await Promise.all([
+    listConsolidatedSections(slug),
+    listCodes(slug),
+  ]);
+  const categoryLookup: CategoryLookup = {};
+  for (const c of codeRecs) categoryLookup[c.code] = c.category;
   const rows = recs.map(projectSection);
-  return <SectionsView rows={rows} />;
+  return <SectionsView rows={rows} categoryLookup={categoryLookup} />;
 }

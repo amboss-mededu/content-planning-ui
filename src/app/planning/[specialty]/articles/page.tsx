@@ -4,13 +4,14 @@ import {
   listConsolidatedArticles,
   listNewArticleSuggestions,
 } from '@/lib/data/articles';
+import { listCodes } from '@/lib/data/codes';
 import type {
   ArticleUpdateSuggestion,
   ConsolidatedArticle,
   NewArticleSuggestion,
 } from '@/lib/types';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
-import { extractCodes } from '../../_components/code-utils';
+import { type CategoryLookup, extractCodes } from '../../_components/code-utils';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({
@@ -60,15 +61,26 @@ function projectSuggestion(
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [consolidatedRecs, newRecs, updateRecs] = await Promise.all([
+  const [consolidatedRecs, newRecs, updateRecs, codeRecs] = await Promise.all([
     listConsolidatedArticles(slug),
     listNewArticleSuggestions(slug),
     listArticleUpdateSuggestions(slug),
+    listCodes(slug),
   ]);
+
+  const categoryLookup: CategoryLookup = {};
+  for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
   const consolidated = consolidatedRecs.map(projectConsolidated);
   const newOnes = newRecs.map(projectSuggestion);
   const updates = updateRecs.map(projectSuggestion);
 
-  return <ArticlesView consolidated={consolidated} newOnes={newOnes} updates={updates} />;
+  return (
+    <ArticlesView
+      consolidated={consolidated}
+      newOnes={newOnes}
+      updates={updates}
+      categoryLookup={categoryLookup}
+    />
+  );
 }

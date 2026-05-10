@@ -2,7 +2,7 @@
 
 import { Popover, Stack, Text } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
-import type { EmbeddedCode } from './code-utils';
+import type { CategoryLookup, EmbeddedCode } from './code-utils';
 
 const buttonStyle: CSSProperties = {
   display: 'inline-block',
@@ -23,7 +23,13 @@ const buttonStyle: CSSProperties = {
   verticalAlign: 'top',
 };
 
-export function CodeChip({ entry }: { entry: EmbeddedCode }) {
+export function CodeChip({
+  entry,
+  category,
+}: {
+  entry: EmbeddedCode;
+  category?: string;
+}) {
   const label = entry.description ?? entry.code;
   const content = (
     <div style={{ padding: 12, maxWidth: 360 }}>
@@ -32,6 +38,14 @@ export function CodeChip({ entry }: { entry: EmbeddedCode }) {
         <Text size="xs" color="secondary">
           {entry.code}
         </Text>
+        {category && (
+          <Stack space="xxs">
+            <Text size="xs" color="secondary" weight="bold">
+              Category
+            </Text>
+            <Text size="xs">{category}</Text>
+          </Stack>
+        )}
         {entry.previouslySuggestedArticleTitle && (
           <Stack space="xxs">
             <Text size="xs" color="secondary" weight="bold">
@@ -59,7 +73,13 @@ export function CodeChip({ entry }: { entry: EmbeddedCode }) {
   );
 }
 
-export function CodeChipList({ codes }: { codes: EmbeddedCode[] }) {
+export function CodeChipList({
+  codes,
+  categoryLookup,
+}: {
+  codes: EmbeddedCode[];
+  categoryLookup?: CategoryLookup;
+}) {
   if (codes.length === 0) return <span>—</span>;
   return (
     <div
@@ -71,7 +91,11 @@ export function CodeChipList({ codes }: { codes: EmbeddedCode[] }) {
       }}
     >
       {codes.map((c) => (
-        <CodeChip key={c.code} entry={c} />
+        <CodeChip
+          key={c.code}
+          entry={c}
+          category={c.category ?? categoryLookup?.[c.code]}
+        />
       ))}
     </div>
   );

@@ -7,10 +7,17 @@
 export type EmbeddedCode = {
   code: string;
   description?: string;
+  category?: string;
   previouslySuggestedArticleTitle?: string;
   coverageScore?: string | number;
   importance?: string | number;
 };
+
+/** Lightweight code → full source-ontology category lookup, used as a
+ * fallback when the embedded code object on an article/section row
+ * doesn't carry its own category. Built once per page from the global
+ * codes table. */
+export type CategoryLookup = Record<string, string | undefined>;
 
 /**
  * Normalize the `codes` JSON column on article/section records (declared as
@@ -40,6 +47,7 @@ export function extractCodes(raw: unknown): EmbeddedCode[] {
     out.push({
       code,
       description: typeof o.description === 'string' ? o.description : undefined,
+      category: typeof o.category === 'string' ? o.category : undefined,
       previouslySuggestedArticleTitle:
         typeof o.previouslySuggestedArticleTitle === 'string'
           ? o.previouslySuggestedArticleTitle
