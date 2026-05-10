@@ -48,10 +48,52 @@ export type ArticleRow = {
 
 type Pass = 'first' | 'second';
 
+/** Compact list of 1st-pass article titles consolidated into the
+ *  current 2nd-pass row. Each title is annotated by origin via the
+ *  shared titleOriginLookup so the editor can tell whether the
+ *  precursor was an article in its own right or a section nested
+ *  under one. */
+function PreviousTitlesCell({
+  titles,
+  titleOriginLookup,
+}: {
+  titles: string[] | undefined;
+  titleOriginLookup: TitleOriginLookup;
+}) {
+  if (!titles || titles.length === 0) return <Text size="xs">—</Text>;
+  return (
+    <Stack space="xxs">
+      {titles.map((t) => {
+        const origin = titleOriginLookup[t];
+        const tag =
+          origin?.kind === 'section' || origin?.kind === 'both'
+            ? `(in "${origin.inArticle}")`
+            : origin?.kind === 'article'
+              ? '(article)'
+              : null;
+        return (
+          <Text key={t} size="xs">
+            · {t}
+            {tag ? ' ' : ''}
+            {tag && (
+              <Text as="span" size="xs" color="secondary">
+                {tag}
+              </Text>
+            )}
+          </Text>
+        );
+      })}
+    </Stack>
+  );
+}
+
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 
-function buildColumns(categoryLookup: CategoryLookup): Column<ArticleRow>[] {
+function buildColumns(
+  categoryLookup: CategoryLookup,
+  titleOriginLookup: TitleOriginLookup,
+): Column<ArticleRow>[] {
   return [
     {
       key: 'title',
@@ -86,6 +128,24 @@ function buildColumns(categoryLookup: CategoryLookup): Column<ArticleRow>[] {
       accessor: (r) => r.category ?? null,
       type: 'string',
       filterable: true,
+    },
+    {
+      key: 'previousArticleTitles',
+      label: 'Previous article titles',
+      description:
+        '1st-pass article titles consolidated into this 2nd-pass article (cross-category dedupe lineage).',
+      render: (r) => (
+        <PreviousTitlesCell
+          titles={r.previousArticleTitleSuggestions}
+          titleOriginLookup={titleOriginLookup}
+        />
+      ),
+      verticalAlign: 'top',
+      align: 'left',
+      accessor: (r) => (r.previousArticleTitleSuggestions ?? []).join(' '),
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
     },
     {
       key: 'codes',
@@ -175,15 +235,24 @@ export function ArticlesView({
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail?: string;
 }) {
-  const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
-  // 2nd-pass articles are cross-category — newArticleSuggestions
-  // records don't carry a category field — so the column would
-  // always render `—`. Drop it from the lens's column set (and from
-  // the article-update-suggestions block below, which is the same
-  // 2nd-pass shape).
+  const allColumns = useMemo(
+    () => buildColumns(categoryLookup, titleOriginLookup),
+    [categoryLookup, titleOriginLookup],
+  );
+  // Per-pass column shape:
+  //  - 1st pass keeps Category; 1st-pass records don't have the
+  //    cross-category previousArticleTitleSuggestions lineage, so we
+  //    drop that column.
+  //  - 2nd pass crosses categories (no category field), but each row
+  //    carries the 1st-pass titles that were consolidated into it via
+  //    previousArticleTitleSuggestions — show those, drop Category.
+  const columns = useMemo(
+    () => allColumns.filter((c) => c.key !== 'previousArticleTitles'),
+    [allColumns],
+  );
   const secondPassColumns = useMemo(
-    () => columns.filter((c) => c.key !== 'category'),
-    [columns],
+    () => allColumns.filter((c) => c.key !== 'category'),
+    [allColumns],
   );
   const params = useSearchParams();
   const [pass, setPass] = useState<Pass>(() =>
