@@ -233,28 +233,24 @@ export function SectionReviewModal({
           {previousNames && previousNames.length > 0 && (
             <Stack space="xs">
               <Text size="s" weight="bold">
-                Previously consolidated section names
+                Previous names
               </Text>
               {previousNames.map((t) => {
                 const origin = titleOriginLookup[t];
-                const tagText =
-                  origin?.kind === 'article'
-                    ? 'article'
-                    : origin?.kind === 'section'
-                      ? `section in "${origin.inArticle}"`
-                      : origin?.kind === 'both'
-                        ? `article + section in "${origin.inArticle}"`
-                        : null;
+                // Format as "(<article title>: <section title>)" when we
+                // know the section's parent article. Falls back to just
+                // the name when origin is unknown or the entry was an
+                // article on its own.
+                const formatted =
+                  origin?.kind === 'section' || origin?.kind === 'both'
+                    ? `(${origin.inArticle}: ${t})`
+                    : origin?.kind === 'article'
+                      ? `(article: ${t})`
+                      : t;
                 return (
-                  <Inline key={t} space="xs" vAlignItems="center">
-                    <Text size="xs">· {t}</Text>
-                    {tagText && (
-                      <Badge
-                        text={tagText}
-                        color={origin?.kind === 'section' ? 'purple' : 'blue'}
-                      />
-                    )}
-                  </Inline>
+                  <Text key={t} size="xs">
+                    · {formatted}
+                  </Text>
                 );
               })}
             </Stack>
@@ -276,7 +272,8 @@ export function SectionReviewModal({
           style={{
             flex: 'none',
             borderTop: '1px solid rgba(0, 0, 0, 0.12)',
-            paddingTop: 12,
+            padding: '16px 0',
+            minHeight: 64,
             display: 'flex',
             alignItems: 'center',
             gap: 8,

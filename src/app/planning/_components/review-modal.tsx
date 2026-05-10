@@ -233,7 +233,7 @@ export function ReviewModal({
           {previousTitles && previousTitles.length > 0 && (
             <Stack space="xs">
               <Text size="s" weight="bold">
-                Previously consolidated titles
+                Previous article titles
               </Text>
               {previousTitles.map((t) => {
                 const origin = titleOriginLookup[t];
@@ -276,7 +276,8 @@ export function ReviewModal({
           style={{
             flex: 'none',
             borderTop: '1px solid rgba(0, 0, 0, 0.12)',
-            paddingTop: 12,
+            padding: '16px 0',
+            minHeight: 64,
             display: 'flex',
             alignItems: 'center',
             gap: 8,
