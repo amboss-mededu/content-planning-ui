@@ -255,6 +255,8 @@ export function SectionReviewModal({
       subHeader={subHeaderText}
       size="l"
       isDismissible
+      isFullScreen={viewMode === 'article'}
+      isMaxWidthLimit={viewMode === 'section'}
       onAction={() => onClose()}
       privateProps={{ height: '90vh' }}
       closeButtonAriaLabel="Close review"
