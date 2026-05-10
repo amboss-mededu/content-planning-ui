@@ -185,7 +185,6 @@ export function SectionReviewModal({
           flexDirection: 'column',
           height: '100%',
           minHeight: 0,
-          gap: 16,
         }}
       >
         <div
@@ -196,6 +195,7 @@ export function SectionReviewModal({
             display: 'flex',
             flexDirection: 'column',
             gap: 16,
+            paddingBottom: 12,
           }}
         >
           <Stack space="s">
@@ -292,8 +292,7 @@ export function SectionReviewModal({
           style={{
             flex: 'none',
             borderTop: '1px solid rgba(0, 0, 0, 0.12)',
-            padding: '16px 0',
-            minHeight: 64,
+            padding: '10px 0',
             display: 'flex',
             alignItems: 'center',
             gap: 8,

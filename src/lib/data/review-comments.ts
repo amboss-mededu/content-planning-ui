@@ -26,12 +26,17 @@ export async function listReviewComments(
 ): Promise<Record<string, ReviewCommentRecord[]>> {
   await connection();
   const pb = await userClient();
+  // Filter only on specialtySlug. PB's select-field filter for recordKind
+  // returned a 400 in 0.37.x against this collection — fall back to
+  // filtering by `kind` in JS, which is fine since the per-specialty row
+  // count is small.
   const rows = await pb.collection<ReviewCommentRecord>('reviewComments').getFullList({
-    filter: `specialtySlug = "${slug}" && recordKind = "${kind}"`,
+    filter: `specialtySlug = "${slug}"`,
     sort: 'created',
   });
   const out: Record<string, ReviewCommentRecord[]> = {};
   for (const r of rows) {
+    if (r.recordKind !== kind) continue;
     const list = out[r.recordId] ?? [];
     list.push(r);
     out[r.recordId] = list;
