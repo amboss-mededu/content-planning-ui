@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { resetArticleReview, submitArticleReview } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import { CodeChipList } from './code-chip';
-import type { CategoryLookup } from './code-utils';
+import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 
 export type ReviewStatus = 'approved' | 'rejected';
 export type ReviewMap = Record<string, ReviewStatus>;
@@ -38,6 +38,7 @@ export function ReviewModal({
   articles,
   initialReviews,
   categoryLookup,
+  titleOriginLookup,
   onClose,
   onReviewsChange,
 }: {
@@ -46,6 +47,7 @@ export function ReviewModal({
   articles: ArticleRow[];
   initialReviews: ReviewMap;
   categoryLookup: CategoryLookup;
+  titleOriginLookup: TitleOriginLookup;
   onClose: () => void;
   /** Called whenever a review is recorded so the parent can re-tint rows
    *  optimistically without waiting for a server round-trip. */
@@ -79,6 +81,7 @@ export function ReviewModal({
     };
   }, [current, sorted, reviews]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handlers close over latest state via the listed deps; adding decide/goNext/goPrev/onClose would re-bind the listener every render.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (submitting) return;
@@ -92,7 +95,6 @@ export function ReviewModal({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, total, current?.id, submitting]);
 
   function goNext() {
@@ -213,13 +215,30 @@ export function ReviewModal({
         {previousTitles && previousTitles.length > 0 && (
           <Stack space="xs">
             <Text size="s" weight="bold">
-              Previous article titles consolidated
+              Previously consolidated titles
             </Text>
-            {previousTitles.map((t) => (
-              <Text key={t} size="xs">
-                · {t}
-              </Text>
-            ))}
+            {previousTitles.map((t) => {
+              const origin = titleOriginLookup[t];
+              const tagText =
+                origin?.kind === 'article'
+                  ? 'article'
+                  : origin?.kind === 'section'
+                    ? `section in "${origin.inArticle}"`
+                    : origin?.kind === 'both'
+                      ? `article + section in "${origin.inArticle}"`
+                      : null;
+              return (
+                <Inline key={t} space="xs" vAlignItems="center">
+                  <Text size="xs">· {t}</Text>
+                  {tagText && (
+                    <Badge
+                      text={tagText}
+                      color={origin?.kind === 'section' ? 'purple' : 'blue'}
+                    />
+                  )}
+                </Inline>
+              );
+            })}
           </Stack>
         )}
 

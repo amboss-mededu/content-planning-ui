@@ -12,7 +12,7 @@ import {
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { CodeChipList } from './code-chip';
-import type { CategoryLookup, EmbeddedCode } from './code-utils';
+import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
 import { type ReviewMap, ReviewModal } from './review-modal';
 
@@ -157,6 +157,7 @@ export function ArticlesView({
   newOnes,
   updates,
   categoryLookup,
+  titleOriginLookup,
   initialReviews,
 }: {
   slug: string;
@@ -164,6 +165,7 @@ export function ArticlesView({
   newOnes: ArticleRow[];
   updates: ArticleRow[];
   categoryLookup: CategoryLookup;
+  titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
@@ -269,6 +271,7 @@ export function ArticlesView({
           articles={consolidated}
           initialReviews={reviews}
           categoryLookup={categoryLookup}
+          titleOriginLookup={titleOriginLookup}
           onClose={() => setReviewOpen(false)}
           onReviewsChange={setReviews}
         />

@@ -20,6 +20,42 @@ export type EmbeddedCode = {
 export type CategoryLookup = Record<string, string | undefined>;
 
 /**
+ * Origin of a title that appeared in an article's
+ * `previousArticleTitleSuggestions` list. The pipeline emits flat
+ * strings, so we join post-hoc against the 1st-pass article + section
+ * tables to recover whether each title was an article on its own or a
+ * section nested under one.
+ */
+export type TitleOrigin =
+  | { kind: 'article' }
+  | { kind: 'section'; inArticle: string }
+  | { kind: 'both'; inArticle: string };
+
+export type TitleOriginLookup = Record<string, TitleOrigin>;
+
+export function buildTitleOriginLookup(
+  articles: Array<{ articleTitle?: string }>,
+  sections: Array<{ sectionName?: string; articleTitle?: string }>,
+): TitleOriginLookup {
+  const out: TitleOriginLookup = {};
+  for (const a of articles) {
+    if (a.articleTitle) out[a.articleTitle] = { kind: 'article' };
+  }
+  for (const s of sections) {
+    if (!s.sectionName) continue;
+    const inArticle = s.articleTitle ?? '(unknown article)';
+    const existing = out[s.sectionName];
+    if (!existing) {
+      out[s.sectionName] = { kind: 'section', inArticle };
+    } else if (existing.kind === 'article') {
+      out[s.sectionName] = { kind: 'both', inArticle };
+    }
+    // existing 'section'/'both' stays — first article wins for the inArticle hint.
+  }
+  return out;
+}
+
+/**
  * Normalize the `codes` JSON column on article/section records (declared as
  * `Array<Record<string, unknown>>` in the seed schema) into a deduped list
  * of EmbeddedCode entries. Older seeds may have stored plain code strings;

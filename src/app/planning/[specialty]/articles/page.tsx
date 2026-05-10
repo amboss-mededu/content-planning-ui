@@ -6,13 +6,19 @@ import {
   listNewArticleSuggestions,
 } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { listConsolidatedSections } from '@/lib/data/sections';
 import type {
   ArticleUpdateSuggestion,
   ConsolidatedArticle,
   NewArticleSuggestion,
 } from '@/lib/types';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
-import { type CategoryLookup, extractCodes } from '../../_components/code-utils';
+import {
+  buildTitleOriginLookup,
+  type CategoryLookup,
+  extractCodes,
+  type TitleOriginLookup,
+} from '../../_components/code-utils';
 import type { ReviewMap } from '../../_components/review-modal';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -67,18 +73,26 @@ function projectSuggestion(
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [consolidatedRecs, newRecs, updateRecs, codeRecs, reviewRecs] = await Promise.all(
-    [
+  const [consolidatedRecs, newRecs, updateRecs, codeRecs, reviewRecs, sectionRecs] =
+    await Promise.all([
       listConsolidatedArticles(slug),
       listNewArticleSuggestions(slug),
       listArticleUpdateSuggestions(slug),
       listCodes(slug),
       listArticleReviews(slug),
-    ],
-  );
+      listConsolidatedSections(slug),
+    ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
+
+  // Lineage map: each known title → whether it's an article, a section
+  // (in which article), or both. Used by the review modal to annotate the
+  // flat strings in `previousArticleTitleSuggestions`.
+  const titleOriginLookup: TitleOriginLookup = buildTitleOriginLookup(
+    consolidatedRecs,
+    sectionRecs,
+  );
 
   const initialReviews: ReviewMap = {};
   for (const [id, r] of Object.entries(reviewRecs)) {
@@ -96,6 +110,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       newOnes={newOnes}
       updates={updates}
       categoryLookup={categoryLookup}
+      titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
     />
   );
