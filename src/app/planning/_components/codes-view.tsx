@@ -113,6 +113,7 @@ export function CodesView({
           </ClickableCell>
         ),
         width: 80,
+        align: 'center',
         accessor: (r) => r.source ?? null,
         type: 'string',
         filterable: true,
@@ -132,6 +133,7 @@ export function CodesView({
           </ClickableCell>
         ),
         width: 180,
+        align: 'center',
         accessor: (r) => r.code ?? null,
         type: 'string',
         group: 'metadata',
@@ -194,6 +196,7 @@ export function CodesView({
         label: 'In AMBOSS',
         description: 'Whether this code is already covered by an AMBOSS article',
         width: 110,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (r.isInAMBOSS === true) {
@@ -240,6 +243,7 @@ export function CodesView({
           );
         },
         width: 140,
+        align: 'center',
         // Sort as a number (rank) so asc/desc follow the coverage ladder rather
         // than alphabetical order of the level label.
         accessor: (r) =>
@@ -269,6 +273,7 @@ export function CodesView({
           );
         },
         width: 90,
+        align: 'center',
         accessor: (r) => r.depthOfCoverage ?? null,
         type: 'number',
         filterable: true,
@@ -279,6 +284,7 @@ export function CodesView({
         label: 'Articles',
         description: 'Existing AMBOSS articles (and sections) that cover this code',
         width: 180,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const arr = r.articlesWhereCoverageIs ?? [];
@@ -307,6 +313,7 @@ export function CodesView({
         label: 'Updates',
         description: 'Suggested updates to existing AMBOSS articles for this code',
         width: 130,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const n = r.existingArticleUpdates?.length ?? 0;
@@ -329,6 +336,7 @@ export function CodesView({
         label: 'New articles',
         description: 'Brand-new AMBOSS articles proposed to cover this code',
         width: 130,
+        align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const n = r.newArticlesNeeded?.length ?? 0;
@@ -435,6 +443,12 @@ function ClickableCell({
         textAlign: 'inherit',
         display: 'inline-flex',
         alignItems: 'center',
+        // Center the badge / chip inside the button by default. If the
+        // button is content-sized this is a no-op; if it's been forced
+        // to fill the cell width (UA defaults on <button>, fixed table
+        // layout, etc.) the inner badge stops sitting flush-left and
+        // sits in the visual center.
+        justifyContent: 'center',
       }}
     >
       {children}

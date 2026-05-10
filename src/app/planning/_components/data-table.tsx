@@ -26,7 +26,12 @@ export interface EditableConfig<T> {
   multiline?: boolean;
 }
 
-export type ColumnGroup = 'metadata' | 'coverage' | 'suggestions' | 'actions';
+export type ColumnGroup =
+  | 'metadata'
+  | 'coverage'
+  | 'consolidation'
+  | 'suggestions'
+  | 'actions';
 
 export interface Column<T> {
   key: string;
@@ -37,6 +42,12 @@ export interface Column<T> {
   render: (row: T) => ReactNode;
   width?: string | number;
   align?: 'left' | 'right' | 'center';
+  /** Vertical alignment for body cells. Defaults to `'middle'` so badges
+   *  and numbers stay centered in tall rows; set to `'top'` for columns
+   *  whose content can wrap to several lines (long descriptions,
+   *  justifications, category names) so the text starts at the top of
+   *  the cell instead of floating in the middle. */
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   accessor?: (row: T) => string | number | boolean | Date | null | undefined;
   type?: 'string' | 'number' | 'date' | 'boolean';
   /** Opts the column into the header dropdown's filter section. Number
@@ -93,6 +104,13 @@ const GROUP_STYLES: Record<
     border: 'rgb(34, 139, 80)',
     stripe: 'rgba(34, 139, 80, 0.06)',
   },
+  consolidation: {
+    label: 'Consolidation',
+    bg: 'rgb(231, 235, 247)',
+    fg: 'rgb(40, 60, 130)',
+    border: 'rgb(79, 102, 184)',
+    stripe: 'rgba(79, 102, 184, 0.06)',
+  },
   suggestions: {
     label: 'Suggestions',
     bg: 'rgb(250, 236, 220)',
@@ -108,6 +126,11 @@ const GROUP_STYLES: Record<
     stripe: 'transparent',
   },
 };
+
+// Default zebra stripe applied to odd rows in cells that don't belong to a
+// `ColumnGroup`. Same shade as the metadata-group stripe so tables with and
+// without groups share the same baseline readability.
+const DEFAULT_ROW_STRIPE = 'rgba(15, 23, 42, 0.035)';
 
 type SortState = { key: string; dir: 'asc' | 'desc' } | null;
 
@@ -676,7 +699,11 @@ function HeaderCell<T>({
       ref={thRef}
       scope="col"
       style={{
-        textAlign: column.align ?? 'left',
+        // Header labels always left-align even when the cell content is
+        // right- or center-aligned (e.g. numeric columns). Cell alignment
+        // is handled separately in the body so numbers still line up on
+        // the right while their header reads naturally on the left.
+        textAlign: 'left',
         padding: '10px 12px',
         borderBottom: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
         // Vertical divider between columns so the resize handle's position
@@ -711,12 +738,9 @@ function HeaderCell<T>({
           alignItems: 'center',
           gap: 6,
           width: '100%',
-          justifyContent:
-            column.align === 'right'
-              ? 'flex-end'
-              : column.align === 'center'
-                ? 'center'
-                : 'flex-start',
+          // Always start-align the header content (label + sort/filter
+          // glyph) regardless of the column's body alignment.
+          justifyContent: 'flex-start',
         }}
       >
         {interactable ? (
@@ -969,6 +993,10 @@ function HeaderMenu<T>({
         flexDirection: 'column',
         gap: 4,
         minWidth: 220,
+        // Cap the popover width so long category names (e.g. "Disorders of
+        // the autonomic nervous system") wrap to multiple lines instead of
+        // making the dropdown grow horizontally across the table.
+        maxWidth: 320,
         maxHeight: '60vh',
         overflowY: 'auto',
       }}
@@ -1249,7 +1277,10 @@ function CategoricalFilter({
                 key={opt.value}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  // Top-align so the checkbox lines up with the first line
+                  // of a wrapped label rather than centering against the
+                  // whole multi-line block.
+                  alignItems: 'flex-start',
                   gap: 8,
                   padding: '5px 8px',
                   borderRadius: 4,
@@ -1270,8 +1301,21 @@ function CategoricalFilter({
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggle(opt.value)}
+                  // Prevent the checkbox from shrinking when the label
+                  // wraps to multiple lines.
+                  style={{ flexShrink: 0, marginTop: 2 }}
                 />
-                <span>{opt.label}</span>
+                <span
+                  style={{
+                    // Wrap long values (e.g. multi-word category names)
+                    // instead of forcing the popover to grow horizontally.
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {opt.label}
+                </span>
               </label>
             );
           })
@@ -1608,9 +1652,12 @@ function TableCells<T>({
   columns: Column<T>[];
   rowIndex: number;
 }) {
-  // Odd rows pick up the column group's stripe tint (light grey for metadata,
-  // light green for coverage, light orange for suggestions). Even rows stay
-  // white. The stripe is per-group so each band reads as its own column block.
+  // Odd rows pick up a stripe tint so the table reads as a zebra pattern.
+  // For grouped columns the tint is the group's color (light blue-grey for
+  // metadata, light green for coverage, light orange for suggestions); for
+  // ungrouped columns and tables without groups, fall back to the default
+  // grey so every table has the same readability without each call site
+  // having to opt in. Even rows stay plain white.
   const stripe = rowIndex % 2 === 1;
   return (
     <>
@@ -1620,17 +1667,49 @@ function TableCells<T>({
           style={{
             padding: '10px 12px',
             borderBottom: '1px solid var(--ads-c-divider, rgba(0,0,0,0.05))',
-            verticalAlign: 'middle',
+            // Vertical column dividers, matching the header row's
+            // `borderRight` so the grid lines are continuous from the
+            // sticky header through every body cell.
+            borderRight: '1px solid var(--ads-c-divider, rgba(0,0,0,0.08))',
+            verticalAlign: c.verticalAlign ?? 'middle',
             textAlign: c.align ?? 'left',
             maxWidth: 360,
-            background: stripe && c.group ? GROUP_STYLES[c.group].stripe : 'transparent',
+            background: stripe
+              ? c.group
+                ? GROUP_STYLES[c.group].stripe
+                : DEFAULT_ROW_STRIPE
+              : 'transparent',
           }}
         >
-          {c.editable ? (
-            <EditableCell row={row} column={c} editable={c.editable} />
-          ) : (
-            c.render(row)
-          )}
+          {/*
+           * Wrap the rendered cell content in a flex row so cell-level
+           * alignment is enforced by `justifyContent` rather than
+           * relying on `textAlign` to cascade through arbitrary nested
+           * elements (DS components, <button>s, inline-flex wrappers).
+           * That makes the alignment robust to UA button defaults and
+           * to design-system components that introduce their own block
+           * layout — a colored Badge or chip stays centered inside an
+           * align:'center' cell instead of pinning to the left edge.
+           */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent:
+                c.align === 'right'
+                  ? 'flex-end'
+                  : c.align === 'center'
+                    ? 'center'
+                    : 'flex-start',
+              width: '100%',
+            }}
+          >
+            {c.editable ? (
+              <EditableCell row={row} column={c} editable={c.editable} />
+            ) : (
+              c.render(row)
+            )}
+          </div>
         </td>
       ))}
     </>

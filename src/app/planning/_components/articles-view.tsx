@@ -14,6 +14,11 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     label: 'Title',
     description: 'Article title after consolidation/deduplication',
     render: (r) => r.articleTitle ?? '—',
+    align: 'center',
+    accessor: (r) => r.articleTitle ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
   {
     key: 'type',
@@ -21,12 +26,19 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     description: 'Article type (e.g. disease, procedure, drug)',
     render: (r) => r.articleType ?? '—',
     width: 160,
+    align: 'center',
+    accessor: (r) => r.articleType ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'category',
     label: 'Category',
     description: 'Code category that anchors this article',
     render: (r) => r.category ?? '—',
+    accessor: (r) => r.category ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'numCodes',
@@ -34,7 +46,10 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     description: 'Number of source codes mapped to this article',
     render: (r) => r.numCodes ?? '—',
     width: 80,
-    align: 'right',
+    align: 'center',
+    accessor: (r) => r.numCodes ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'importance',
@@ -42,7 +57,10 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
     description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
-    align: 'right',
+    align: 'center',
+    accessor: (r) => r.overallImportance ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'coverage',
@@ -51,7 +69,10 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
       'Existing AMBOSS coverage score for this article (higher = better covered)',
     render: (r) => r.overallCoverage ?? '—',
     width: 100,
-    align: 'right',
+    align: 'center',
+    accessor: (r) => r.overallCoverage ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'justification',
@@ -62,6 +83,10 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
         {r.justification ?? ''}
       </Text>
     ),
+    accessor: (r) => r.justification ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
 ];
 
@@ -71,6 +96,11 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     label: 'Title',
     description: 'Suggested article title',
     render: (r) => r.articleTitle ?? '—',
+    align: 'center',
+    accessor: (r) => r.articleTitle ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
   {
     key: 'type',
@@ -78,6 +108,10 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     description: 'Article type (e.g. disease, procedure, drug)',
     render: (r) => r.articleType ?? '—',
     width: 160,
+    align: 'center',
+    accessor: (r) => r.articleType ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'importance',
@@ -85,7 +119,10 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     description: 'Editorial importance score (higher = higher priority)',
     render: (r) => r.overallImportance ?? '—',
     width: 100,
-    align: 'right',
+    align: 'center',
+    accessor: (r) => r.overallImportance ?? null,
+    type: 'number',
+    filterable: true,
   },
   {
     key: 'coverage',
@@ -93,6 +130,11 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     description: 'Free-text note on how this topic is covered in AMBOSS today',
     render: (r) => r.existingAmbossCoverage ?? '—',
     width: 140,
+    align: 'center',
+    accessor: (r) => r.existingAmbossCoverage ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
   {
     key: 'editor',
@@ -100,6 +142,10 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     description: 'Editor assigned to draft or update this article',
     render: (r) => r.assignedEditor ?? '—',
     width: 140,
+    align: 'center',
+    accessor: (r) => r.assignedEditor ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'verdict',
@@ -107,6 +153,10 @@ const newColumns: Column<NewArticleSuggestion>[] = [
     description: 'Editorial verdict on the suggestion (accept / reject / revise)',
     render: (r) => r.verdict ?? '—',
     width: 120,
+    align: 'center',
+    accessor: (r) => r.verdict ?? null,
+    type: 'string',
+    filterable: true,
   },
   {
     key: 'justification',
@@ -117,6 +167,10 @@ const newColumns: Column<NewArticleSuggestion>[] = [
         {r.justification ?? ''}
       </Text>
     ),
+    accessor: (r) => r.justification ?? null,
+    type: 'string',
+    filterable: true,
+    filterMode: 'contains',
   },
 ];
 
