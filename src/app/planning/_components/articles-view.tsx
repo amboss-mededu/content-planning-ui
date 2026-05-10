@@ -1,6 +1,15 @@
 'use client';
 
-import { Callout, H2, Stack, Text } from '@amboss/design-system';
+import {
+  Callout,
+  H2,
+  Inline,
+  SegmentedControl,
+  Stack,
+  Text,
+} from '@amboss/design-system';
+import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import type {
   ArticleUpdateSuggestion,
   ConsolidatedArticle,
@@ -12,7 +21,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'title',
     label: 'Title',
-    description: 'Article title after consolidation/deduplication',
+    description: 'Article title after the per-category 1st consolidation pass',
     render: (r) => r.articleTitle ?? '—',
     align: 'center',
     accessor: (r) => r.articleTitle ?? null,
@@ -34,7 +43,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'category',
     label: 'Category',
-    description: 'Code category that anchors this article',
+    description: 'Source code category that anchors this article',
     render: (r) => r.category ?? '—',
     accessor: (r) => r.category ?? null,
     type: 'string',
@@ -77,7 +86,7 @@ const consolidatedColumns: Column<ConsolidatedArticle>[] = [
   {
     key: 'justification',
     label: 'Justification',
-    description: 'Why this consolidated article was proposed',
+    description: 'Why this 1st-pass article was proposed',
     render: (r) => (
       <Text color="secondary" size="s">
         {r.justification ?? ''}
@@ -94,7 +103,7 @@ const newColumns: Column<NewArticleSuggestion>[] = [
   {
     key: 'title',
     label: 'Title',
-    description: 'Suggested article title',
+    description: 'Suggested article title (post 2nd-pass cross-category consolidation)',
     render: (r) => r.articleTitle ?? '—',
     align: 'center',
     accessor: (r) => r.articleTitle ?? null,
@@ -174,6 +183,8 @@ const newColumns: Column<NewArticleSuggestion>[] = [
   },
 ];
 
+type Pass = 'first' | 'second';
+
 export function ArticlesView({
   consolidated,
   newOnes,
@@ -183,30 +194,59 @@ export function ArticlesView({
   newOnes: NewArticleSuggestion[];
   updates: ArticleUpdateSuggestion[];
 }) {
+  const params = useSearchParams();
+  const [pass, setPass] = useState<Pass>(() => {
+    const v = params.get('pass');
+    return v === 'second' ? 'second' : 'first';
+  });
+
+  // Mirror the URL-param sync pattern from sections-view: hold the lens in
+  // local state and writeback via replaceState so refresh preserves the
+  // choice without a full server round-trip.
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (pass !== 'first') p.set('pass', pass);
+    const qs = p.toString();
+    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', next);
+  }, [pass]);
+
+  const summary =
+    pass === 'first'
+      ? `${consolidated.length.toLocaleString()} 1st-pass articles — per-category aggregation (consolidatedArticles).`
+      : `${newOnes.length.toLocaleString()} 2nd-pass articles — cross-category, editor-facing (newArticleSuggestions).`;
+
   return (
     <Stack space="xl">
       <Stack space="m">
-        <H2>Consolidated articles</H2>
-        <Text color="secondary">
-          {consolidated.length} deduped article suggestions post-consolidation.
-        </Text>
-        <DataTable
-          rows={consolidated}
-          columns={consolidatedColumns}
-          getRowKey={(r, i) => `${i}-${r.index ?? ''}`}
-        />
-      </Stack>
-
-      <Stack space="m">
-        <H2>New article suggestions</H2>
-        <Text color="secondary">
-          {newOnes.length} editor-facing suggestions for new articles.
-        </Text>
-        <DataTable
-          rows={newOnes}
-          columns={newColumns}
-          getRowKey={(r, i) => `${i}-${r.index ?? ''}`}
-        />
+        <Inline space="s" vAlignItems="bottom">
+          <SegmentedControl
+            label="Consolidation pass"
+            isLabelHidden
+            value={pass}
+            onChange={(v) => setPass(v === 'second' ? 'second' : 'first')}
+            options={[
+              { name: 'pass', value: 'first', label: '1st pass' },
+              { name: 'pass', value: 'second', label: '2nd pass' },
+            ]}
+          />
+        </Inline>
+        <Text color="secondary">{summary}</Text>
+        {pass === 'first' ? (
+          <DataTable
+            rows={consolidated}
+            columns={consolidatedColumns}
+            getRowKey={(r, i) => `${i}-${r.index ?? ''}`}
+            emptyText="No 1st-pass articles for this specialty."
+          />
+        ) : (
+          <DataTable
+            rows={newOnes}
+            columns={newColumns}
+            getRowKey={(r, i) => `${i}-${r.index ?? ''}`}
+            emptyText="No 2nd-pass articles for this specialty."
+          />
+        )}
       </Stack>
 
       <Stack space="m">

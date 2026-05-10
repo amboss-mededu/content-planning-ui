@@ -126,20 +126,39 @@ const columns: Column<ConsolidatedSection>[] = [
 export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
+  const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
 
   useEffect(() => {
     const p = new URLSearchParams();
     if (kind) p.set('kind', kind);
+    if (article) p.set('article', article);
     const qs = p.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
-  }, [kind]);
+  }, [kind, article]);
+
+  // Article options come from the full row set (not the kind-filtered subset)
+  // so the dropdown is stable when the kind filter changes. Counts shown are
+  // the per-article totals across all kinds.
+  const articleOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const t = r.articleTitle;
+      if (!t) continue;
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([title, n]) => ({ value: title, label: `${title} (${n})` }));
+  }, [rows]);
 
   const filtered = useMemo(() => {
-    if (kind === 'new') return rows.filter((r) => r.newSection === true);
-    if (kind === 'update') return rows.filter((r) => r.sectionUpdate === true);
-    return rows;
-  }, [rows, kind]);
+    let out = rows;
+    if (kind === 'new') out = out.filter((r) => r.newSection === true);
+    else if (kind === 'update') out = out.filter((r) => r.sectionUpdate === true);
+    if (article) out = out.filter((r) => r.articleTitle === article);
+    return out;
+  }, [rows, kind, article]);
 
   return (
     <Stack space="m">
@@ -155,6 +174,15 @@ export function SectionsView({ rows }: { rows: ConsolidatedSection[] }) {
               { value: 'update', label: 'Section updates' },
             ]}
             onChange={(e) => setKind(e.target.value)}
+          />
+        </div>
+        <div className="filter-cell">
+          <Select
+            name="article"
+            label="Article"
+            value={article}
+            options={[{ value: '', label: 'All articles' }, ...articleOptions]}
+            onChange={(e) => setArticle(e.target.value)}
           />
         </div>
       </Inline>
