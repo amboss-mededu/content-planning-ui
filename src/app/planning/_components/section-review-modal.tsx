@@ -167,93 +167,121 @@ export function SectionReviewModal({
       privateProps={{ height: '90vh' }}
       closeButtonAriaLabel="Close review"
     >
-      <Modal.Stack>
-        <Stack space="s">
-          <Inline space="s" vAlignItems="center">
-            <Text size="m" weight="bold">
-              {current.sectionName ?? '(untitled section)'}
-            </Text>
-            {current.updateType === 'new' && <Badge text="new" color="blue" />}
-            {current.updateType === 'update' && <Badge text="update" color="purple" />}
-            {currentStatus === 'approved' && <Badge text="approved" color="green" />}
-            {currentStatus === 'rejected' && <Badge text="rejected" color="red" />}
-          </Inline>
-          <Inline space="s">
-            {current.articleTitle && (
-              <Text size="xs" color="secondary">
-                Parent article: {current.articleTitle}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          minHeight: 0,
+          gap: 16,
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+          }}
+        >
+          <Stack space="s">
+            <Inline space="s" vAlignItems="center">
+              <Text size="m" weight="bold">
+                {current.sectionName ?? '(untitled section)'}
               </Text>
-            )}
-            {current.articleId && (
+              {current.updateType === 'new' && <Badge text="new" color="blue" />}
+              {current.updateType === 'update' && <Badge text="update" color="purple" />}
+              {currentStatus === 'approved' && <Badge text="approved" color="green" />}
+              {currentStatus === 'rejected' && <Badge text="rejected" color="red" />}
+            </Inline>
+            <Inline space="s">
+              {current.articleTitle && (
+                <Text size="xs" color="secondary">
+                  Parent article: {current.articleTitle}
+                </Text>
+              )}
+              {current.articleId && (
+                <Text size="xs" color="secondary">
+                  ID: {current.articleId}
+                </Text>
+              )}
+              {typeof current.overallImportance === 'number' && (
+                <Text size="xs" color="secondary">
+                  Importance: {current.overallImportance}
+                </Text>
+              )}
+              {typeof current.overallCoverage === 'number' && (
+                <Text size="xs" color="secondary">
+                  Coverage: {current.overallCoverage}
+                </Text>
+              )}
               <Text size="xs" color="secondary">
-                ID: {current.articleId}
+                # Codes: {current.numCodes}
               </Text>
-            )}
-            {typeof current.overallImportance === 'number' && (
-              <Text size="xs" color="secondary">
-                Importance: {current.overallImportance}
-              </Text>
-            )}
-            {typeof current.overallCoverage === 'number' && (
-              <Text size="xs" color="secondary">
-                Coverage: {current.overallCoverage}
-              </Text>
-            )}
-            <Text size="xs" color="secondary">
-              # Codes: {current.numCodes}
-            </Text>
-          </Inline>
-        </Stack>
+            </Inline>
+          </Stack>
 
-        <Stack space="xs">
-          <Text size="s" weight="bold">
-            Codes ({current.codes.length})
-          </Text>
-          <CodeChipList codes={current.codes} categoryLookup={categoryLookup} />
-        </Stack>
-
-        {previousNames && previousNames.length > 0 && (
           <Stack space="xs">
             <Text size="s" weight="bold">
-              Previously consolidated section names
+              Codes ({current.codes.length})
             </Text>
-            {previousNames.map((t) => {
-              const origin = titleOriginLookup[t];
-              const tagText =
-                origin?.kind === 'article'
-                  ? 'article'
-                  : origin?.kind === 'section'
-                    ? `section in "${origin.inArticle}"`
-                    : origin?.kind === 'both'
-                      ? `article + section in "${origin.inArticle}"`
-                      : null;
-              return (
-                <Inline key={t} space="xs" vAlignItems="center">
-                  <Text size="xs">· {t}</Text>
-                  {tagText && (
-                    <Badge
-                      text={tagText}
-                      color={origin?.kind === 'section' ? 'purple' : 'blue'}
-                    />
-                  )}
-                </Inline>
-              );
-            })}
+            <CodeChipList codes={current.codes} categoryLookup={categoryLookup} />
           </Stack>
-        )}
 
-        {current.justification && (
-          <Stack space="xs">
-            <Text size="s" weight="bold">
-              Justification
-            </Text>
-            <Text size="s" color="secondary">
-              {current.justification}
-            </Text>
-          </Stack>
-        )}
+          {previousNames && previousNames.length > 0 && (
+            <Stack space="xs">
+              <Text size="s" weight="bold">
+                Previously consolidated section names
+              </Text>
+              {previousNames.map((t) => {
+                const origin = titleOriginLookup[t];
+                const tagText =
+                  origin?.kind === 'article'
+                    ? 'article'
+                    : origin?.kind === 'section'
+                      ? `section in "${origin.inArticle}"`
+                      : origin?.kind === 'both'
+                        ? `article + section in "${origin.inArticle}"`
+                        : null;
+                return (
+                  <Inline key={t} space="xs" vAlignItems="center">
+                    <Text size="xs">· {t}</Text>
+                    {tagText && (
+                      <Badge
+                        text={tagText}
+                        color={origin?.kind === 'section' ? 'purple' : 'blue'}
+                      />
+                    )}
+                  </Inline>
+                );
+              })}
+            </Stack>
+          )}
 
-        <Inline space="s" vAlignItems="center">
+          {current.justification && (
+            <Stack space="xs">
+              <Text size="s" weight="bold">
+                Justification
+              </Text>
+              <Text size="s" color="secondary">
+                {current.justification}
+              </Text>
+            </Stack>
+          )}
+        </div>
+
+        <div
+          style={{
+            flex: 'none',
+            borderTop: '1px solid rgba(0, 0, 0, 0.12)',
+            paddingTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
           <Button
             variant="tertiary"
             onClick={goPrev}
@@ -289,8 +317,8 @@ export function SectionReviewModal({
           >
             Approve (A)
           </Button>
-        </Inline>
-      </Modal.Stack>
+        </div>
+      </div>
     </Modal>
   );
 }
