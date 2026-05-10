@@ -6,7 +6,6 @@ import {
   H2,
   Inline,
   SegmentedControl,
-  Select,
   Stack,
   Text,
 } from '@amboss/design-system';
@@ -47,7 +46,6 @@ export type ArticleRow = {
 };
 
 type Pass = 'first' | 'second';
-type StatusFilter = '' | 'unreviewed' | 'approved' | 'rejected';
 
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
@@ -174,7 +172,6 @@ export function ArticlesView({
     params.get('pass') === 'second' ? 'second' : 'first',
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
   const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
@@ -185,15 +182,6 @@ export function ArticlesView({
     window.history.replaceState(null, '', next);
   }, [pass]);
 
-  const filteredConsolidated = useMemo(() => {
-    if (!statusFilter) return consolidated;
-    return consolidated.filter((r) => {
-      const s = r.id ? reviews[r.id] : undefined;
-      if (statusFilter === 'unreviewed') return !s;
-      return s === statusFilter;
-    });
-  }, [consolidated, reviews, statusFilter]);
-
   // Tint applies to 1st-pass rows that have a recorded review status.
   const getRowStyle = (r: ArticleRow) => {
     if (!r.id) return undefined;
@@ -203,7 +191,7 @@ export function ArticlesView({
     return undefined;
   };
 
-  const activeRows = pass === 'first' ? filteredConsolidated : newOnes;
+  const activeRows = pass === 'first' ? consolidated : newOnes;
 
   const reviewCounts = useMemo(() => {
     let approved = 0;
@@ -236,29 +224,13 @@ export function ArticlesView({
             ]}
           />
           {pass === 'first' && (
-            <>
-              <div className="filter-cell">
-                <Select
-                  name="status"
-                  label="Review status"
-                  value={statusFilter}
-                  options={[
-                    { value: '', label: 'All' },
-                    { value: 'unreviewed', label: 'Unreviewed' },
-                    { value: 'approved', label: 'Approved' },
-                    { value: 'rejected', label: 'Rejected' },
-                  ]}
-                  onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                />
-              </div>
-              <Button
-                variant="primary"
-                onClick={() => setReviewOpen(true)}
-                disabled={consolidated.length === 0}
-              >
-                Start review
-              </Button>
-            </>
+            <Button
+              variant="primary"
+              onClick={() => setReviewOpen(true)}
+              disabled={consolidated.length === 0}
+            >
+              Start review
+            </Button>
           )}
         </Inline>
         <DataTable
