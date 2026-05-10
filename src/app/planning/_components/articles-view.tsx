@@ -258,10 +258,6 @@ export function ArticlesView({
               >
                 Start review
               </Button>
-              <Text size="xs" color="secondary">
-                {reviewCounts.approved} approved · {reviewCounts.rejected} rejected ·{' '}
-                {reviewCounts.unreviewed} unreviewed
-              </Text>
             </>
           )}
         </Inline>
@@ -270,6 +266,11 @@ export function ArticlesView({
           columns={columns}
           getRowKey={(_r, i) => `${pass}-${i}`}
           getRowStyle={pass === 'first' ? getRowStyle : undefined}
+          leadingNote={
+            pass === 'first'
+              ? `${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`
+              : undefined
+          }
           emptyText={
             pass === 'first'
               ? 'No 1st-pass articles for this specialty.'
