@@ -85,6 +85,21 @@ export interface CodeCategoryRecord extends PbRecord {
   numTotallyIgnoredCodes?: number;
 }
 
+// --- Collection: articleReviews --------------------------------------------
+
+export type ArticleReviewStatus = 'approved' | 'rejected';
+
+export interface ArticleReviewRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the consolidatedArticles row this review covers. */
+  articleRecordId: string;
+  status: ArticleReviewStatus;
+  reviewerEmail?: string;
+  /** ms since epoch */
+  reviewedAt?: number;
+  notes?: string;
+}
+
 // --- Collection: mappingsInFlight ------------------------------------------
 
 export interface MappingInFlightRecord extends PbRecord {

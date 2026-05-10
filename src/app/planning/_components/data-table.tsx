@@ -2,7 +2,14 @@
 
 import { Button, Text, Tooltip } from '@amboss/design-system';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 /**
@@ -174,6 +181,7 @@ export function DataTable<T>({
   columns,
   emptyText = 'No rows to display.',
   getRowKey,
+  getRowStyle,
   leadingNote,
   countAddendum,
   storageKey,
@@ -182,6 +190,10 @@ export function DataTable<T>({
   columns: Column<T>[];
   emptyText?: string;
   getRowKey: (row: T, index: number) => string;
+  /** Optional per-row style overlay. Returned styles apply to the `<tr>`
+   *  and override the default zebra stripe — used by review-pass tinting
+   *  to show approved (green) / rejected (red) rows. */
+  getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
   /** Short caption appended after the row count with a `·` separator. Use
    *  `countAddendum` instead when you want a parenthetical that depends on
    *  the live filtered set. */
@@ -545,6 +557,7 @@ export function DataTable<T>({
         rows={sortedRows}
         columns={visibleColumns}
         getRowKey={getRowKey}
+        getRowStyle={getRowStyle}
         sort={sort}
         onSortSet={onSortSet}
         numFilters={numFilters}
@@ -1899,6 +1912,7 @@ type BodyProps<T> = {
   rows: T[];
   columns: Column<T>[];
   getRowKey: (row: T, index: number) => string;
+  getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
   sort: SortState;
   onSortSet: (key: string, dir: 'asc' | 'desc' | null) => void;
   numFilters: Record<string, NumericFilter | null>;
@@ -2101,7 +2115,7 @@ function PlainBody<T>(props: BodyProps<T>) {
         <Header {...props} />
         <tbody>
           {rows.map((row, i) => (
-            <tr key={getRowKey(row, i)}>
+            <tr key={getRowKey(row, i)} style={props.getRowStyle?.(row, i)}>
               <TableCells row={row} columns={columns} rowIndex={i} />
             </tr>
           ))}
@@ -2191,6 +2205,7 @@ function VirtualizedBody<T>(props: BodyProps<T>) {
                 key={getRowKey(row, vi.index)}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
+                style={props.getRowStyle?.(row, vi.index)}
               >
                 <TableCells row={row} columns={columns} rowIndex={vi.index} />
               </tr>

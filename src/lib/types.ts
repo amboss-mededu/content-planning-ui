@@ -102,6 +102,8 @@ export type CodeCategory = {
 // --- Articles --------------------------------------------------------------
 
 export type ConsolidatedArticle = {
+  /** PB record id (preserved by the data layer for the review-pass keying). */
+  id?: string;
   index?: string;
   articleTitle?: string;
   articleType?: string;
@@ -117,6 +119,7 @@ export type ConsolidatedArticle = {
 };
 
 export type NewArticleSuggestion = {
+  id?: string;
   index?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;

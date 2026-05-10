@@ -1,10 +1,12 @@
 'use client';
 
 import {
+  Button,
   Callout,
   H2,
   Inline,
   SegmentedControl,
+  Select,
   Stack,
   Text,
 } from '@amboss/design-system';
@@ -13,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { type ReviewMap, ReviewModal } from './review-modal';
 
 /**
  * Unified row shape for the New Articles tab. Both 1st-pass
@@ -24,6 +27,9 @@ import { type Column, DataTable } from './data-table';
  * is 2nd-pass-only).
  */
 export type ArticleRow = {
+  /** PB record id of the underlying consolidatedArticles row. Set on
+   *  1st-pass rows; the review pass keys reviews on this. */
+  id?: string;
   articleTitle?: string;
   articleType?: string;
   category?: string;
@@ -33,10 +39,18 @@ export type ArticleRow = {
   existingAmbossCoverage?: string;
   overallImportance?: number;
   justification?: string;
+  /** Alternative / precursor titles emitted by the LLM. Surfaced in the
+   *  review modal so the editor can see what was consolidated into the
+   *  current title. */
+  previousArticleTitleSuggestions?: string[];
   pass: 'first' | 'second';
 };
 
 type Pass = 'first' | 'second';
+type StatusFilter = '' | 'unreviewed' | 'approved' | 'rejected';
+
+const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
+const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 
 function buildColumns(categoryLookup: CategoryLookup): Column<ArticleRow>[] {
   return [
@@ -140,21 +154,28 @@ function buildColumns(categoryLookup: CategoryLookup): Column<ArticleRow>[] {
 }
 
 export function ArticlesView({
+  slug,
   consolidated,
   newOnes,
   updates,
   categoryLookup,
+  initialReviews,
 }: {
+  slug: string;
   consolidated: ArticleRow[];
   newOnes: ArticleRow[];
   updates: ArticleRow[];
   categoryLookup: CategoryLookup;
+  initialReviews: ReviewMap;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
   const [pass, setPass] = useState<Pass>(() =>
     params.get('pass') === 'second' ? 'second' : 'first',
   );
+  const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -164,7 +185,41 @@ export function ArticlesView({
     window.history.replaceState(null, '', next);
   }, [pass]);
 
-  const activeRows = pass === 'first' ? consolidated : newOnes;
+  const filteredConsolidated = useMemo(() => {
+    if (!statusFilter) return consolidated;
+    return consolidated.filter((r) => {
+      const s = r.id ? reviews[r.id] : undefined;
+      if (statusFilter === 'unreviewed') return !s;
+      return s === statusFilter;
+    });
+  }, [consolidated, reviews, statusFilter]);
+
+  // Tint applies to 1st-pass rows that have a recorded review status.
+  const getRowStyle = (r: ArticleRow) => {
+    if (!r.id) return undefined;
+    const s = reviews[r.id];
+    if (s === 'approved') return { background: APPROVED_TINT };
+    if (s === 'rejected') return { background: REJECTED_TINT };
+    return undefined;
+  };
+
+  const activeRows = pass === 'first' ? filteredConsolidated : newOnes;
+
+  const reviewCounts = useMemo(() => {
+    let approved = 0;
+    let rejected = 0;
+    for (const r of consolidated) {
+      if (!r.id) continue;
+      const s = reviews[r.id];
+      if (s === 'approved') approved++;
+      else if (s === 'rejected') rejected++;
+    }
+    return {
+      approved,
+      rejected,
+      unreviewed: consolidated.length - approved - rejected,
+    };
+  }, [consolidated, reviews]);
 
   return (
     <Stack space="xl">
@@ -180,11 +235,41 @@ export function ArticlesView({
               { name: 'pass', value: 'second', label: '2nd pass' },
             ]}
           />
+          {pass === 'first' && (
+            <>
+              <div className="filter-cell">
+                <Select
+                  name="status"
+                  label="Review status"
+                  value={statusFilter}
+                  options={[
+                    { value: '', label: 'All' },
+                    { value: 'unreviewed', label: 'Unreviewed' },
+                    { value: 'approved', label: 'Approved' },
+                    { value: 'rejected', label: 'Rejected' },
+                  ]}
+                  onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                />
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => setReviewOpen(true)}
+                disabled={consolidated.length === 0}
+              >
+                Start review
+              </Button>
+              <Text size="xs" color="secondary">
+                {reviewCounts.approved} approved · {reviewCounts.rejected} rejected ·{' '}
+                {reviewCounts.unreviewed} unreviewed
+              </Text>
+            </>
+          )}
         </Inline>
         <DataTable
           rows={activeRows}
           columns={columns}
           getRowKey={(_r, i) => `${pass}-${i}`}
+          getRowStyle={pass === 'first' ? getRowStyle : undefined}
           emptyText={
             pass === 'first'
               ? 'No 1st-pass articles for this specialty.'
@@ -204,6 +289,17 @@ export function ArticlesView({
           <DataTable rows={updates} columns={columns} getRowKey={(_r, i) => `upd-${i}`} />
         )}
       </Stack>
+
+      {reviewOpen && (
+        <ReviewModal
+          slug={slug}
+          articles={consolidated}
+          initialReviews={reviews}
+          categoryLookup={categoryLookup}
+          onClose={() => setReviewOpen(false)}
+          onReviewsChange={setReviews}
+        />
+      )}
     </Stack>
   );
 }

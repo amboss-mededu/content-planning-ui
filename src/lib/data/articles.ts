@@ -24,12 +24,13 @@ async function userClient(): Promise<PocketBase> {
   return createServerClient(cookieHeader);
 }
 
-// Strip PB system fields + the specialtySlug join column so the type
-// matches the legacy repository shape consumers expect.
+// Strip PB system fields except `id` (the review pass keys reviews on the
+// PB record id, so consumers need it to remain available) plus the
+// specialtySlug join column so the type matches the legacy repository
+// shape consumers expect.
 function strip<T>(rows: PbRecord[]): T[] {
   return rows.map((row) => {
     const {
-      id: _id,
       created: _created,
       updated: _updated,
       collectionId: _ci,

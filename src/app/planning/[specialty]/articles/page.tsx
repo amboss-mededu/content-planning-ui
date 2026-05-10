@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { listArticleReviews } from '@/lib/data/article-reviews';
 import {
   listArticleUpdateSuggestions,
   listConsolidatedArticles,
@@ -12,6 +13,7 @@ import type {
 } from '@/lib/types';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
 import { type CategoryLookup, extractCodes } from '../../_components/code-utils';
+import type { ReviewMap } from '../../_components/review-modal';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({
@@ -30,6 +32,7 @@ export default async function ArticlesPage({
 function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
   const codes = extractCodes(r.codes);
   return {
+    id: r.id,
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     category: r.category,
@@ -38,6 +41,7 @@ function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
     overallCoverage: r.overallCoverage,
     overallImportance: r.overallImportance,
     justification: r.justification,
+    previousArticleTitleSuggestions: r.previousArticleTitleSuggestions,
     pass: 'first',
   };
 }
@@ -47,6 +51,7 @@ function projectSuggestion(
 ): ArticleRow {
   const codes = extractCodes(r.codes);
   return {
+    id: r.id,
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     // category + numCodes are not on the 2nd-pass schema; fall back where we can.
@@ -56,20 +61,29 @@ function projectSuggestion(
     existingAmbossCoverage: r.existingAmbossCoverage,
     overallImportance: r.overallImportance,
     justification: r.justification,
+    previousArticleTitleSuggestions: r.previousArticleTitleSuggestions,
     pass: 'second',
   };
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [consolidatedRecs, newRecs, updateRecs, codeRecs] = await Promise.all([
-    listConsolidatedArticles(slug),
-    listNewArticleSuggestions(slug),
-    listArticleUpdateSuggestions(slug),
-    listCodes(slug),
-  ]);
+  const [consolidatedRecs, newRecs, updateRecs, codeRecs, reviewRecs] = await Promise.all(
+    [
+      listConsolidatedArticles(slug),
+      listNewArticleSuggestions(slug),
+      listArticleUpdateSuggestions(slug),
+      listCodes(slug),
+      listArticleReviews(slug),
+    ],
+  );
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
+
+  const initialReviews: ReviewMap = {};
+  for (const [id, r] of Object.entries(reviewRecs)) {
+    initialReviews[id] = r.status;
+  }
 
   const consolidated = consolidatedRecs.map(projectConsolidated);
   const newOnes = newRecs.map(projectSuggestion);
@@ -77,10 +91,12 @@ async function ArticlesData({ slug }: { slug: string }) {
 
   return (
     <ArticlesView
+      slug={slug}
       consolidated={consolidated}
       newOnes={newOnes}
       updates={updates}
       categoryLookup={categoryLookup}
+      initialReviews={initialReviews}
     />
   );
 }
