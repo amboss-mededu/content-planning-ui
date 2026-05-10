@@ -3,7 +3,7 @@
 import { Button, Stack, Text } from '@amboss/design-system';
 import { useState } from 'react';
 import type { ReviewCommentRecord, ReviewRecordKind } from '@/lib/pb/types';
-import { postReviewComment } from '../[specialty]/actions';
+import { deleteOwnReviewComment, postReviewComment } from '../[specialty]/actions';
 
 function handleFromEmail(email?: string): string {
   if (!email) return '(unknown)';
@@ -25,11 +25,16 @@ export function CommentsSection({
   recordKind,
   recordId,
   initialComments,
+  viewerEmail,
 }: {
   slug: string;
   recordKind: ReviewRecordKind;
   recordId: string;
   initialComments: ReviewCommentRecord[];
+  /** Email of the currently signed-in editor. Used to decide which
+   *  comments expose a delete affordance — PB also enforces this
+   *  server-side via the deleteRule. */
+  viewerEmail?: string;
 }) {
   const [comments, setComments] = useState<ReviewCommentRecord[]>(initialComments);
   const [draft, setDraft] = useState('');
@@ -50,6 +55,17 @@ export function CommentsSection({
     }
   }
 
+  async function deleteComment(commentId: string) {
+    const before = comments;
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
+    try {
+      await deleteOwnReviewComment(slug, commentId);
+    } catch (err) {
+      console.error('deleteOwnReviewComment failed', err);
+      setComments(before);
+    }
+  }
+
   return (
     <Stack space="xs">
       <Text size="s" weight="bold">
@@ -60,21 +76,55 @@ export function CommentsSection({
           No comments yet.
         </Text>
       )}
-      {comments.map((c) => (
-        <div
-          key={c.id}
-          style={{
-            padding: '8px 10px',
-            borderRadius: 4,
-            background: 'rgba(0, 0, 0, 0.03)',
-          }}
-        >
-          <Text size="xs" color="secondary">
-            {handleFromEmail(c.authorEmail)} · {formatTime(c.created)}
-          </Text>
-          <Text size="s">{c.body}</Text>
-        </div>
-      ))}
+      {comments.map((c) => {
+        const isOwn = !!viewerEmail && c.authorEmail === viewerEmail;
+        return (
+          <div
+            key={c.id}
+            style={{
+              padding: '8px 10px',
+              borderRadius: 4,
+              background: 'rgba(0, 0, 0, 0.03)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              position: 'relative',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <Text size="xs" color="secondary">
+                {handleFromEmail(c.authorEmail)} · {formatTime(c.created)}
+              </Text>
+              {isOwn && (
+                <button
+                  type="button"
+                  onClick={() => deleteComment(c.id)}
+                  title="Delete comment"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '0 4px',
+                    color: 'rgb(120, 120, 130)',
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <Text size="s">{c.body}</Text>
+          </div>
+        );
+      })}
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

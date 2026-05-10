@@ -56,6 +56,7 @@ export function SectionReviewModal({
   initialCommentsByParentArticle,
   categoryLookup,
   titleOriginLookup,
+  viewerEmail,
   onClose,
   onReviewsChange,
 }: {
@@ -66,6 +67,7 @@ export function SectionReviewModal({
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
+  viewerEmail?: string;
   onClose: () => void;
   onReviewsChange: (next: ReviewMap) => void;
 }) {
@@ -305,6 +307,7 @@ export function SectionReviewModal({
               categoryLookup={categoryLookup}
               slug={slug}
               initialComments={initialCommentsBySection[current.id] ?? []}
+              viewerEmail={viewerEmail}
             />
           ) : (
             <ArticleViewBody
@@ -321,6 +324,7 @@ export function SectionReviewModal({
                   current.articleId ?? current.articleTitle ?? '_'
                 ] ?? []
               }
+              viewerEmail={viewerEmail}
             />
           )}
         </div>
@@ -415,6 +419,7 @@ function SectionViewBody({
   categoryLookup,
   slug,
   initialComments,
+  viewerEmail,
 }: {
   current: SortedRow;
   currentStatus: ReviewStatus | undefined;
@@ -423,6 +428,7 @@ function SectionViewBody({
   categoryLookup: CategoryLookup;
   slug: string;
   initialComments: ReviewCommentRecord[];
+  viewerEmail?: string;
 }) {
   return (
     <>
@@ -509,6 +515,7 @@ function SectionViewBody({
         recordKind="section"
         recordId={current.id}
         initialComments={initialComments}
+        viewerEmail={viewerEmail}
       />
     </>
   );
@@ -586,6 +593,7 @@ function ArticleViewBody({
   onReject,
   slug,
   initialComments,
+  viewerEmail,
 }: {
   articleSections: SortedRow[];
   /** Stable key for the current AMBOSS article. Used as the
@@ -599,6 +607,7 @@ function ArticleViewBody({
   onReject: (rowId: string) => void;
   slug: string;
   initialComments: ReviewCommentRecord[];
+  viewerEmail?: string;
 }) {
   return (
     <>
@@ -696,9 +705,10 @@ function ArticleViewBody({
       <CommentsSection
         key={articleKey}
         slug={slug}
-        recordKind="parent-article"
-        recordId={articleKey}
+        recordKind="article"
+        recordId={`pa:${articleKey}`}
         initialComments={initialComments}
+        viewerEmail={viewerEmail}
       />
     </>
   );

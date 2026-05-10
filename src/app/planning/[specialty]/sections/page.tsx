@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { getCurrentUser } from '@/lib/auth';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
@@ -60,15 +61,30 @@ async function SectionsData({ slug }: { slug: string }) {
     reviewRecs,
     articleRecs,
     commentsBySection,
-    commentsByParentArticle,
+    commentsByArticleKind,
+    user,
   ] = await Promise.all([
     listConsolidatedSections(slug),
     listCodes(slug),
     listSectionReviews(slug),
     listConsolidatedArticles(slug),
     listReviewComments(slug, 'section'),
-    listReviewComments(slug, 'parent-article'),
+    listReviewComments(slug, 'article'),
+    getCurrentUser(),
   ]);
+
+  // Per-AMBOSS-article comments live in the same `reviewComments`
+  // collection under recordKind='article' (the only allowed select
+  // value alongside 'section'), with a 'pa:' recordId prefix to
+  // distinguish them from the New Articles modal's per-PB-record
+  // comments. Strip the prefix so the modal can look up by article id.
+  const commentsByParentArticle: Record<string, (typeof commentsByArticleKind)[string]> =
+    {};
+  for (const [recordId, comments] of Object.entries(commentsByArticleKind)) {
+    if (recordId.startsWith('pa:')) {
+      commentsByParentArticle[recordId.slice(3)] = comments;
+    }
+  }
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
@@ -96,6 +112,7 @@ async function SectionsData({ slug }: { slug: string }) {
       initialReviews={initialReviews}
       initialCommentsBySection={commentsBySection}
       initialCommentsByParentArticle={commentsByParentArticle}
+      viewerEmail={user?.email ?? undefined}
     />
   );
 }

@@ -58,3 +58,12 @@ export async function addReviewComment(
     body,
   });
 }
+
+/** Delete a comment by id. PB's deleteRule (added in
+ *  1778439508_review_comments_author_delete.js) restricts this to
+ *  comments where authorEmail matches the requesting user's email, so
+ *  editors can only delete their own. */
+export async function deleteReviewComment(commentId: string): Promise<void> {
+  const pb = await userClient();
+  await pb.collection('reviewComments').delete(commentId);
+}

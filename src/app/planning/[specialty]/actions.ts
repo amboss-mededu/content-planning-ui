@@ -3,7 +3,7 @@
 import { updateTag } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
 import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
-import { addReviewComment } from '@/lib/data/review-comments';
+import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
 import type {
   ArticleReviewStatus,
@@ -63,4 +63,15 @@ export async function postReviewComment(
   const created = await addReviewComment(slug, kind, recordId, user?.email ?? null, body);
   updateTag(`specialty:${slug}`);
   return created;
+}
+
+/** Delete a comment by id. PB enforces author-match via the
+ *  collection's deleteRule, so a stale viewer email here can't be
+ *  used to delete someone else's comment — the request will 403. */
+export async function deleteOwnReviewComment(
+  slug: string,
+  commentId: string,
+): Promise<void> {
+  await deleteReviewComment(commentId);
+  updateTag(`specialty:${slug}`);
 }

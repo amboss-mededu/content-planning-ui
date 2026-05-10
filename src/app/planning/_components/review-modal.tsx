@@ -42,6 +42,7 @@ export function ReviewModal({
   initialCommentsByArticle,
   categoryLookup,
   titleOriginLookup,
+  viewerEmail,
   onClose,
   onReviewsChange,
 }: {
@@ -55,6 +56,7 @@ export function ReviewModal({
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
+  viewerEmail?: string;
   onClose: () => void;
   /** Called whenever a review is recorded so the parent can re-tint rows
    *  optimistically without waiting for a server round-trip. */
@@ -295,6 +297,7 @@ export function ReviewModal({
             recordKind="article"
             recordId={current.id}
             initialComments={initialCommentsByArticle[current.id] ?? []}
+            viewerEmail={viewerEmail}
           />
         </div>
 

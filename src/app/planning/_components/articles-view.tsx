@@ -161,6 +161,7 @@ export function ArticlesView({
   titleOriginLookup,
   initialReviews,
   initialCommentsByArticle,
+  viewerEmail,
 }: {
   slug: string;
   consolidated: ArticleRow[];
@@ -170,6 +171,7 @@ export function ArticlesView({
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
+  viewerEmail?: string;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
@@ -276,6 +278,7 @@ export function ArticlesView({
           initialCommentsByArticle={initialCommentsByArticle}
           categoryLookup={categoryLookup}
           titleOriginLookup={titleOriginLookup}
+          viewerEmail={viewerEmail}
           onClose={() => setReviewOpen(false)}
           onReviewsChange={setReviews}
         />

@@ -182,6 +182,7 @@ export function SectionsView({
   initialReviews,
   initialCommentsBySection,
   initialCommentsByParentArticle,
+  viewerEmail,
 }: {
   slug: string;
   rows: SectionRow[];
@@ -190,6 +191,7 @@ export function SectionsView({
   initialReviews: ReviewMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
+  viewerEmail?: string;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
@@ -307,6 +309,7 @@ export function SectionsView({
           initialCommentsByParentArticle={initialCommentsByParentArticle}
           categoryLookup={categoryLookup}
           titleOriginLookup={titleOriginLookup}
+          viewerEmail={viewerEmail}
           onClose={() => setReviewOpen(false)}
           onReviewsChange={setReviews}
         />

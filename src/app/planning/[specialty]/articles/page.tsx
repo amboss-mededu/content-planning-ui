@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { getCurrentUser } from '@/lib/auth';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import {
   listArticleUpdateSuggestions,
@@ -82,6 +83,7 @@ async function ArticlesData({ slug }: { slug: string }) {
     reviewRecs,
     sectionRecs,
     commentsByArticle,
+    user,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
     listNewArticleSuggestions(slug),
@@ -90,6 +92,7 @@ async function ArticlesData({ slug }: { slug: string }) {
     listArticleReviews(slug),
     listConsolidatedSections(slug),
     listReviewComments(slug, 'article'),
+    getCurrentUser(),
   ]);
 
   const categoryLookup: CategoryLookup = {};
@@ -122,6 +125,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
       initialCommentsByArticle={commentsByArticle}
+      viewerEmail={user?.email ?? undefined}
     />
   );
 }
