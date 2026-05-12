@@ -57,6 +57,44 @@ export async function listArticleSourcesByArticle(
 }
 
 /**
+ * Cross-specialty bulk fetch by `articleRecordId`. Used by the global
+ * "My Backlog" view so each row's source count + drawer have data
+ * without paying one round-trip per article. Grouped by id so the
+ * drawer keeps its O(1) lookup.
+ */
+export async function listArticleSourcesForArticleIds(
+  ids: string[],
+): Promise<Record<string, ArticleSourceRecord[]>> {
+  const out: Record<string, ArticleSourceRecord[]> = {};
+  const unique = Array.from(new Set(ids.filter((s) => s.length > 0)));
+  if (unique.length === 0) return out;
+  await connection();
+  const pb = await userClient();
+  const CHUNK = 30;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const filter = chunk.map((id) => `articleRecordId = "${id}"`).join(' || ');
+    const rows = await pb
+      .collection<ArticleSourceRecord>('articleSources')
+      .getFullList({ filter });
+    for (const r of rows) {
+      const bucket = out[r.articleRecordId] ?? [];
+      bucket.push(r);
+      out[r.articleRecordId] = bucket;
+    }
+  }
+  for (const key of Object.keys(out)) {
+    out[key].sort((a, b) => {
+      const ar = a.rank ?? Number.POSITIVE_INFINITY;
+      const br = b.rank ?? Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      return (a.title ?? '').localeCompare(b.title ?? '');
+    });
+  }
+  return out;
+}
+
+/**
  * Bulk-insert ranked sources for a single article from the
  * literature-search worker. Admin-side (no cookies in scope). Replaces
  * any existing rows for this article — re-running a search wipes the

@@ -34,6 +34,23 @@ export async function listArticleBacklog(
   return out;
 }
 
+/**
+ * Cross-specialty scan: every backlog row currently assigned to
+ * `email`. Returned as an array because rows from different
+ * specialties can share an `articleRecordId` and a slug-keyed map
+ * would lose that distinction.
+ */
+export async function listArticleBacklogForAssignee(
+  email: string,
+): Promise<ArticleBacklogRecord[]> {
+  if (!email) return [];
+  await connection();
+  const pb = await userClient();
+  return pb
+    .collection<ArticleBacklogRecord>('articleBacklog')
+    .getFullList({ filter: `assigneeEmail = "${email}"` });
+}
+
 async function upsertBacklog(
   pb: PocketBase,
   slug: string,

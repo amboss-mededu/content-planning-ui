@@ -12,6 +12,7 @@ import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comment
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
 import {
   setPipelineStageOverride as setPipelineStageOverrideData,
+  setPipelineStageSkipped as setPipelineStageSkippedData,
   setTabOverride as setTabOverrideData,
 } from '@/lib/data/specialties';
 import type {
@@ -161,5 +162,17 @@ export async function setPipelineStageOverride(
     throw new Error(`Unknown pipeline stage: ${stageName}`);
   }
   await setPipelineStageOverrideData(slug, stageName, value);
+  updateTag(`specialty:${slug}`);
+}
+
+export async function setPipelineStageSkipped(
+  slug: string,
+  stageName: string,
+  value: boolean,
+): Promise<void> {
+  if (!KNOWN_PIPELINE_STAGES.has(stageName)) {
+    throw new Error(`Unknown pipeline stage: ${stageName}`);
+  }
+  await setPipelineStageSkippedData(slug, stageName, value);
   updateTag(`specialty:${slug}`);
 }

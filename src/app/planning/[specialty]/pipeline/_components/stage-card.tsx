@@ -30,6 +30,15 @@ import { CancelButton } from './cancel-button';
 import { MarkStageCompleteButton } from './mark-stage-complete-button';
 import { MappingModelSelector, ModelSelector } from './model-selector';
 import { ResetButton } from './reset-button';
+import { SkipStageButton } from './skip-stage-button';
+
+// Stages that expose a manual "Skip step" button. Today this is only
+// the 2nd-consolidation passes, which are explicitly optional — for
+// every other stage, "skip" is not a meaningful editorial action.
+const SKIPPABLE_STAGES = new Set<StageName>([
+  'consolidate_articles',
+  'consolidate_sections',
+]);
 
 /**
  * Persist a boolean flag in localStorage. Defaults to `false` on first paint
@@ -542,6 +551,7 @@ export function StageCard({
   unmappedCount,
   hasOutput,
   manualOverride,
+  manualSkipped,
 }: {
   title: string;
   description?: string;
@@ -560,6 +570,11 @@ export function StageCard({
    *  `specialties.pipelineStageOverrides`. OR-merged with
    *  `stage.status === 'completed'` for the badge. */
   manualOverride?: boolean;
+  /** Editor's per-specialty "skip this stage" flag from
+   *  `specialties.pipelineStageSkipped`. When true the badge renders
+   *  as "Skipped" (gray) and supersedes both the auto-derived status
+   *  and `manualOverride`. */
+  manualSkipped?: boolean;
   /** When the latest run wrapped up (completed / approved) but the
    *  specialty-level work isn't finished — e.g. map_codes ran for a subset
    *  of codes and more remain unmapped — display "In progress" instead of
@@ -596,12 +611,13 @@ export function StageCard({
   // the stage row itself never reached completed/approved (e.g. the
   // workflow was killed mid-run, or the 2nd-consolidation pass produced
   // nothing).
+  const inFlight = rawStatus === 'running' || rawStatus === 'awaiting_approval';
   const status: StageStatus =
-    manualOverride === true &&
-    rawStatus !== 'running' &&
-    rawStatus !== 'awaiting_approval'
-      ? 'completed'
-      : rawStatus;
+    manualSkipped === true && !inFlight
+      ? 'skipped'
+      : manualOverride === true && !inFlight
+        ? 'completed'
+        : rawStatus;
   const useMapHistory = stageName === 'map_codes' && mapCodesHistory !== undefined;
   // Map codes shows a specialty-wide "X mapped, Y unmapped" tally instead of
   // the per-run summary, since the card represents the whole stage and per-run
@@ -755,6 +771,15 @@ export function StageCard({
                     stageName={stageName}
                     hasOutput={hasOutput === true || manualOverride === true}
                     isComplete={manualOverride === true}
+                  />
+                ) : null}
+                {status !== 'running' &&
+                status !== 'awaiting_approval' &&
+                SKIPPABLE_STAGES.has(stageName) ? (
+                  <SkipStageButton
+                    slug={specialtySlug}
+                    stageName={stageName}
+                    isSkipped={manualSkipped === true}
                   />
                 ) : null}
               </Inline>

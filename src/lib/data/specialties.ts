@@ -201,6 +201,49 @@ export async function setPipelineStageOverride(
 }
 
 /**
+ * Read the per-pipeline-stage manual "skip" map for a specialty. The
+ * pipeline dashboard renders a skipped stage as gray "Skipped" and
+ * advances the last-completed-step chain past it. Used today for the
+ * optional 2nd-consolidation stages.
+ */
+export async function getPipelineStageSkipped(
+  slug: string,
+): Promise<Record<string, boolean>> {
+  await connection();
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+    return (row.pipelineStageSkipped ?? {}) as Record<string, boolean>;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return {};
+    throw e;
+  }
+}
+
+/**
+ * Set or clear a per-stage "skip" flag on a specialty. Read-merge-
+ * write so concurrent edits on different stages don't clobber each
+ * other.
+ */
+export async function setPipelineStageSkipped(
+  slug: string,
+  stageName: string,
+  value: boolean,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  const current = (row.pipelineStageSkipped ?? {}) as Record<string, boolean>;
+  const next: Record<string, boolean> = { ...current };
+  if (value) next[stageName] = true;
+  else delete next[stageName];
+  await pb.collection('specialties').update(row.id, { pipelineStageSkipped: next });
+}
+
+/**
  * Workflow write — uses the admin client so it works outside a request
  * cookie context. Stores approved milestone text and bumps the
  * `lastSeededAt` timestamp. Pass `milestones: undefined` to clear (used

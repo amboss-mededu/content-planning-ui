@@ -18,7 +18,11 @@ import {
   getMapCodesHistory,
 } from '@/lib/data/pipeline';
 import { listConsolidatedSections } from '@/lib/data/sections';
-import { getPipelineStageOverrides, getSpecialty } from '@/lib/data/specialties';
+import {
+  getPipelineStageOverrides,
+  getPipelineStageSkipped,
+  getSpecialty,
+} from '@/lib/data/specialties';
 import { SkeletonLine } from '../../_components/skeleton';
 import { PipelineDashboard } from './_components/pipeline-dashboard';
 
@@ -89,6 +93,7 @@ async function PipelineData({ slug }: { slug: string }) {
     codeCount,
     articleSourceCount,
     stageOverrides,
+    stageSkipped,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
@@ -108,6 +113,7 @@ async function PipelineData({ slug }: { slug: string }) {
     listCodeCount(slug),
     listArticleSourceCount(slug),
     getPipelineStageOverrides(slug),
+    getPipelineStageSkipped(slug),
   ]);
 
   // Stats for the "Articles (secondary)" card — the 2nd consolidation
@@ -217,6 +223,7 @@ async function PipelineData({ slug }: { slug: string }) {
       litSearchStats={litSearchStats}
       stageHasOutput={stageHasOutput}
       stageOverrides={stageOverrides}
+      stageSkipped={stageSkipped}
     />
   );
 }

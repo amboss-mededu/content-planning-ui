@@ -50,6 +50,7 @@ export function PipelineDashboard({
   litSearchStats,
   stageHasOutput,
   stageOverrides,
+  stageSkipped,
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -71,6 +72,7 @@ export function PipelineDashboard({
   };
   stageHasOutput: Record<string, boolean>;
   stageOverrides: Record<string, boolean>;
+  stageSkipped: Record<string, boolean>;
 }) {
   const runActive =
     run !== null &&
@@ -162,6 +164,7 @@ export function PipelineDashboard({
                 unmappedCount={unmappedCodeCount}
                 hasOutput={stageHasOutput.map_codes ?? false}
                 manualOverride={stageOverrides.map_codes === true}
+                manualSkipped={stageSkipped.map_codes === true}
               />
             );
           }
@@ -178,6 +181,7 @@ export function PipelineDashboard({
                 sources={sources}
                 hasOutput={stageHasOutput.extract_codes ?? false}
                 manualOverride={stageOverrides.extract_codes === true}
+                manualSkipped={stageSkipped.extract_codes === true}
               />
             );
           }
@@ -194,6 +198,7 @@ export function PipelineDashboard({
                 sources={milestoneSources}
                 hasOutput={stageHasOutput.extract_milestones ?? false}
                 manualOverride={stageOverrides.extract_milestones === true}
+                manualSkipped={stageSkipped.extract_milestones === true}
               />
             );
           }
@@ -355,6 +360,7 @@ export function PipelineDashboard({
             sources={sources}
             hasOutput={stageHasOutput.extract_codes ?? false}
             manualOverride={stageOverrides.extract_codes === true}
+            manualSkipped={stageSkipped.extract_codes === true}
           />
           <StageCard
             title="Extract milestones"
@@ -367,6 +373,7 @@ export function PipelineDashboard({
             sources={milestoneSources}
             hasOutput={stageHasOutput.extract_milestones ?? false}
             manualOverride={stageOverrides.extract_milestones === true}
+            manualSkipped={stageSkipped.extract_milestones === true}
           />
         </Stack>
       </PhaseGroup>
@@ -390,6 +397,7 @@ export function PipelineDashboard({
           }
           hasOutput={stageHasOutput.map_codes ?? false}
           manualOverride={stageOverrides.map_codes === true}
+          manualSkipped={stageSkipped.map_codes === true}
         />
       </PhaseGroup>
 
@@ -404,6 +412,7 @@ export function PipelineDashboard({
             events={stages.consolidate_primary?.events ?? []}
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualOverride={stageOverrides.consolidate_primary === true}
+            manualSkipped={stageSkipped.consolidate_primary === true}
           />
           <StageCard
             title="Articles (secondary)"
@@ -418,6 +427,7 @@ export function PipelineDashboard({
             events={stages.consolidate_articles?.events ?? []}
             hasOutput={stageHasOutput.consolidate_articles ?? true}
             manualOverride={stageOverrides.consolidate_articles === true}
+            manualSkipped={stageSkipped.consolidate_articles === true}
           />
           <StageCard
             title="Sections (secondary)"
@@ -428,6 +438,7 @@ export function PipelineDashboard({
             events={stages.consolidate_sections?.events ?? []}
             hasOutput={stageHasOutput.consolidate_sections ?? true}
             manualOverride={stageOverrides.consolidate_sections === true}
+            manualSkipped={stageSkipped.consolidate_sections === true}
           />
           <Stack space="s">
             <StageCard
@@ -443,6 +454,7 @@ export function PipelineDashboard({
               events={stages.literature_search?.events ?? []}
               hasOutput={stageHasOutput.literature_search ?? false}
               manualOverride={stageOverrides.literature_search === true}
+              manualSkipped={stageSkipped.literature_search === true}
             />
             <RunLitSearchButton
               specialtySlug={specialtySlug}

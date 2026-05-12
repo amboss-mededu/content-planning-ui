@@ -61,6 +61,7 @@ type Signals = {
   approvedArticleIds: string[];
   publishedBacklogIds: Set<string>;
   overrides: Record<string, boolean>;
+  skipped: Record<string, boolean>;
 };
 
 function bool(value: unknown): boolean {
@@ -69,25 +70,42 @@ function bool(value: unknown): boolean {
 
 function resolveLastStep(s: Signals): LastStep {
   const o = s.overrides;
+  const k = s.skipped;
   // Each rank corresponds to one slot in the chain — true if the
-  // auto-derive signal fires OR the editor manually overrode it.
-  const r1_codes = bool(s.stageCompleted.extract_codes) || bool(o.extract_codes);
+  // auto-derive signal fires OR the editor manually overrode it OR
+  // the editor explicitly skipped it. Skipped stages count as
+  // "completed" for chain advancement; only their badge label differs.
+  const r1_codes =
+    bool(s.stageCompleted.extract_codes) ||
+    bool(o.extract_codes) ||
+    bool(k.extract_codes);
   const r2_milestones =
     bool(s.stageCompleted.extract_milestones) ||
     s.milestonesText ||
-    bool(o.extract_milestones);
+    bool(o.extract_milestones) ||
+    bool(k.extract_milestones);
   const r3_mapping =
-    bool(s.stageCompleted.map_codes) || s.mappedCodeCount >= 1 || bool(o.map_codes);
+    bool(s.stageCompleted.map_codes) ||
+    s.mappedCodeCount >= 1 ||
+    bool(o.map_codes) ||
+    bool(k.map_codes);
   const r4_consolidations =
     bool(s.stageCompleted.consolidate_primary) ||
     s.consolidatedArticleCount + s.consolidatedSectionCount >= 1 ||
-    bool(o.consolidate_primary);
+    bool(o.consolidate_primary) ||
+    bool(k.consolidate_primary);
   const r5_consArticles =
-    bool(s.stageCompleted.consolidate_articles) || bool(o.consolidate_articles);
+    bool(s.stageCompleted.consolidate_articles) ||
+    bool(o.consolidate_articles) ||
+    bool(k.consolidate_articles);
   const r6_consSections =
-    bool(s.stageCompleted.consolidate_sections) || bool(o.consolidate_sections);
+    bool(s.stageCompleted.consolidate_sections) ||
+    bool(o.consolidate_sections) ||
+    bool(k.consolidate_sections);
   const r7_litSearch =
-    bool(s.stageCompleted.literature_search) || bool(o.literature_search);
+    bool(s.stageCompleted.literature_search) ||
+    bool(o.literature_search) ||
+    bool(k.literature_search);
   const r8_articlesReviewed =
     s.consolidatedArticleCount > 0 &&
     s.approvedArticleCount === s.consolidatedArticleCount;
@@ -201,6 +219,7 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
       backlog.filter((b) => b.status === 'published').map((b) => b.articleRecordId),
     ),
     overrides: (specialty?.pipelineStageOverrides ?? {}) as Record<string, boolean>,
+    skipped: (specialty?.pipelineStageSkipped ?? {}) as Record<string, boolean>,
   });
 }
 
@@ -335,6 +354,7 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
       approvedArticleIds: approvedArticleIdsBySlug.get(slug) ?? [],
       publishedBacklogIds: publishedBacklogBySlug.get(slug) ?? new Set<string>(),
       overrides: (sp.pipelineStageOverrides ?? {}) as Record<string, boolean>,
+      skipped: (sp.pipelineStageSkipped ?? {}) as Record<string, boolean>,
     });
   }
   return out;
