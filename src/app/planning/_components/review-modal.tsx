@@ -59,6 +59,7 @@ export function ReviewModal({
   slug,
   articles,
   passLabel,
+  startAtId,
   initialReviews,
   initialReviewers,
   initialCommentsByArticle,
@@ -76,6 +77,9 @@ export function ReviewModal({
   /** Short label for the active consolidation pass, surfaced in the
    *  modal header so editors know which set they're stamping. */
   passLabel?: string;
+  /** When the modal is opened from a row click, jump straight to that
+   *  row instead of defaulting to first-unreviewed. */
+  startAtId?: string;
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
   /** Existing comment threads keyed by consolidatedArticles record id.
@@ -95,6 +99,10 @@ export function ReviewModal({
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [index, setIndex] = useState(() => {
+    if (startAtId) {
+      const at = sorted.findIndex((r) => r.id === startAtId);
+      if (at !== -1) return at;
+    }
     // Open at the first unreviewed row if any; otherwise the first row.
     const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;

@@ -57,6 +57,8 @@ function sortForReview(rows: SectionRow[]): SortedRow[] {
 export function SectionReviewModal({
   slug,
   sections,
+  startAtId,
+  initialViewMode,
   initialReviews,
   initialReviewers,
   initialCommentsBySection,
@@ -70,6 +72,12 @@ export function SectionReviewModal({
 }: {
   slug: string;
   sections: SectionRow[];
+  /** Section id to seek to on open; falls back to first-unreviewed. */
+  startAtId?: string;
+  /** Initial view mode — defaults to per-section. Pass 'article' when
+   *  opening from the grouped per-article view so the modal lands on
+   *  the article overview instead of a single section. */
+  initialViewMode?: ViewMode;
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
@@ -85,11 +93,15 @@ export function SectionReviewModal({
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [index, setIndex] = useState(() => {
+    if (startAtId) {
+      const at = sorted.findIndex((r) => r.id === startAtId);
+      if (at !== -1) return at;
+    }
     const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;
   });
   const [submitting, setSubmitting] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('section');
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode ?? 'section');
 
   const total = sorted.length;
   const current = sorted[index];

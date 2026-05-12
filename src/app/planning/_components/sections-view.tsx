@@ -1,6 +1,14 @@
 'use client';
 
-import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
+import {
+  Badge,
+  Button,
+  Inline,
+  SegmentedControl,
+  Select,
+  Stack,
+  Text,
+} from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
@@ -182,6 +190,191 @@ function buildColumns(categoryLookup: CategoryLookup): Column<SectionRow>[] {
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 
+/**
+ * One row per parent article, aggregating its section update suggestions.
+ * Built by `buildArticleGroups` on whatever section subset is currently
+ * filtered, so the grouped view stays in sync with the toolbar filters.
+ */
+type ArticleGroupRow = {
+  /** Display key — falls back to "(no article)" so groupless sections
+   *  still aggregate into a single visible row. */
+  articleTitle: string;
+  articleId?: string;
+  sections: SectionRow[];
+  sectionCount: number;
+  newCount: number;
+  updateCount: number;
+  /** Unique union of codes across the group's sections, keyed by `code`. */
+  codes: EmbeddedCode[];
+  numCodes: number;
+  approvedCount: number;
+  rejectedCount: number;
+  unreviewedCount: number;
+};
+
+function buildArticleGroups(
+  sections: SectionRow[],
+  reviews: ReviewMap,
+): ArticleGroupRow[] {
+  const byKey = new Map<string, ArticleGroupRow>();
+  for (const s of sections) {
+    const key = s.articleTitle ?? '(no article)';
+    let g = byKey.get(key);
+    if (!g) {
+      g = {
+        articleTitle: key,
+        articleId: s.articleId,
+        sections: [],
+        sectionCount: 0,
+        newCount: 0,
+        updateCount: 0,
+        codes: [],
+        numCodes: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+        unreviewedCount: 0,
+      };
+      byKey.set(key, g);
+    }
+    g.sections.push(s);
+    g.sectionCount++;
+    if (s.updateType === 'new') g.newCount++;
+    else if (s.updateType === 'update') g.updateCount++;
+    if (s.id) {
+      const r = reviews[s.id];
+      if (r === 'approved') g.approvedCount++;
+      else if (r === 'rejected') g.rejectedCount++;
+      else g.unreviewedCount++;
+    } else {
+      g.unreviewedCount++;
+    }
+  }
+  // Codes union (dedupe by `code`) computed once per group at the end.
+  for (const g of byKey.values()) {
+    const seen = new Set<string>();
+    for (const s of g.sections) {
+      for (const c of s.codes) {
+        if (seen.has(c.code)) continue;
+        seen.add(c.code);
+        g.codes.push(c);
+      }
+    }
+    g.numCodes = g.codes.length;
+  }
+  return Array.from(byKey.values()).sort((a, b) => {
+    if (a.articleTitle === '(no article)' && b.articleTitle !== '(no article)') return 1;
+    if (a.articleTitle !== '(no article)' && b.articleTitle === '(no article)') return -1;
+    return a.articleTitle.localeCompare(b.articleTitle);
+  });
+}
+
+function buildGroupColumns(categoryLookup: CategoryLookup): Column<ArticleGroupRow>[] {
+  return [
+    {
+      key: 'articleTitle',
+      label: 'Article Title',
+      description: 'Existing AMBOSS article being updated',
+      render: (r) => r.articleTitle,
+      verticalAlign: 'top',
+      align: 'center',
+      accessor: (r) => r.articleTitle,
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
+    },
+    {
+      key: 'articleId',
+      label: 'Article ID',
+      description: 'AMBOSS article ID',
+      render: (r) => r.articleId ?? '—',
+      width: 140,
+      verticalAlign: 'top',
+      align: 'center',
+      accessor: (r) => r.articleId ?? null,
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
+    },
+    {
+      key: 'sectionCount',
+      label: '# Sections',
+      description:
+        'Number of section update suggestions on this article. Subtext breaks down new vs. update.',
+      render: (r) => (
+        <Stack space="xxs" alignItems="center">
+          <Text size="s">{r.sectionCount}</Text>
+          {(r.newCount > 0 || r.updateCount > 0) && (
+            <Text size="xs" color="secondary">
+              {r.newCount > 0 ? `${r.newCount} new` : null}
+              {r.newCount > 0 && r.updateCount > 0 ? ' · ' : ''}
+              {r.updateCount > 0 ? `${r.updateCount} update` : null}
+            </Text>
+          )}
+        </Stack>
+      ),
+      width: 130,
+      verticalAlign: 'top',
+      align: 'center',
+      accessor: (r) => r.sectionCount,
+      type: 'number',
+      filterable: true,
+    },
+    {
+      key: 'codes',
+      label: 'Codes',
+      description:
+        'Union of all codes across this article’s suggested sections (deduped). Per-section info — hidden by default in the per-article view.',
+      render: (r) => <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />,
+      verticalAlign: 'top',
+      align: 'left',
+      accessor: (r) => r.codes.map((c) => c.description ?? c.code).join(' '),
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
+      defaultHidden: true,
+    },
+    {
+      key: 'numCodes',
+      label: '# Codes',
+      description:
+        'Unique codes across all sections in this article. Per-section info — hidden by default in the per-article view.',
+      render: (r) => r.numCodes,
+      width: 90,
+      verticalAlign: 'top',
+      align: 'center',
+      accessor: (r) => r.numCodes,
+      type: 'number',
+      filterable: true,
+      defaultHidden: true,
+    },
+    {
+      key: 'review',
+      label: 'Reviewed',
+      description:
+        'Per-state counts of sections in this article. Each badge is omitted when its count is 0, so a fully-unreviewed article shows just the yellow chip.',
+      render: (r) => (
+        <Stack space="xxs" alignItems="center">
+          {r.unreviewedCount > 0 && (
+            <Badge color="yellow" text={`${r.unreviewedCount} unreviewed`} />
+          )}
+          {r.approvedCount > 0 && (
+            <Badge color="green" text={`${r.approvedCount} approved`} />
+          )}
+          {r.rejectedCount > 0 && (
+            <Badge color="red" text={`${r.rejectedCount} rejected`} />
+          )}
+        </Stack>
+      ),
+      width: 140,
+      verticalAlign: 'top',
+      align: 'center',
+      accessor: (r) => r.unreviewedCount,
+      type: 'number',
+      filterable: true,
+    },
+  ];
+}
+
 export function SectionsView({
   slug,
   rows,
@@ -204,15 +397,29 @@ export function SectionsView({
   viewerEmail?: string;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
+  const groupColumns = useMemo(() => buildGroupColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
+  // Whether the table renders one row per section (default) or one row
+  // per parent article aggregating its sections.
+  const [grouping, setGrouping] = useState<'section' | 'article'>(() =>
+    params.get('grouping') === 'article' ? 'article' : 'section',
+  );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
   // Sections the open review modal walks. Set when the user clicks
-  // one of the Start review / Review all buttons.
+  // one of the Start review / Review all buttons or a table row.
   const [reviewSections, setReviewSections] = useState<SectionRow[]>([]);
+  // Section id to seek to on open (set by row click in section view).
+  const [reviewStartAtId, setReviewStartAtId] = useState<string | undefined>();
+  // When the modal is opened from the per-article grouped view, land
+  // it in the modal's built-in 'article' view mode so the editor sees
+  // the article-level overview first.
+  const [reviewInitialViewMode, setReviewInitialViewMode] = useState<
+    'section' | 'article' | undefined
+  >();
   // Visible row set after DataTable's column-level filters + sort,
   // intersected with the toolbar `kind` and `article` filters above.
   // Drives the review modal so editors can scope to whatever's
@@ -223,10 +430,11 @@ export function SectionsView({
     const p = new URLSearchParams();
     if (kind) p.set('kind', kind);
     if (article) p.set('article', article);
+    if (grouping === 'article') p.set('grouping', 'article');
     const qs = p.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
-  }, [kind, article]);
+  }, [kind, article, grouping]);
 
   // Article options come from the full row set so the dropdown is stable
   // when the kind filter changes. Counts are per-article totals across
@@ -250,6 +458,15 @@ export function SectionsView({
     if (article) out = out.filter((r) => r.articleTitle === article);
     return out;
   }, [rows, kind, article]);
+
+  // Aggregate the *filtered* sections so the article view honours the
+  // toolbar filters — e.g. filtering to "new" shows only articles that
+  // have at least one new-section suggestion, aggregated over just
+  // those new sections.
+  const groupRows = useMemo(
+    () => buildArticleGroups(filtered, reviews),
+    [filtered, reviews],
+  );
 
   const reviewCounts = useMemo(() => {
     let approved = 0;
@@ -281,6 +498,16 @@ export function SectionsView({
   return (
     <Stack space="m">
       <Inline space="s" vAlignItems="bottom">
+        <SegmentedControl
+          label="Grouping"
+          isLabelHidden
+          value={grouping}
+          onChange={(v) => setGrouping(v === 'article' ? 'article' : 'section')}
+          options={[
+            { name: 'grouping', value: 'section', label: 'By section' },
+            { name: 'grouping', value: 'article', label: 'By article' },
+          ]}
+        />
         <div className="filter-cell">
           <Select
             name="kind"
@@ -294,19 +521,23 @@ export function SectionsView({
             onChange={(e) => setKind(e.target.value)}
           />
         </div>
-        <div className="filter-cell">
-          <Select
-            name="article"
-            label="Article"
-            value={article}
-            options={[{ value: '', label: 'All articles' }, ...articleOptions]}
-            onChange={(e) => setArticle(e.target.value)}
-          />
-        </div>
+        {grouping === 'section' && (
+          <div className="filter-cell">
+            <Select
+              name="article"
+              label="Article"
+              value={article}
+              options={[{ value: '', label: 'All articles' }, ...articleOptions]}
+              onChange={(e) => setArticle(e.target.value)}
+            />
+          </div>
+        )}
         <Button
           variant="primary"
           onClick={() => {
             setReviewSections(visibleRows);
+            setReviewStartAtId(undefined);
+            setReviewInitialViewMode(undefined);
             setReviewOpen(true);
           }}
           disabled={visibleRows.length === 0}
@@ -320,6 +551,8 @@ export function SectionsView({
             variant="tertiary"
             onClick={() => {
               setReviewSections(rows);
+              setReviewStartAtId(undefined);
+              setReviewInitialViewMode(undefined);
               setReviewOpen(true);
             }}
           >
@@ -327,19 +560,53 @@ export function SectionsView({
           </Button>
         )}
       </Inline>
-      <DataTable
-        rows={filtered}
-        columns={columns}
-        getRowKey={(_r, i) => `${i}`}
-        getRowStyle={getRowStyle}
-        onVisibleRowsChange={setVisibleRows}
-        countAddendum={() => 'sections'}
-        leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
-      />
+      {grouping === 'section' ? (
+        <DataTable
+          rows={filtered}
+          columns={columns}
+          getRowKey={(_r, i) => `${i}`}
+          getRowStyle={getRowStyle}
+          onVisibleRowsChange={setVisibleRows}
+          onRowClick={(row) => {
+            if (!row.id) return;
+            setReviewSections(filtered);
+            setReviewStartAtId(row.id);
+            setReviewInitialViewMode('section');
+            setReviewOpen(true);
+          }}
+          countAddendum={() => 'sections'}
+          leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
+          storageKey={`sections-table:${slug}:section`}
+        />
+      ) : (
+        <DataTable
+          rows={groupRows}
+          columns={groupColumns}
+          getRowKey={(g) => g.articleTitle}
+          // Keep the toolbar's visibleRows aligned with the underlying
+          // section set the Start review buttons walk — the aggregate
+          // table's filters only affect the visible groups, but reviews
+          // always run against sections, so we surface the section list.
+          onVisibleRowsChange={(visibleGroups) =>
+            setVisibleRows(visibleGroups.flatMap((g) => g.sections))
+          }
+          onRowClick={(g) => {
+            setReviewSections(g.sections);
+            setReviewStartAtId(undefined);
+            setReviewInitialViewMode('article');
+            setReviewOpen(true);
+          }}
+          countAddendum={() => 'articles'}
+          leadingNote={`Sections across these articles: ${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
+          storageKey={`sections-table:${slug}:article`}
+        />
+      )}
       {reviewOpen && (
         <SectionReviewModal
           slug={slug}
           sections={reviewSections}
+          startAtId={reviewStartAtId}
+          initialViewMode={reviewInitialViewMode}
           initialReviews={reviews}
           initialReviewers={reviewers}
           initialCommentsBySection={initialCommentsBySection}

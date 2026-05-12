@@ -79,6 +79,11 @@ export interface Column<T> {
   filterMode?: 'select' | 'contains';
   editable?: EditableConfig<T>;
   group?: ColumnGroup;
+  /** Start the column hidden. The user can re-enable it from the Columns
+   *  menu. Use for columns that exist for completeness but aren't useful
+   *  at the current aggregation level (e.g. per-section fields shown on
+   *  a per-article row). Persisted state still wins over this default. */
+  defaultHidden?: boolean;
 }
 
 const GROUP_STYLES: Record<
@@ -242,8 +247,12 @@ export function DataTable<T>({
     setWidths((prev) => ({ ...prev, [key]: Math.max(MIN_COLUMN_WIDTH, Math.round(px)) }));
   // Per-table hidden-column set, toggled from the Columns menu in the toolbar.
   // Lives in component state (not URL or storage) so navigating away resets
-  // the view — matches the existing sort/width state lifetime.
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  // the view — matches the existing sort/width state lifetime. Seeded from
+  // any columns marked `defaultHidden`; persisted state (if storageKey is
+  // set) overrides this in the hydrate effect below.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key)),
+  );
   const visibleColumns = useMemo(
     () => columns.filter((c) => !hidden.has(c.key)),
     [columns, hidden],

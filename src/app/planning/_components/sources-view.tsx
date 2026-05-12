@@ -53,6 +53,7 @@ export function SourcesView({ source, rows }: { source: OntologySource; rows: Ro
         rows={rows}
         columns={columnsFor(source)}
         getRowKey={(_, i) => `${source}-${i}`}
+        storageKey={`sources-table:${source}`}
       />
     </Stack>
   );

@@ -430,6 +430,7 @@ export function BacklogView({
         onRowClick={(r) => setManagerArticleId(r.id)}
         countAddendum={() => 'articles'}
         leadingNote={`${rows.length} approved · ${counts.published} published · ${counts.inProgress} in progress · ${counts.waiting} waiting for sources`}
+        storageKey={`backlog-table:${slug}`}
       />
       {drawerArticleId && (
         <ArticleSourcesDrawer
