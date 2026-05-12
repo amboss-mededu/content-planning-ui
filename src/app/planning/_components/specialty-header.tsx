@@ -11,9 +11,11 @@ import { SpecialtyTabs } from './specialty-tabs';
 export function SpecialtyHeader({
   specialty,
   phase,
+  tabsComplete,
 }: {
   specialty: Specialty;
   phase: Phase;
+  tabsComplete: Record<string, boolean>;
 }) {
   return (
     <Stack space="l">
@@ -33,7 +35,7 @@ export function SpecialtyHeader({
       <Text color="secondary">
         Slug: <code>{specialty.slug}</code>
       </Text>
-      <SpecialtyTabs slug={specialty.slug} />
+      <SpecialtyTabs slug={specialty.slug} tabsComplete={tabsComplete} />
     </Stack>
   );
 }

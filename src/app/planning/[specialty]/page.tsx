@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { getOverviewCounts } from '@/lib/data/overview';
-import { getSpecialty } from '@/lib/data/specialties';
+import { getSpecialty, getTabOverrides } from '@/lib/data/specialties';
+import { MarkStepCompleteButton } from '../_components/mark-step-complete-button';
 import { OverviewSkeleton } from '../_components/overview-skeleton';
 import { OverviewView } from '../_components/overview-view';
 
@@ -21,7 +22,10 @@ async function OverviewData({ slug }: { slug: string }) {
   const specialty = await getSpecialty(slug);
   if (!specialty) return null;
 
-  const counts = await getOverviewCounts(slug);
+  const [counts, overrides] = await Promise.all([
+    getOverviewCounts(slug),
+    getTabOverrides(slug),
+  ]);
 
   const statItems = [
     { label: 'Codes', value: counts.codes, hint: `${counts.mappedCodes} mapped` },
@@ -34,5 +38,16 @@ async function OverviewData({ slug }: { slug: string }) {
     { label: 'Consolidated sections', value: counts.consolidatedSections },
   ];
 
-  return <OverviewView stats={statItems} />;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <OverviewView stats={statItems} />
+      <div>
+        <MarkStepCompleteButton
+          slug={slug}
+          segment=""
+          isComplete={overrides[''] === true}
+        />
+      </div>
+    </div>
+  );
 }

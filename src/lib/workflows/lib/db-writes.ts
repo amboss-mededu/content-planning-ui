@@ -48,7 +48,8 @@ export type StageName =
   | 'map_codes'
   | 'consolidate_primary'
   | 'consolidate_articles'
-  | 'consolidate_sections';
+  | 'consolidate_sections'
+  | 'literature_search';
 
 export type StageStatus =
   | 'pending'

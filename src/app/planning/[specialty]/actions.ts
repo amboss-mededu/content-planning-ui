@@ -2,10 +2,20 @@
 
 import { updateTag } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
+import {
+  clearArticleBacklog,
+  setArticleBacklogAssignee,
+  setArticleBacklogStatus,
+} from '@/lib/data/article-backlog';
 import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
 import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
+import {
+  setPipelineStageOverride as setPipelineStageOverrideData,
+  setTabOverride as setTabOverrideData,
+} from '@/lib/data/specialties';
 import type {
+  ArticleBacklogStatus,
   ArticleReviewStatus,
   ReviewCommentRecord,
   ReviewRecordKind,
@@ -73,5 +83,83 @@ export async function deleteOwnReviewComment(
   commentId: string,
 ): Promise<void> {
   await deleteReviewComment(commentId);
+  updateTag(`specialty:${slug}`);
+}
+
+export async function setBacklogStatus(
+  slug: string,
+  articleRecordId: string,
+  status: ArticleBacklogStatus,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await setArticleBacklogStatus(slug, articleRecordId, status, user?.email ?? null);
+  updateTag(`specialty:${slug}`);
+}
+
+export async function setBacklogAssignee(
+  slug: string,
+  articleRecordId: string,
+  assigneeEmail: string | null,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await setArticleBacklogAssignee(
+    slug,
+    articleRecordId,
+    assigneeEmail,
+    user?.email ?? null,
+  );
+  updateTag(`specialty:${slug}`);
+}
+
+export async function clearBacklogRow(
+  slug: string,
+  articleRecordId: string,
+): Promise<void> {
+  await clearArticleBacklog(slug, articleRecordId);
+  updateTag(`specialty:${slug}`);
+}
+
+const KNOWN_TAB_SEGMENTS = new Set([
+  '',
+  'pipeline',
+  'milestones',
+  'categories',
+  'codes',
+  'articles',
+  'sections',
+  'backlog',
+]);
+
+export async function setTabOverride(
+  slug: string,
+  segment: string,
+  value: boolean,
+): Promise<void> {
+  if (!KNOWN_TAB_SEGMENTS.has(segment)) {
+    throw new Error(`Unknown tab segment: ${segment}`);
+  }
+  await setTabOverrideData(slug, segment, value);
+  updateTag(`specialty:${slug}`);
+}
+
+const KNOWN_PIPELINE_STAGES = new Set([
+  'extract_codes',
+  'extract_milestones',
+  'map_codes',
+  'consolidate_primary',
+  'consolidate_articles',
+  'consolidate_sections',
+  'literature_search',
+]);
+
+export async function setPipelineStageOverride(
+  slug: string,
+  stageName: string,
+  value: boolean,
+): Promise<void> {
+  if (!KNOWN_PIPELINE_STAGES.has(stageName)) {
+    throw new Error(`Unknown pipeline stage: ${stageName}`);
+  }
+  await setPipelineStageOverrideData(slug, stageName, value);
   updateTag(`specialty:${slug}`);
 }

@@ -36,6 +36,14 @@ export interface SpecialtyRecord extends PbRecord {
   milestones?: string;
   region?: string;
   language?: string;
+  /** Per-tab manual "mark step complete" override, keyed by tab segment
+   *  (e.g. `''` for Overview, `'categories'`). OR-merged with the
+   *  auto-derived completion in `getTabsComplete`. */
+  tabOverrides?: Record<string, boolean>;
+  /** Per-pipeline-stage manual "mark step complete" override, keyed by
+   *  stage name (e.g. `'map_codes'`). OR-merged with
+   *  `stage.status === 'completed'` in the pipeline dashboard. */
+  pipelineStageOverrides?: Record<string, boolean>;
 }
 
 // --- Collection: codes -----------------------------------------------------
@@ -110,6 +118,72 @@ export interface SectionReviewRecord extends PbRecord {
   reviewerEmail?: string;
   reviewedAt?: number;
   notes?: string;
+}
+
+// --- Collection: articleBacklog --------------------------------------------
+
+export type ArticleBacklogStatus =
+  | 'unassigned'
+  | 'waiting-for-sources'
+  | 'sources-searched'
+  | 'sources-approved'
+  | 'ready-for-llm-draft'
+  | 'ready-for-editing'
+  | 'editing-in-progress'
+  | 'ready-to-publish'
+  | 'published';
+
+export interface ArticleBacklogRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the newArticleSuggestions row this backlog state covers. */
+  articleRecordId: string;
+  status: ArticleBacklogStatus;
+  assigneeEmail?: string;
+  lastChangedByEmail?: string;
+  /** ms since epoch */
+  lastChangedAt?: number;
+  notes?: string;
+}
+
+// --- Collection: articleSources --------------------------------------------
+
+export type ArticleSourceType =
+  | 'guideline'
+  | 'systematic_review'
+  | 'clinical_review'
+  | 'meta_analysis'
+  | 'case_report'
+  | 'vet_content'
+  | 'non_english'
+  | 'other';
+
+export type PredatoryJournalRisk = 'none' | 'low' | 'medium' | 'high' | 'predatory';
+
+export interface ArticleSourceRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the newArticleSuggestions row this source is attached to. */
+  articleRecordId: string;
+  ribosomId?: string;
+  title: string;
+  doi?: string;
+  url?: string;
+  journal?: string;
+  journalNlm?: string;
+  sourceType?: ArticleSourceType;
+  predatoryJournalRisk?: PredatoryJournalRisk;
+  totalCitations?: number;
+  impactFactor?: number;
+  rank?: number;
+  subtopics?: string;
+  llmSummary?: string;
+  justification?: string;
+  useFlag?: boolean;
+  superseded?: boolean;
+  priority?: number;
+  originalFilename?: string;
+  geminiFilename?: string;
+  uri?: string;
+  mimeType?: string;
 }
 
 // --- Collection: reviewComments --------------------------------------------

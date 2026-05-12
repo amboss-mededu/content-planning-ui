@@ -158,14 +158,7 @@ export function ModelSelector({
   useEffect(() => {
     setInitial(readSpec(storageKey));
   }, [storageKey]);
-  return (
-    <ModelDropdowns
-      label="Model"
-      storageKey={storageKey}
-      initial={initial}
-      emptyHint="Pick a model before starting this stage."
-    />
-  );
+  return <ModelDropdowns label="Model" storageKey={storageKey} initial={initial} />;
 }
 
 /**
@@ -196,7 +189,6 @@ export function MappingModelSelector({ specialtySlug }: { specialtySlug: string 
         label="Primary model"
         storageKey={primaryStorageKey}
         initial={primaryInitial}
-        emptyHint="Pick a primary model before starting mapping."
       />
       <ModelDropdowns
         label="Backup model (used when primary still cites invalid IDs)"

@@ -115,6 +115,92 @@ export async function createSpecialty(args: {
 }
 
 /**
+ * Read the per-tab manual override map (`{ segment: true }`) for a
+ * specialty. Used by pages that render `<MarkStepCompleteButton>` so
+ * they can show the right "complete" vs "incomplete" label without
+ * re-running the whole `getTabsComplete` derivation.
+ */
+export async function getTabOverrides(slug: string): Promise<Record<string, boolean>> {
+  await connection();
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+    return (row.tabOverrides ?? {}) as Record<string, boolean>;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return {};
+    throw e;
+  }
+}
+
+/**
+ * Set or clear a per-tab "manual step complete" override on a
+ * specialty. Used by the `<MarkStepCompleteButton>` to flip a tab's
+ * indicator to a checkmark when auto-derive can't determine completion
+ * (Overview, Categories). Read-merge-write so concurrent edits on
+ * different segments don't clobber each other.
+ */
+export async function setTabOverride(
+  slug: string,
+  segment: string,
+  value: boolean,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  const current = (row.tabOverrides ?? {}) as Record<string, boolean>;
+  const next: Record<string, boolean> = { ...current };
+  if (value) next[segment] = true;
+  else delete next[segment];
+  await pb.collection('specialties').update(row.id, { tabOverrides: next });
+}
+
+/**
+ * Read the per-pipeline-stage manual override map for a specialty. Used
+ * by the pipeline dashboard so each stage card can render the right
+ * "complete" vs "incomplete" toggle label without re-running the whole
+ * `getLastCompletedStep` derivation.
+ */
+export async function getPipelineStageOverrides(
+  slug: string,
+): Promise<Record<string, boolean>> {
+  await connection();
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+    return (row.pipelineStageOverrides ?? {}) as Record<string, boolean>;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return {};
+    throw e;
+  }
+}
+
+/**
+ * Set or clear a per-stage "manual mark complete" override on a
+ * specialty. Read-merge-write so concurrent edits on different stages
+ * don't clobber each other.
+ */
+export async function setPipelineStageOverride(
+  slug: string,
+  stageName: string,
+  value: boolean,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  const current = (row.pipelineStageOverrides ?? {}) as Record<string, boolean>;
+  const next: Record<string, boolean> = { ...current };
+  if (value) next[stageName] = true;
+  else delete next[stageName];
+  await pb.collection('specialties').update(row.id, { pipelineStageOverrides: next });
+}
+
+/**
  * Workflow write — uses the admin client so it works outside a request
  * cookie context. Stores approved milestone text and bumps the
  * `lastSeededAt` timestamp. Pass `milestones: undefined` to clear (used

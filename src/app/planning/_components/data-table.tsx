@@ -182,6 +182,7 @@ export function DataTable<T>({
   emptyText = 'No rows to display.',
   getRowKey,
   getRowStyle,
+  onRowClick,
   onVisibleRowsChange,
   leadingNote,
   countAddendum,
@@ -195,6 +196,11 @@ export function DataTable<T>({
    *  and override the default zebra stripe — used by review-pass tinting
    *  to show approved (green) / rejected (red) rows. */
   getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  /** Optional click handler on the row's `<tr>`. When set, the row
+   *  picks up a pointer cursor. Cells that need to handle their own
+   *  clicks (inline selects, buttons) must `stopPropagation` so they
+   *  don't also trigger this handler. */
+  onRowClick?: (row: T, index: number) => void;
   /** Fires whenever the currently-visible row set changes (after the
    *  table's filters + sort are applied). The parent can plumb this
    *  into a review modal so editors can stamp through "what's
@@ -573,6 +579,7 @@ export function DataTable<T>({
         columns={visibleColumns}
         getRowKey={getRowKey}
         getRowStyle={getRowStyle}
+        onRowClick={onRowClick}
         sort={sort}
         onSortSet={onSortSet}
         numFilters={numFilters}
@@ -1928,6 +1935,7 @@ type BodyProps<T> = {
   columns: Column<T>[];
   getRowKey: (row: T, index: number) => string;
   getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  onRowClick?: (row: T, index: number) => void;
   sort: SortState;
   onSortSet: (key: string, dir: 'asc' | 'desc' | null) => void;
   numFilters: Record<string, NumericFilter | null>;
@@ -2129,11 +2137,21 @@ function PlainBody<T>(props: BodyProps<T>) {
         <ColGroup columns={columns} widths={widths} />
         <Header {...props} />
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={getRowKey(row, i)} style={props.getRowStyle?.(row, i)}>
-              <TableCells row={row} columns={columns} rowIndex={i} />
-            </tr>
-          ))}
+          {rows.map((row, i) => {
+            const style = props.getRowStyle?.(row, i);
+            const rowStyle = props.onRowClick
+              ? { ...(style ?? {}), cursor: 'pointer' as const }
+              : style;
+            return (
+              <tr
+                key={getRowKey(row, i)}
+                style={rowStyle}
+                onClick={props.onRowClick ? () => props.onRowClick?.(row, i) : undefined}
+              >
+                <TableCells row={row} columns={columns} rowIndex={i} />
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -2215,12 +2233,19 @@ function VirtualizedBody<T>(props: BodyProps<T>) {
           ) : null}
           {items.map((vi) => {
             const row = rows[vi.index];
+            const style = props.getRowStyle?.(row, vi.index);
+            const rowStyle = props.onRowClick
+              ? { ...(style ?? {}), cursor: 'pointer' as const }
+              : style;
             return (
               <tr
                 key={getRowKey(row, vi.index)}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
-                style={props.getRowStyle?.(row, vi.index)}
+                style={rowStyle}
+                onClick={
+                  props.onRowClick ? () => props.onRowClick?.(row, vi.index) : undefined
+                }
               >
                 <TableCells row={row} columns={columns} rowIndex={vi.index} />
               </tr>

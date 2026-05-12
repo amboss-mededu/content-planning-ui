@@ -22,7 +22,6 @@ export function SpecialtyEntry({
   const options = specialties.map((s) => ({
     value: s.slug,
     label: s.name,
-    description: s.source === 'sheets' ? 'Google Sheets' : 'Local fixture',
   }));
 
   const onSubmit = () => {

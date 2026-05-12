@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { listSpecialtyPhases } from '@/lib/data/pipeline';
+import { listSpecialtyLastSteps } from '@/lib/data/last-completed-step';
 import { listSpecialties } from '@/lib/data/specialties';
 import { HomeShell, SpecialtiesJumpToShell } from './planning/_components/home-shell';
 import {
@@ -26,13 +26,11 @@ export default function Home() {
 }
 
 async function SpecialtiesGridData() {
-  // listSpecialties + listSpecialtyPhases are independently cached. Awaiting in
-  // parallel keeps wall time near max(specialties, phases) instead of summing.
-  const [specialties, phases] = await Promise.all([
+  const [specialties, lastSteps] = await Promise.all([
     listSpecialties(),
-    listSpecialtyPhases(),
+    listSpecialtyLastSteps(),
   ]);
-  return <SpecialtiesGridView specialties={specialties} phases={phases} />;
+  return <SpecialtiesGridView specialties={specialties} lastSteps={lastSteps} />;
 }
 
 async function SpecialtiesJumpToData() {

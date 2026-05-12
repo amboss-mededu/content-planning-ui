@@ -1,0 +1,94 @@
+import 'server-only';
+
+import { cookies } from 'next/headers';
+import { connection } from 'next/server';
+import type PocketBase from 'pocketbase';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
+import type { ArticleSourceRecord } from '@/lib/pb/types';
+
+async function userClient(): Promise<PocketBase> {
+  const store = await cookies();
+  const cookieHeader = store
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+  return createServerClient(cookieHeader);
+}
+
+export async function listArticleSourceCount(slug: string): Promise<number> {
+  await connection();
+  const pb = await userClient();
+  const list = await pb.collection<ArticleSourceRecord>('articleSources').getList(1, 1, {
+    filter: `specialtySlug = "${slug}"`,
+    skipTotal: false,
+  });
+  return list.totalItems;
+}
+
+/**
+ * Returns all sources for the specialty grouped by `articleRecordId`,
+ * so the backlog view can render per-article source counts and a
+ * drawer's row list without a second fetch.
+ */
+export async function listArticleSourcesByArticle(
+  slug: string,
+): Promise<Record<string, ArticleSourceRecord[]>> {
+  await connection();
+  const pb = await userClient();
+  const rows = await pb
+    .collection<ArticleSourceRecord>('articleSources')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  const out: Record<string, ArticleSourceRecord[]> = {};
+  for (const r of rows) {
+    const bucket = out[r.articleRecordId] ?? [];
+    bucket.push(r);
+    out[r.articleRecordId] = bucket;
+  }
+  // Stable order per article: rank ascending (nulls last), then title.
+  for (const key of Object.keys(out)) {
+    out[key].sort((a, b) => {
+      const ar = a.rank ?? Number.POSITIVE_INFINITY;
+      const br = b.rank ?? Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      return (a.title ?? '').localeCompare(b.title ?? '');
+    });
+  }
+  return out;
+}
+
+/**
+ * Bulk-insert ranked sources for a single article from the
+ * literature-search worker. Admin-side (no cookies in scope). Replaces
+ * any existing rows for this article — re-running a search wipes the
+ * prior set rather than accumulating duplicates.
+ */
+export async function bulkInsertArticleSourcesAsAdmin(
+  slug: string,
+  articleRecordId: string,
+  rows: Array<
+    Omit<
+      ArticleSourceRecord,
+      | 'id'
+      | 'created'
+      | 'updated'
+      | 'collectionId'
+      | 'collectionName'
+      | 'specialtySlug'
+      | 'articleRecordId'
+    >
+  >,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  const existing = await pb
+    .collection<ArticleSourceRecord>('articleSources')
+    .getFullList({ filter });
+  await Promise.all(existing.map((r) => pb.collection('articleSources').delete(r.id)));
+  for (const row of rows) {
+    await pb.collection('articleSources').create({
+      specialtySlug: slug,
+      articleRecordId,
+      ...row,
+    });
+  }
+}

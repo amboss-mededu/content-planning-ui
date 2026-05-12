@@ -67,6 +67,16 @@ export async function listUnmappedCodeCount(slug: string): Promise<number> {
   return list.totalItems;
 }
 
+export async function listCodeCount(slug: string): Promise<number> {
+  await connection();
+  const pb = await userClient();
+  const list = await pb.collection<CodeRecord>('codes').getList(1, 1, {
+    filter: `specialtySlug = "${slug}"`,
+    skipTotal: false,
+  });
+  return list.totalItems;
+}
+
 export type UnmappedCodePickerRow = {
   code: string;
   description: string | null;
