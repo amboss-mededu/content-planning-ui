@@ -1,0 +1,60 @@
+apiVersion: v3
+kind: service
+metadata:
+    # Service name - use kebab-case
+    name: amboss-content-planner-ui
+
+    # Brief description of the service's purpose
+    description: Internal AMBOSS staff tool for planning medical-content coverage per specialty. Editors trigger multi-stage AI pipelines that extract clinical concepts from board-review PDFs, map them against existing AMBOSS articles, and consolidate gaps into editorial decisions.
+
+    # Display name - can use spaces and proper capitalization
+    displayName: AMBOSS Content Planner UI
+
+    # Team or group responsible for the service
+    owner: longtail
+
+    links:
+      # GitHub
+      - name: repo-content-planning-ui
+        type: repo
+        provider: github
+        # Repository URL
+        url: https://github.com/amboss-mededu/content-planning-ui
+
+      # Notion
+    #  - type: doc
+    #    name: Notion docs
+    #    url: https://www.notion.so/amboss-medical
+    #    provider: Notion
+
+      # Sentry
+    #  - type: other
+    #    name: Sentry
+    #    url: https://amboss.sentry.io/issues/?project=
+    #    provider: Sentry
+
+      # Architecture
+    #  - type: doc
+    #    name: C4 Model
+    #    url: https://structurizr.com/workspace/95177
+    #    provider: Structurizr
+
+    # contacts:
+    #  - type: slack
+    #    contact: https://organization.slack.com/archives/CHANNEL-ID
+    #  - name: TeamName
+    #    type: email
+    #    contact: team.name@medicuja.com
+# integrations:
+#   pagerduty:
+#     serviceURL: https://miamed.pagerduty.com/service-directory/amboss-content-planner-ui
+spec:
+    # Programming languages used in the service
+    languages:
+     - typescript
+
+    # Service type (e.g., web, worker, etc.)
+    type: web
+
+    # Current state of the service (can be any of: production, experimental, deprecated)
+    lifecycle: experimental
