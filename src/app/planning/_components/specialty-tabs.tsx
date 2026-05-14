@@ -13,6 +13,7 @@ const TABS = [
   { label: 'Milestones', segment: 'milestones', numbered: true },
   { label: 'Categories', segment: 'categories', numbered: true },
   { label: 'Mapping', segment: 'codes', numbered: true },
+  { label: 'Consolidation Review', segment: 'consolidation-review', numbered: true },
   { label: 'New Articles', segment: 'articles', numbered: true },
   { label: 'Article Updates', segment: 'sections', numbered: true },
   { label: 'Backlog', segment: 'backlog', numbered: true },
