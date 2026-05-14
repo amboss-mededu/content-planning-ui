@@ -57,4 +57,4 @@ spec:
     type: web
 
     # Current state of the service (can be any of: production, experimental, deprecated)
-    lifecycle: production
+    lifecycle: experimental
