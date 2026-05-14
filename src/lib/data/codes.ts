@@ -57,11 +57,11 @@ export async function listInFlightCodes(slug: string): Promise<string[]> {
 export async function listUnmappedCodeCount(slug: string): Promise<number> {
   await connection();
   const pb = await userClient();
-  // PB does not let us filter on undefined in JSON-style; we rely on the
-  // workflow path that always sets isInAMBOSS to true/false on mapping
-  // completion. Filter for "no isInAMBOSS field" via empty match.
+  // mappedAt is the canonical "mapping has run" signal — see the migration
+  // 1779000000_codes_mappedAt for why `isInAMBOSS` alone can't carry an
+  // "unset" state in PocketBase.
   const list = await pb.collection<CodeRecord>('codes').getList(1, 1, {
-    filter: `specialtySlug = "${slug}" && isInAMBOSS = null`,
+    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)`,
     skipTotal: false,
   });
   return list.totalItems;
@@ -89,7 +89,7 @@ export async function listUnmappedCodesForPicker(
   await connection();
   const pb = await userClient();
   const rows = await pb.collection<CodeRecord>('codes').getFullList({
-    filter: `specialtySlug = "${slug}" && isInAMBOSS = null`,
+    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)`,
     sort: 'code',
   });
   return rows.map((r) => ({
@@ -116,7 +116,7 @@ export async function listCodeCategories(slug: string): Promise<CodeCategorySumm
     const cat = r.category ?? '(uncategorized)';
     const entry = totals.get(cat) ?? { total: 0, unmapped: 0 };
     entry.total += 1;
-    if (r.isInAMBOSS === undefined || r.isInAMBOSS === null) entry.unmapped += 1;
+    if (!r.mappedAt) entry.unmapped += 1;
     totals.set(cat, entry);
   }
   return Array.from(totals.entries())
@@ -151,9 +151,9 @@ export async function listUnmappedCodesAsAdmin(
   filter?: { categories?: string[]; codes?: string[] } | null,
 ): Promise<Array<{ code: string; category: string | null; description: string | null }>> {
   const pb = await createAdminClient();
-  const rows = await pb
-    .collection<CodeRecord>('codes')
-    .getFullList({ filter: `specialtySlug = "${slug}" && isInAMBOSS = null` });
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)`,
+  });
   const catSet = filter?.categories?.length ? new Set(filter.categories) : null;
   const codeSet = filter?.codes?.length ? new Set(filter.codes) : null;
   return rows
@@ -207,7 +207,7 @@ export async function writeCodeMappingAsAdmin(args: WriteCodeMappingArgs): Promi
   const row = await pb
     .collection<CodeRecord>('codes')
     .getFirstListItem(`specialtySlug = "${slug}" && code = "${code}"`);
-  await pb.collection('codes').update(row.id, mapping);
+  await pb.collection('codes').update(row.id, { ...mapping, mappedAt: Date.now() });
 
   // Drop in-flight markers for this code.
   const flights = await pb
@@ -222,12 +222,9 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
     .collection<CodeRecord>('codes')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   for (const r of rows) {
-    if (
-      (r.isInAMBOSS === undefined || r.isInAMBOSS === null) &&
-      (r.coverageLevel === undefined || r.coverageLevel === null)
-    )
-      continue;
+    if (!r.mappedAt) continue;
     await pb.collection('codes').update(r.id, {
+      mappedAt: 0,
       isInAMBOSS: null,
       coverageLevel: null,
       depthOfCoverage: null,
@@ -257,6 +254,7 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     throw e;
   }
   await pb.collection('codes').update(row.id, {
+    mappedAt: 0,
     isInAMBOSS: null,
     coverageLevel: null,
     depthOfCoverage: null,
@@ -275,6 +273,10 @@ export async function bulkInsertCodesAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   for (const r of rows) {
+    // `mappedAt` is the unmapped sentinel — left at 0 here so newly inserted
+    // codes don't trip the "mapping has run" predicate. `isInAMBOSS` is a PB
+    // bool (NOT NULL, default false) and cannot represent "unset", so we read
+    // it conditionally on `mappedAt > 0` everywhere.
     await pb.collection('codes').create({ specialtySlug: slug, ...r });
   }
 }

@@ -170,7 +170,7 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
       .getFullList({ filter: `specialtySlug = "${slug}"`, sort: '-startedAt' }),
     pb
       .collection<CodeRecord>('codes')
-      .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,isInAMBOSS' }),
+      .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,mappedAt' }),
     pb
       .collection<ConsolidatedArticleRecord>('consolidatedArticles')
       .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id' }),
@@ -209,7 +209,7 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
     stageCompleted,
     milestonesText:
       typeof specialty?.milestones === 'string' && specialty.milestones.length > 0,
-    mappedCodeCount: codeRows.filter((c) => c.isInAMBOSS != null).length,
+    mappedCodeCount: codeRows.filter((c) => (c.mappedAt ?? 0) > 0).length,
     consolidatedArticleCount: articles.length,
     consolidatedSectionCount: sections.length,
     approvedArticleCount: approvedArticleIds.length,
@@ -254,7 +254,7 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
         .getFullList({ sort: '-startedAt' }),
       pb
         .collection<CodeRecord>('codes')
-        .getFullList({ fields: 'specialtySlug,isInAMBOSS' }),
+        .getFullList({ fields: 'specialtySlug,mappedAt' }),
       pb
         .collection<ConsolidatedArticleRecord>('consolidatedArticles')
         .getFullList({ fields: 'id,specialtySlug' }),
@@ -276,19 +276,26 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   // Stages for the *latest* run of each specialty. One filter call per
   // run is acceptable here — this list is the homepage grid; one-extra
   // query per specialty is still bounded by the specialty count.
+  // `requestKey: null` opts each fan-out call out of the PB SDK's
+  // auto-cancellation, which otherwise nukes every concurrent same-method
+  // request on `pipelineStages` except the last.
   const stagesByRunId = new Map<string, PipelineStageRecord[]>();
   await Promise.all(
     Array.from(latestRunBySlug.values()).map(async (run) => {
       const list = await pb
         .collection<PipelineStageRecord>('pipelineStages')
-        .getFullList({ filter: `runId = "${run.id}"`, fields: 'stage,status' });
+        .getFullList({
+          filter: `runId = "${run.id}"`,
+          fields: 'stage,status',
+          requestKey: null,
+        });
       stagesByRunId.set(run.id, list);
     }),
   );
 
   const mappedCount = new Map<string, number>();
   for (const c of codes) {
-    if (c.isInAMBOSS != null) {
+    if ((c.mappedAt ?? 0) > 0) {
       mappedCount.set(c.specialtySlug, (mappedCount.get(c.specialtySlug) ?? 0) + 1);
     }
   }

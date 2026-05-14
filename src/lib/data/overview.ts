@@ -30,8 +30,9 @@ async function userClient(): Promise<PocketBase> {
  * with skipTotal off so the server includes a totalItems count for free.
  *
  * `mappedCodes` is the only stat that needs a row scan (codes whose
- * isInAMBOSS is set, regardless of true/false). For our scale (low
- * thousands of rows per specialty) this stays well under a second.
+ * mapping workflow has run, regardless of in-AMBOSS verdict). For our
+ * scale (low thousands of rows per specialty) this stays well under a
+ * second.
  */
 export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
   await connection();
@@ -47,10 +48,7 @@ export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
       pb.collection('consolidatedSections').getList(1, 1, { filter, skipTotal: false }),
     ]);
 
-  const mappedCodes = codeList.reduce(
-    (n, c) => (c.isInAMBOSS === undefined || c.isInAMBOSS === null ? n : n + 1),
-    0,
-  );
+  const mappedCodes = codeList.reduce((n, c) => (c.mappedAt ? n + 1 : n), 0);
 
   return {
     codes: codeList.length,
