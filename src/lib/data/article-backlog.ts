@@ -88,9 +88,12 @@ export async function setArticleBacklogStatus(
   articleRecordId: string,
   status: ArticleBacklogStatus,
   changedByEmail: string | null,
+  notes?: string,
 ): Promise<void> {
   const pb = await userClient();
-  await upsertBacklog(pb, slug, articleRecordId, { status }, changedByEmail);
+  const patch: Record<string, unknown> = { status };
+  if (notes !== undefined) patch.notes = notes;
+  await upsertBacklog(pb, slug, articleRecordId, patch, changedByEmail);
 }
 
 export async function setArticleBacklogAssignee(
@@ -138,4 +141,59 @@ export async function setArticleBacklogStatusAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   await upsertBacklog(pb, slug, articleRecordId, { status }, changedByEmail);
+}
+
+/**
+ * Idempotent: create an articleBacklog row of type='update' for the given
+ * parent article if one doesn't already exist. Called from
+ * `submitSectionReview` when any section under a parent is approved; we
+ * don't want to clobber an existing row's status (an editor may have
+ * already advanced it past 'waiting-for-sources').
+ */
+export async function ensureUpdateBacklogRow(
+  slug: string,
+  parentArticleId: string,
+  changedByEmail: string | null,
+): Promise<void> {
+  const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleRecordId = "${parentArticleId}"`;
+  try {
+    await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
+    return;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      await pb.collection('articleBacklog').create({
+        specialtySlug: slug,
+        articleRecordId: parentArticleId,
+        type: 'update',
+        status: 'waiting-for-sources',
+        lastChangedByEmail: changedByEmail ?? '',
+        lastChangedAt: Date.now(),
+      });
+      return;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Tear down an update-type backlog row. Used when the last approved
+ * section under the parent article is unreviewed/rejected — the row
+ * lost its only justification for existing.
+ */
+export async function clearUpdateBacklogRow(
+  slug: string,
+  parentArticleId: string,
+): Promise<void> {
+  const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleRecordId = "${parentArticleId}" && type = "update"`;
+  try {
+    const existing = await pb
+      .collection<ArticleBacklogRecord>('articleBacklog')
+      .getFirstListItem(filter);
+    await pb.collection('articleBacklog').delete(existing.id);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return;
+    throw e;
+  }
 }

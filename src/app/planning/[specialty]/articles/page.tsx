@@ -14,6 +14,7 @@ import type {
   ConsolidatedArticle,
   NewArticleSuggestion,
 } from '@/lib/types';
+import type { ReviewerMap, ReviewMap } from '../../_components/article-manager-modal-v2';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
 import {
   buildTitleOriginLookup,
@@ -21,7 +22,6 @@ import {
   extractCodes,
   type TitleOriginLookup,
 } from '../../_components/code-utils';
-import type { ReviewerMap, ReviewMap } from '../../_components/review-modal';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function ArticlesPage({
@@ -108,12 +108,14 @@ async function ArticlesData({ slug }: { slug: string }) {
 
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
+  const initialNotesByArticle: Record<string, string> = {};
   for (const [id, r] of Object.entries(reviewRecs)) {
     initialReviews[id] = r.status;
     initialReviewers[id] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
+    if (r.notes) initialNotesByArticle[id] = r.notes;
   }
 
   const consolidated = consolidatedRecs.map(projectConsolidated);
@@ -131,6 +133,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       initialReviews={initialReviews}
       initialReviewers={initialReviewers}
       initialCommentsByArticle={commentsByArticle}
+      initialNotesByArticle={initialNotesByArticle}
       viewerEmail={user?.email ?? undefined}
     />
   );

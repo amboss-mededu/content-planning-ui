@@ -12,11 +12,14 @@ import {
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
+import {
+  ArticleManagerModalV2,
+  type ReviewerMap,
+  type ReviewMap,
+} from './article-manager-modal-v2';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
-import type { ReviewerMap, ReviewMap } from './review-modal';
-import { SectionReviewModal } from './section-review-modal';
 
 /**
  * Unified row shape for the Article Updates tab. ConsolidatedSection records
@@ -384,6 +387,7 @@ export function SectionsView({
   initialReviewers,
   initialCommentsBySection,
   initialCommentsByParentArticle,
+  initialNotesBySection,
   viewerEmail,
 }: {
   slug: string;
@@ -394,6 +398,7 @@ export function SectionsView({
   initialReviewers: ReviewerMap;
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
+  initialNotesBySection: Record<string, string>;
   viewerEmail?: string;
 }) {
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
@@ -602,21 +607,26 @@ export function SectionsView({
         />
       )}
       {reviewOpen && (
-        <SectionReviewModal
-          slug={slug}
-          sections={reviewSections}
-          startAtId={reviewStartAtId}
-          initialViewMode={reviewInitialViewMode}
-          initialReviews={reviews}
-          initialReviewers={reviewers}
-          initialCommentsBySection={initialCommentsBySection}
-          initialCommentsByParentArticle={initialCommentsByParentArticle}
-          categoryLookup={categoryLookup}
-          titleOriginLookup={titleOriginLookup}
-          viewerEmail={viewerEmail}
+        <ArticleManagerModalV2
+          opener={{
+            type: 'update',
+            stage: 'review-2nd',
+            slug,
+            sections: reviewSections,
+            startAtId: reviewStartAtId,
+            initialViewMode: reviewInitialViewMode,
+            initialReviews: reviews,
+            initialReviewers: reviewers,
+            initialCommentsBySection,
+            initialCommentsByParentArticle,
+            initialNotesBySection,
+            categoryLookup,
+            titleOriginLookup,
+            viewerEmail,
+            onReviewsChange: setReviews,
+            onReviewersChange: setReviewers,
+          }}
           onClose={() => setReviewOpen(false)}
-          onReviewsChange={setReviews}
-          onReviewersChange={setReviewers}
         />
       )}
     </Stack>

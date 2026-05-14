@@ -12,8 +12,9 @@ import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
   ArticleSourceRecord,
+  ReviewCommentRecord,
 } from '@/lib/pb/types';
-import { ArticleManagerModal } from './article-manager-modal';
+import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import {
   IN_PROGRESS_STATUSES,
@@ -26,14 +27,22 @@ import {
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import type { SectionRow } from './sections-view';
 
 export type BacklogRow = {
-  /** PB id of the underlying newArticleSuggestions row. */
+  /** For type='new': PB id of the underlying newArticleSuggestions row.
+   *  For type='update': the parent article's CMS articleId. */
   id: string;
+  /** Discriminator. type='update' rows are built by aggregating approved
+   *  section reviews; type='new' rows mirror approved newArticleSuggestions. */
+  type: 'new' | 'update';
   articleTitle?: string;
   articleType?: string;
   codes: EmbeddedCode[];
+  /** Sources attached to this article (type='new' only — empty for updates). */
   sourcesCount: number;
+  /** Approved section changes for type='update' rows; undefined otherwise. */
+  sections?: SectionRow[];
 };
 
 export type AssignableUser = { email: string; name?: string };
@@ -75,6 +84,7 @@ export function BacklogView({
   assignableUsers,
   initialBacklog,
   initialSourcesByArticle,
+  initialCommentsByArticle,
   viewerEmail,
 }: {
   slug: string;
@@ -83,6 +93,7 @@ export function BacklogView({
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
   initialSourcesByArticle: Record<string, ArticleSourceRecord[]>;
+  initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail?: string;
 }) {
   const params = useSearchParams();
@@ -149,6 +160,7 @@ export function BacklogView({
   async function handleStatusChange(
     rowId: string,
     next: ArticleBacklogStatus,
+    notes?: string,
   ): Promise<void> {
     const prev = backlog[rowId];
     if (next === 'unassigned') {
@@ -175,10 +187,11 @@ export function BacklogView({
         assigneeEmail: curr[rowId]?.assigneeEmail ?? '',
         lastChangedByEmail: viewerEmail ?? '',
         lastChangedAt: Date.now(),
+        ...(notes !== undefined ? { notes } : {}),
       } as ArticleBacklogRecord,
     }));
     try {
-      await setBacklogStatus(slug, rowId, next);
+      await setBacklogStatus(slug, rowId, next, notes);
     } catch (e) {
       setBacklog((curr) => {
         const copy = { ...curr };
@@ -221,9 +234,33 @@ export function BacklogView({
 
   const columns: Column<BacklogRow>[] = [
     {
+      key: 'kind',
+      label: 'Kind',
+      description:
+        'Whether this row tracks a brand-new article or an update to an existing article (built from approved section changes).',
+      render: (r) =>
+        r.type === 'update' ? (
+          <Badge text="Update" color="purple" />
+        ) : (
+          <Badge text="New" color="blue" />
+        ),
+      width: 90,
+      verticalAlign: 'middle',
+      align: 'center',
+      accessor: (r) => (r.type === 'update' ? 'Update' : 'New'),
+      type: 'string',
+      filterable: true,
+      filterOptions: [
+        { value: 'New', label: 'New' },
+        { value: 'Update', label: 'Update' },
+      ],
+      filterValue: (r) => (r.type === 'update' ? 'Update' : 'New'),
+    },
+    {
       key: 'articleTitle',
       label: 'Article Title',
-      description: 'Approved 2nd-pass new article suggestion',
+      description:
+        'For new articles: the approved 2nd-pass suggestion title. For updates: the parent article being updated.',
       render: (r) => r.articleTitle ?? '—',
       verticalAlign: 'middle',
       align: 'left',
@@ -235,7 +272,7 @@ export function BacklogView({
     {
       key: 'articleType',
       label: 'Type',
-      description: 'Article type from the suggestion',
+      description: 'Article type from the suggestion (new articles only).',
       render: (r) => r.articleType ?? '—',
       width: 130,
       verticalAlign: 'middle',
@@ -350,36 +387,42 @@ export function BacklogView({
       ),
     },
     {
-      key: 'sourcesCount',
-      label: '# Sources',
-      description: 'Number of sources currently attached to this article.',
-      render: (r) => r.sourcesCount,
+      key: 'count',
+      label: '# Items',
+      description:
+        'For new articles: count of attached sources. For updates: count of approved section changes.',
+      render: (r) => (r.type === 'update' ? (r.sections?.length ?? 0) : r.sourcesCount),
       width: 100,
       verticalAlign: 'middle',
       align: 'center',
-      accessor: (r) => r.sourcesCount,
+      accessor: (r) => (r.type === 'update' ? (r.sections?.length ?? 0) : r.sourcesCount),
       type: 'number',
       filterable: true,
     },
     {
       key: 'sourcesAction',
       label: 'Sources',
-      description: 'Open the per-article sources drawer.',
+      description: 'Open the per-article sources drawer (new articles only).',
       width: 120,
       verticalAlign: 'middle',
       align: 'center',
-      render: (r) => (
-        <Button
-          variant="tertiary"
-          size="s"
-          onClick={(e) => {
-            (e as React.MouseEvent).stopPropagation();
-            setDrawerArticleId(r.id);
-          }}
-        >
-          View
-        </Button>
-      ),
+      render: (r) =>
+        r.type === 'update' ? (
+          <Text size="xs" color="secondary">
+            —
+          </Text>
+        ) : (
+          <Button
+            variant="tertiary"
+            size="s"
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              setDrawerArticleId(r.id);
+            }}
+          >
+            View
+          </Button>
+        ),
     },
   ];
 
@@ -439,12 +482,41 @@ export function BacklogView({
           onClose={() => setDrawerArticleId(null)}
         />
       )}
-      {managerArticleId && managerRow && (
-        <ArticleManagerModal
-          article={managerRow}
-          currentStatus={statusOf(managerArticleId)}
-          sources={initialSourcesByArticle[managerArticleId] ?? []}
-          onStatusChange={(next) => handleStatusChange(managerArticleId, next)}
+      {managerArticleId && managerRow && managerRow.type === 'new' && (
+        <ArticleManagerModalV2
+          opener={{
+            type: 'new',
+            stage: 'backlog',
+            slug,
+            article: managerRow,
+            currentStatus: statusOf(managerArticleId),
+            sources: initialSourcesByArticle[managerArticleId] ?? [],
+            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
+            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            categoryLookup,
+            viewerEmail,
+            onStatusChange: (next, notes) =>
+              handleStatusChange(managerArticleId, next, notes),
+          }}
+          onClose={() => setManagerArticleId(null)}
+        />
+      )}
+      {managerArticleId && managerRow && managerRow.type === 'update' && (
+        <ArticleManagerModalV2
+          opener={{
+            type: 'update',
+            stage: 'backlog',
+            slug,
+            article: managerRow,
+            sections: managerRow.sections ?? [],
+            currentStatus: statusOf(managerArticleId),
+            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
+            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            categoryLookup,
+            viewerEmail,
+            onStatusChange: (next, notes) =>
+              handleStatusChange(managerArticleId, next, notes),
+          }}
           onClose={() => setManagerArticleId(null)}
         />
       )}

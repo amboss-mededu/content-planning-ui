@@ -12,10 +12,14 @@ import {
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
+import {
+  ArticleManagerModalV2,
+  type ReviewerMap,
+  type ReviewMap,
+} from './article-manager-modal-v2';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
-import { type ReviewerMap, type ReviewMap, ReviewModal } from './review-modal';
 
 /**
  * Unified row shape for the New Articles tab. Both 1st-pass
@@ -228,6 +232,7 @@ export function ArticlesView({
   initialReviews,
   initialReviewers,
   initialCommentsByArticle,
+  initialNotesByArticle,
   viewerEmail,
 }: {
   slug: string;
@@ -239,6 +244,7 @@ export function ArticlesView({
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
+  initialNotesByArticle: Record<string, string>;
   viewerEmail?: string;
 }) {
   const allColumns = useMemo(
@@ -421,20 +427,25 @@ export function ArticlesView({
       </Stack>
 
       {reviewOpen && (
-        <ReviewModal
-          slug={slug}
-          articles={reviewArticles}
-          passLabel={reviewPassLabel ?? (pass === 'first' ? '1st pass' : '2nd pass')}
-          startAtId={reviewStartAtId}
-          initialReviews={reviews}
-          initialReviewers={reviewers}
-          initialCommentsByArticle={initialCommentsByArticle}
-          categoryLookup={categoryLookup}
-          titleOriginLookup={titleOriginLookup}
-          viewerEmail={viewerEmail}
+        <ArticleManagerModalV2
+          opener={{
+            type: 'new',
+            stage: pass === 'first' ? 'review-1st' : 'review-2nd',
+            slug,
+            articles: reviewArticles,
+            passLabel: reviewPassLabel ?? (pass === 'first' ? '1st pass' : '2nd pass'),
+            startAtId: reviewStartAtId,
+            initialReviews: reviews,
+            initialReviewers: reviewers,
+            initialCommentsByArticle,
+            initialNotesByArticle,
+            categoryLookup,
+            titleOriginLookup,
+            viewerEmail,
+            onReviewsChange: setReviews,
+            onReviewersChange: setReviewers,
+          }}
           onClose={() => setReviewOpen(false)}
-          onReviewsChange={setReviews}
-          onReviewersChange={setReviewers}
         />
       )}
     </Stack>

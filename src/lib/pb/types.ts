@@ -126,6 +126,22 @@ export interface SectionReviewRecord extends PbRecord {
   notes?: string;
 }
 
+// --- Collection: consolidationCategoryReviews ------------------------------
+
+export type ConsolidationCategoryReviewStatus = 'flagged-for-rerun';
+
+export interface ConsolidationCategoryReviewRecord extends PbRecord {
+  specialtySlug: string;
+  /** Source category from consolidatedArticles / consolidatedSections that
+   *  this row gates. Unique within a specialty. */
+  category: string;
+  status: ConsolidationCategoryReviewStatus;
+  reviewerEmail?: string;
+  /** ms since epoch */
+  reviewedAt?: number;
+  notes?: string;
+}
+
 // --- Collection: articleBacklog --------------------------------------------
 
 export type ArticleBacklogStatus =
@@ -139,11 +155,19 @@ export type ArticleBacklogStatus =
   | 'ready-to-publish'
   | 'published';
 
+export type ArticleBacklogType = 'new' | 'update';
+
 export interface ArticleBacklogRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the newArticleSuggestions row this backlog state covers. */
+  /** PB id of the newArticleSuggestions row this backlog state covers
+   *  (type='new'), or the CMS articleId of the parent article being
+   *  updated (type='update'). */
   articleRecordId: string;
   status: ArticleBacklogStatus;
+  /** Discriminator between new-article backlog rows and update-article
+   *  backlog rows. Existing rows without an explicit value default to
+   *  'new' at the data layer for back-compat. */
+  type?: ArticleBacklogType;
   assigneeEmail?: string;
   lastChangedByEmail?: string;
   /** ms since epoch */

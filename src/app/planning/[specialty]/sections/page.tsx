@@ -6,13 +6,13 @@ import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { ConsolidatedSection } from '@/lib/types';
+import type { ReviewerMap, ReviewMap } from '../../_components/article-manager-modal-v2';
 import {
   buildTitleOriginLookup,
   type CategoryLookup,
   extractCodes,
   type TitleOriginLookup,
 } from '../../_components/code-utils';
-import type { ReviewerMap, ReviewMap } from '../../_components/review-modal';
 import { type SectionRow, SectionsView } from '../../_components/sections-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -98,12 +98,14 @@ async function SectionsData({ slug }: { slug: string }) {
 
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
+  const initialNotesBySection: Record<string, string> = {};
   for (const [id, r] of Object.entries(reviewRecs)) {
     initialReviews[id] = r.status;
     initialReviewers[id] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
+    if (r.notes) initialNotesBySection[id] = r.notes;
   }
 
   const rows = sectionRecs.map(projectSection);
@@ -118,6 +120,7 @@ async function SectionsData({ slug }: { slug: string }) {
       initialReviewers={initialReviewers}
       initialCommentsBySection={commentsBySection}
       initialCommentsByParentArticle={commentsByParentArticle}
+      initialNotesBySection={initialNotesBySection}
       viewerEmail={user?.email ?? undefined}
     />
   );
