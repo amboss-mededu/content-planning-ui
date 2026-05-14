@@ -199,14 +199,17 @@ export function CodesView({
         align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
-          if (r.isInAMBOSS === true) {
+          // `isInAMBOSS` is a non-nullable PB bool; only treat it as a
+          // verdict once the mapping workflow has stamped `mappedAt`.
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (mapped && r.isInAMBOSS === true) {
             return (
               <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
                 <Badge text="Yes" color="green" />
               </ClickableCell>
             );
           }
-          if (r.isInAMBOSS === false) {
+          if (mapped && r.isInAMBOSS === false) {
             return (
               <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
                 <Badge text="No" color="red" />
@@ -215,16 +218,23 @@ export function CodesView({
           }
           return <EmptyChip />;
         },
-        // true → 1, false → 0, unknown → null so unmapped rows stay at the
-        // bottom regardless of sort direction.
-        accessor: (r) => (r.isInAMBOSS === true ? 1 : r.isInAMBOSS === false ? 0 : null),
+        // mapped+true → 1, mapped+false → 0, unmapped → null so unmapped
+        // rows stay at the bottom regardless of sort direction.
+        accessor: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return null;
+          return r.isInAMBOSS === true ? 1 : 0;
+        },
         type: 'boolean',
         filterable: true,
         // Map the boolean to friendly Yes/No values; unmapped rows return
         // undefined so they don't fall under either bucket and are excluded
         // when the user picks Yes or No.
-        filterValue: (r) =>
-          r.isInAMBOSS === true ? 'yes' : r.isInAMBOSS === false ? 'no' : undefined,
+        filterValue: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return undefined;
+          return r.isInAMBOSS === true ? 'yes' : 'no';
+        },
         filterOptions: IN_AMBOSS_FILTER_OPTIONS,
         group: 'coverage',
       },
@@ -371,12 +381,12 @@ export function CodesView({
         columns={columns}
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
-        // "Mapped" = the workflow has filled in `isInAMBOSS` (yes or no).
+        // "Mapped" = the workflow has stamped `mappedAt` (yes or no verdict).
         // Computed off the live filtered set so the count tracks whatever
         // slice the user is currently looking at.
         countAddendum={(filtered) => {
           const mapped = filtered.reduce(
-            (n, c) => (c.isInAMBOSS === true || c.isInAMBOSS === false ? n + 1 : n),
+            (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
             0,
           );
           return `${mapped.toLocaleString()} mapped`;

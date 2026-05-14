@@ -63,6 +63,7 @@ export interface CodeRecord extends PbRecord {
   consolidationCategory?: string;
   description?: string;
   isInAMBOSS?: boolean;
+  mappedAt?: number;
   articlesWhereCoverageIs?: CoveredSection[];
   notes?: string;
   gaps?: string;

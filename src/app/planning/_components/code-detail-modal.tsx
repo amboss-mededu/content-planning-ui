@@ -174,7 +174,7 @@ export function CodeDetailModal({
   // RowActions: unmapped rows can always be mapped; remap of an already-
   // mapped row requires the consolidation gate to be open. While the row is
   // currently in flight from an active map_codes run, the action is locked.
-  const isUnmapped = row.isInAMBOSS === undefined || row.isInAMBOSS === null;
+  const isUnmapped = !((row.mappedAt ?? 0) > 0);
   const actionEnabled = !inFlight && !submitting && (isUnmapped || canEdit);
   const actionLabel = inFlight
     ? 'Mapping…'

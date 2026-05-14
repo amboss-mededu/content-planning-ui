@@ -62,6 +62,7 @@ export type Code = {
   consolidationCategory?: string;
   description?: string;
   isInAMBOSS?: boolean;
+  mappedAt?: number;
   articlesWhereCoverageIs?: ArticleCoverageRef[];
   notes?: string;
   gaps?: string;
