@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
-import type { ConsolidatedSectionRecord } from '@/lib/pb/types';
+import type { ConsolidatedSectionRecord, SectionReviewRecord } from '@/lib/pb/types';
 import type { ConsolidatedSection } from '@/lib/types';
 
 async function userClient(): Promise<PocketBase> {
@@ -14,6 +14,59 @@ async function userClient(): Promise<PocketBase> {
     .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   return createServerClient(cookieHeader);
+}
+
+/**
+ * Returns the consolidatedSections row's parent article id (the CMS
+ * articleId, not a PB id) if it exists, else null. Used by the section
+ * review→backlog promotion path to key the resulting backlog row on the
+ * parent article.
+ */
+export async function getConsolidatedSectionParentArticleId(
+  sectionRecordId: string,
+): Promise<string | null> {
+  const pb = await userClient();
+  try {
+    const rec = await pb
+      .collection<ConsolidatedSectionRecord>('consolidatedSections')
+      .getOne(sectionRecordId);
+    return rec.articleId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether any other section under the same parent article currently
+ * has an approved review. Used by `resetSectionReview` to decide
+ * whether to tear down the update-type backlog row when an approval is
+ * cleared.
+ */
+export async function hasOtherApprovedSectionsForParent(
+  slug: string,
+  parentArticleId: string,
+  excludeSectionId: string,
+): Promise<boolean> {
+  const pb = await userClient();
+  const sections = await pb
+    .collection<ConsolidatedSectionRecord>('consolidatedSections')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  const siblingIds = new Set(
+    sections
+      .filter((s) => s.articleId === parentArticleId && s.id !== excludeSectionId)
+      .map((s) => s.id),
+  );
+  if (siblingIds.size === 0) return false;
+  // sectionReviews don't carry articleId, so join via sectionRecordId.
+  const reviews = await pb
+    .collection<SectionReviewRecord>('sectionReviews')
+    .getFullList({ filter: `specialtySlug = "${slug}" && status = "approved"` });
+  for (const r of reviews) {
+    if (siblingIds.has(r.sectionRecordId)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function listConsolidatedSections(

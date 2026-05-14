@@ -27,8 +27,18 @@ import {
 } from '@/lib/workflows/lib/sources';
 import { ApproveButton } from './approve-button';
 import { CancelButton } from './cancel-button';
+import { MarkStageCompleteButton } from './mark-stage-complete-button';
 import { MappingModelSelector, ModelSelector } from './model-selector';
 import { ResetButton } from './reset-button';
+import { SkipStageButton } from './skip-stage-button';
+
+// Stages that expose a manual "Skip step" button. Today this is only
+// the 2nd-consolidation passes, which are explicitly optional — for
+// every other stage, "skip" is not a meaningful editorial action.
+const SKIPPABLE_STAGES = new Set<StageName>([
+  'consolidate_articles',
+  'consolidate_sections',
+]);
 
 /**
  * Persist a boolean flag in localStorage. Defaults to `false` on first paint
@@ -539,6 +549,9 @@ export function StageCard({
   continueAction,
   mapCodesHistory,
   unmappedCount,
+  hasOutput,
+  manualOverride,
+  manualSkipped,
 }: {
   title: string;
   description?: string;
@@ -548,6 +561,20 @@ export function StageCard({
   runUrls?: unknown;
   events?: PipelineEventRow[];
   sources?: CodeSource[];
+  /** True when the stage has produced at least one piece of output — gates
+   *  the manual "Mark step complete" button so editors can't flag an
+   *  empty stage as done (except for the always-enabled 2nd-consolidation
+   *  passes, which pass `hasOutput=true` unconditionally). */
+  hasOutput?: boolean;
+  /** Editor's per-specialty manual "this stage is done" override from
+   *  `specialties.pipelineStageOverrides`. OR-merged with
+   *  `stage.status === 'completed'` for the badge. */
+  manualOverride?: boolean;
+  /** Editor's per-specialty "skip this stage" flag from
+   *  `specialties.pipelineStageSkipped`. When true the badge renders
+   *  as "Skipped" (gray) and supersedes both the auto-derived status
+   *  and `manualOverride`. */
+  manualSkipped?: boolean;
   /** When the latest run wrapped up (completed / approved) but the
    *  specialty-level work isn't finished — e.g. map_codes ran for a subset
    *  of codes and more remain unmapped — display "In progress" instead of
@@ -578,7 +605,19 @@ export function StageCard({
   unmappedCount?: number;
 }) {
   const runInputs = normalizeInputs(runUrls);
-  const status = (stage?.status ?? 'pending') as StageStatus;
+  const rawStatus = (stage?.status ?? 'pending') as StageStatus;
+  // OR-merge the manual override into the rendered status so the badge
+  // flips to "Completed" once an editor marks the step done — even if
+  // the stage row itself never reached completed/approved (e.g. the
+  // workflow was killed mid-run, or the 2nd-consolidation pass produced
+  // nothing).
+  const inFlight = rawStatus === 'running' || rawStatus === 'awaiting_approval';
+  const status: StageStatus =
+    manualSkipped === true && !inFlight
+      ? 'skipped'
+      : manualOverride === true && !inFlight
+        ? 'completed'
+        : rawStatus;
   const useMapHistory = stageName === 'map_codes' && mapCodesHistory !== undefined;
   // Map codes shows a specialty-wide "X mapped, Y unmapped" tally instead of
   // the per-run summary, since the card represents the whole stage and per-run
@@ -725,6 +764,23 @@ export function StageCard({
                   >
                     {continuing ? 'Working…' : continueAction.label}
                   </Button>
+                ) : null}
+                {status !== 'running' && status !== 'awaiting_approval' ? (
+                  <MarkStageCompleteButton
+                    slug={specialtySlug}
+                    stageName={stageName}
+                    hasOutput={hasOutput === true || manualOverride === true}
+                    isComplete={manualOverride === true}
+                  />
+                ) : null}
+                {status !== 'running' &&
+                status !== 'awaiting_approval' &&
+                SKIPPABLE_STAGES.has(stageName) ? (
+                  <SkipStageButton
+                    slug={specialtySlug}
+                    stageName={stageName}
+                    isSkipped={manualSkipped === true}
+                  />
                 ) : null}
               </Inline>
               {expanded && stage ? (

@@ -177,6 +177,7 @@ export function CategoriesView({
         columns={columns}
         getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
         emptyText="No consolidation buckets found."
+        storageKey={`categories-table:${slug}`}
       />
     </Stack>
   );

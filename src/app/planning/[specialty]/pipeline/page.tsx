@@ -1,10 +1,13 @@
 import { Suspense } from 'react';
 import { getAmbossLibraryStats } from '@/lib/data/amboss-library';
+import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listConsolidatedArticles } from '@/lib/data/articles';
+import { listArticleSourceCount } from '@/lib/data/article-sources';
+import { listConsolidatedArticles, listNewArticleSuggestions } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
 import {
   listCodeCategories,
+  listCodeCount,
   listUnmappedCodeCount,
   listUnmappedCodesForPicker,
 } from '@/lib/data/codes';
@@ -14,7 +17,12 @@ import {
   getLatestStageContexts,
   getMapCodesHistory,
 } from '@/lib/data/pipeline';
-import { getSpecialty } from '@/lib/data/specialties';
+import { listConsolidatedSections } from '@/lib/data/sections';
+import {
+  getPipelineStageOverrides,
+  getPipelineStageSkipped,
+  getSpecialty,
+} from '@/lib/data/specialties';
 import { SkeletonLine } from '../../_components/skeleton';
 import { PipelineDashboard } from './_components/pipeline-dashboard';
 
@@ -78,7 +86,14 @@ async function PipelineData({ slug }: { slug: string }) {
     unmappedCodePicker,
     mapCodesHistory,
     consolidatedArticleRecs,
+    consolidatedSectionRecs,
     articleReviewRecs,
+    newArticleSuggestionRecs,
+    articleBacklogRecs,
+    codeCount,
+    articleSourceCount,
+    stageOverrides,
+    stageSkipped,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
@@ -91,7 +106,14 @@ async function PipelineData({ slug }: { slug: string }) {
     listUnmappedCodesForPicker(slug),
     getMapCodesHistory(slug),
     listConsolidatedArticles(slug),
+    listConsolidatedSections(slug),
     listArticleReviews(slug),
+    listNewArticleSuggestions(slug),
+    listArticleBacklog(slug),
+    listCodeCount(slug),
+    listArticleSourceCount(slug),
+    getPipelineStageOverrides(slug),
+    getPipelineStageSkipped(slug),
   ]);
 
   // Stats for the "Articles (secondary)" card — the 2nd consolidation
@@ -120,6 +142,40 @@ async function PipelineData({ slug }: { slug: string }) {
     consolidate_primary: stageCtxs.consolidate_primary ?? null,
     consolidate_articles: stageCtxs.consolidate_articles ?? null,
     consolidate_sections: stageCtxs.consolidate_sections ?? null,
+    literature_search: stageCtxs.literature_search ?? null,
+  };
+
+  // Backlog stats for the Literature search card. "waiting" covers
+  // every approved 2nd-pass article whose effective backlog status is
+  // unassigned / missing-row / waiting-for-sources — the same gate
+  // the API route uses for eligibility.
+  let waitingForSources = 0;
+  let searched = 0;
+  let laterStages = 0;
+  let approvedNew = 0;
+  for (const r of newArticleSuggestionRecs) {
+    const id = r.id;
+    if (!id) continue;
+    if (articleReviewRecs[id]?.status !== 'approved') continue;
+    approvedNew++;
+    const status = articleBacklogRecs[id]?.status;
+    if (
+      status === undefined ||
+      status === 'unassigned' ||
+      status === 'waiting-for-sources'
+    ) {
+      waitingForSources++;
+    } else if (status === 'sources-searched') {
+      searched++;
+    } else {
+      laterStages++;
+    }
+  }
+  const litSearchStats = {
+    approvedTotal: approvedNew,
+    waitingForSources,
+    searched,
+    laterStages,
   };
 
   // Specialty type from the repository layer doesn't expose `region`; read
@@ -128,6 +184,27 @@ async function PipelineData({ slug }: { slug: string }) {
   const defaultContentBase = deriveContentBase(
     (specialty as { region?: string | null } | null)?.region,
   );
+
+  // Per-stage "has any output" gates for the manual mark-complete
+  // button. 2nd-consolidation stages are intentionally always enabled
+  // (the pass can legitimately produce nothing). Each gate is the
+  // cheapest signal that proves the stage did something.
+  const milestonesText =
+    typeof (specialty as { milestones?: string | null } | null)?.milestones ===
+      'string' &&
+    ((specialty as { milestones?: string | null }).milestones ?? '').length > 0;
+  const mappedCount = codeCount - unmappedCodeCount;
+  const consolidationsOutput =
+    consolidatedArticleRecs.length + consolidatedSectionRecs.length > 0;
+  const stageHasOutput: Record<string, boolean> = {
+    extract_codes: codeCount > 0,
+    extract_milestones: milestonesText,
+    map_codes: mappedCount > 0,
+    consolidate_primary: consolidationsOutput,
+    consolidate_articles: true,
+    consolidate_sections: true,
+    literature_search: articleSourceCount > 0,
+  };
 
   return (
     <PipelineDashboard
@@ -143,6 +220,10 @@ async function PipelineData({ slug }: { slug: string }) {
       unmappedCodePicker={unmappedCodePicker}
       mapCodesHistory={mapCodesHistory}
       articleApprovalStats={articleApprovalStats}
+      litSearchStats={litSearchStats}
+      stageHasOutput={stageHasOutput}
+      stageOverrides={stageOverrides}
+      stageSkipped={stageSkipped}
     />
   );
 }

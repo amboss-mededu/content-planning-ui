@@ -79,6 +79,11 @@ export interface Column<T> {
   filterMode?: 'select' | 'contains';
   editable?: EditableConfig<T>;
   group?: ColumnGroup;
+  /** Start the column hidden. The user can re-enable it from the Columns
+   *  menu. Use for columns that exist for completeness but aren't useful
+   *  at the current aggregation level (e.g. per-section fields shown on
+   *  a per-article row). Persisted state still wins over this default. */
+  defaultHidden?: boolean;
 }
 
 const GROUP_STYLES: Record<
@@ -182,6 +187,7 @@ export function DataTable<T>({
   emptyText = 'No rows to display.',
   getRowKey,
   getRowStyle,
+  onRowClick,
   onVisibleRowsChange,
   leadingNote,
   countAddendum,
@@ -195,6 +201,11 @@ export function DataTable<T>({
    *  and override the default zebra stripe — used by review-pass tinting
    *  to show approved (green) / rejected (red) rows. */
   getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  /** Optional click handler on the row's `<tr>`. When set, the row
+   *  picks up a pointer cursor. Cells that need to handle their own
+   *  clicks (inline selects, buttons) must `stopPropagation` so they
+   *  don't also trigger this handler. */
+  onRowClick?: (row: T, index: number) => void;
   /** Fires whenever the currently-visible row set changes (after the
    *  table's filters + sort are applied). The parent can plumb this
    *  into a review modal so editors can stamp through "what's
@@ -236,8 +247,12 @@ export function DataTable<T>({
     setWidths((prev) => ({ ...prev, [key]: Math.max(MIN_COLUMN_WIDTH, Math.round(px)) }));
   // Per-table hidden-column set, toggled from the Columns menu in the toolbar.
   // Lives in component state (not URL or storage) so navigating away resets
-  // the view — matches the existing sort/width state lifetime.
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  // the view — matches the existing sort/width state lifetime. Seeded from
+  // any columns marked `defaultHidden`; persisted state (if storageKey is
+  // set) overrides this in the hydrate effect below.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key)),
+  );
   const visibleColumns = useMemo(
     () => columns.filter((c) => !hidden.has(c.key)),
     [columns, hidden],
@@ -573,6 +588,7 @@ export function DataTable<T>({
         columns={visibleColumns}
         getRowKey={getRowKey}
         getRowStyle={getRowStyle}
+        onRowClick={onRowClick}
         sort={sort}
         onSortSet={onSortSet}
         numFilters={numFilters}
@@ -1928,6 +1944,7 @@ type BodyProps<T> = {
   columns: Column<T>[];
   getRowKey: (row: T, index: number) => string;
   getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  onRowClick?: (row: T, index: number) => void;
   sort: SortState;
   onSortSet: (key: string, dir: 'asc' | 'desc' | null) => void;
   numFilters: Record<string, NumericFilter | null>;
@@ -2129,11 +2146,21 @@ function PlainBody<T>(props: BodyProps<T>) {
         <ColGroup columns={columns} widths={widths} />
         <Header {...props} />
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={getRowKey(row, i)} style={props.getRowStyle?.(row, i)}>
-              <TableCells row={row} columns={columns} rowIndex={i} />
-            </tr>
-          ))}
+          {rows.map((row, i) => {
+            const style = props.getRowStyle?.(row, i);
+            const rowStyle = props.onRowClick
+              ? { ...(style ?? {}), cursor: 'pointer' as const }
+              : style;
+            return (
+              <tr
+                key={getRowKey(row, i)}
+                style={rowStyle}
+                onClick={props.onRowClick ? () => props.onRowClick?.(row, i) : undefined}
+              >
+                <TableCells row={row} columns={columns} rowIndex={i} />
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -2215,12 +2242,19 @@ function VirtualizedBody<T>(props: BodyProps<T>) {
           ) : null}
           {items.map((vi) => {
             const row = rows[vi.index];
+            const style = props.getRowStyle?.(row, vi.index);
+            const rowStyle = props.onRowClick
+              ? { ...(style ?? {}), cursor: 'pointer' as const }
+              : style;
             return (
               <tr
                 key={getRowKey(row, vi.index)}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
-                style={props.getRowStyle?.(row, vi.index)}
+                style={rowStyle}
+                onClick={
+                  props.onRowClick ? () => props.onRowClick?.(row, vi.index) : undefined
+                }
               >
                 <TableCells row={row} columns={columns} rowIndex={vi.index} />
               </tr>

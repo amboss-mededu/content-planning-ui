@@ -1,17 +1,17 @@
 'use client';
 
 import { Callout, Card, CardBox, Column, Columns, Stack } from '@amboss/design-system';
-import type { Phase } from '@/lib/phase';
+import type { LastStep } from '@/lib/data/last-completed-step';
 import type { Specialty } from '@/lib/types';
 import { SkeletonLine } from './skeleton';
 import { SpecialtyCard } from './specialty-card';
 
 export function SpecialtiesGridView({
   specialties,
-  phases,
+  lastSteps,
 }: {
   specialties: Specialty[];
-  phases: Record<string, Phase>;
+  lastSteps: Record<string, LastStep>;
 }) {
   if (specialties.length === 0) {
     return <Callout type="info" text="No specialties registered yet. Add one below." />;
@@ -20,7 +20,7 @@ export function SpecialtiesGridView({
     <Columns gap="m" vAlignItems="stretch">
       {specialties.map((s) => (
         <Column key={s.slug} size={[12, 6, 4]}>
-          <SpecialtyCard specialty={s} phase={phases[s.slug]} />
+          <SpecialtyCard specialty={s} lastStep={lastSteps[s.slug]} />
         </Column>
       ))}
     </Columns>

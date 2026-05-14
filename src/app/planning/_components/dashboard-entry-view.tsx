@@ -7,7 +7,13 @@ import { SpecialtyEntry } from './specialty-entry';
 
 const STORAGE_KEY = 'lastSpecialty';
 
-export function DashboardEntryView({ specialties }: { specialties: Specialty[] }) {
+export function DashboardEntryView({
+  specialties,
+  specialtiesGrid,
+}: {
+  specialties: Specialty[];
+  specialtiesGrid: React.ReactNode;
+}) {
   const [lastSlug, setLastSlug] = useState<string>('');
 
   useEffect(() => {
@@ -30,6 +36,7 @@ export function DashboardEntryView({ specialties }: { specialties: Specialty[] }
       ) : (
         <SpecialtyEntry specialties={specialties} initialSlug={lastSlug} />
       )}
+      {specialtiesGrid}
     </Stack>
   );
 }

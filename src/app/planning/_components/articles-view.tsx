@@ -12,10 +12,14 @@ import {
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
+import {
+  ArticleManagerModalV2,
+  type ReviewerMap,
+  type ReviewMap,
+} from './article-manager-modal-v2';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { type Column, DataTable } from './data-table';
-import { type ReviewerMap, type ReviewMap, ReviewModal } from './review-modal';
 
 /**
  * Unified row shape for the New Articles tab. Both 1st-pass
@@ -228,6 +232,7 @@ export function ArticlesView({
   initialReviews,
   initialReviewers,
   initialCommentsByArticle,
+  initialNotesByArticle,
   viewerEmail,
 }: {
   slug: string;
@@ -239,6 +244,7 @@ export function ArticlesView({
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
+  initialNotesByArticle: Record<string, string>;
   viewerEmail?: string;
 }) {
   const allColumns = useMemo(
@@ -271,6 +277,14 @@ export function ArticlesView({
   // Articles the open review modal walks. Set when the user clicks one
   // of the Start review / Review all buttons — see scope handlers below.
   const [reviewArticles, setReviewArticles] = useState<ArticleRow[]>([]);
+  // When the modal is opened from a row click, this is the row's PB
+  // record id and the modal seeks straight to it. The Start review /
+  // Review all buttons clear this so the modal lands on first-unreviewed.
+  const [reviewStartAtId, setReviewStartAtId] = useState<string | undefined>();
+  // Header label for the modal — distinguishes "1st / 2nd pass" reviews
+  // from "Article updates" review scope when launched from the updates
+  // sub-table at the bottom of the page.
+  const [reviewPassLabel, setReviewPassLabel] = useState<string | undefined>();
   // Visible row set after the DataTable's filters + sort have been
   // applied. Drives the review modal so editors can scope a review
   // pass to whatever's currently filtered.
@@ -338,6 +352,8 @@ export function ArticlesView({
             variant="primary"
             onClick={() => {
               setReviewArticles(visibleRows);
+              setReviewStartAtId(undefined);
+              setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
               setReviewOpen(true);
             }}
             disabled={visibleRows.length === 0}
@@ -351,6 +367,8 @@ export function ArticlesView({
               variant="tertiary"
               onClick={() => {
                 setReviewArticles(activeRows);
+                setReviewStartAtId(undefined);
+                setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
                 setReviewOpen(true);
               }}
             >
@@ -364,12 +382,23 @@ export function ArticlesView({
           getRowKey={(_r, i) => `${pass}-${i}`}
           getRowStyle={getRowStyle}
           onVisibleRowsChange={setVisibleRows}
+          onRowClick={(row) => {
+            if (!row.id) return;
+            setReviewArticles(activeRows);
+            setReviewStartAtId(row.id);
+            setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
+            setReviewOpen(true);
+          }}
           leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
           emptyText={
             pass === 'first'
               ? 'No 1st-pass articles for this specialty.'
               : 'No 2nd-pass articles for this specialty.'
           }
+          // 1st-pass and 2nd-pass tables have different column sets
+          // (1st drops `previousArticleTitles`, 2nd drops `category`),
+          // so each lens gets its own persisted state.
+          storageKey={`articles-table:${slug}:${pass}`}
         />
       </Stack>
 
@@ -385,24 +414,38 @@ export function ArticlesView({
             rows={updates}
             columns={secondPassColumns}
             getRowKey={(_r, i) => `upd-${i}`}
+            onRowClick={(row) => {
+              if (!row.id) return;
+              setReviewArticles(updates);
+              setReviewStartAtId(row.id);
+              setReviewPassLabel('Article updates');
+              setReviewOpen(true);
+            }}
+            storageKey={`article-updates-table:${slug}`}
           />
         )}
       </Stack>
 
       {reviewOpen && (
-        <ReviewModal
-          slug={slug}
-          articles={reviewArticles}
-          passLabel={pass === 'first' ? '1st pass' : '2nd pass'}
-          initialReviews={reviews}
-          initialReviewers={reviewers}
-          initialCommentsByArticle={initialCommentsByArticle}
-          categoryLookup={categoryLookup}
-          titleOriginLookup={titleOriginLookup}
-          viewerEmail={viewerEmail}
+        <ArticleManagerModalV2
+          opener={{
+            type: 'new',
+            stage: pass === 'first' ? 'review-1st' : 'review-2nd',
+            slug,
+            articles: reviewArticles,
+            passLabel: reviewPassLabel ?? (pass === 'first' ? '1st pass' : '2nd pass'),
+            startAtId: reviewStartAtId,
+            initialReviews: reviews,
+            initialReviewers: reviewers,
+            initialCommentsByArticle,
+            initialNotesByArticle,
+            categoryLookup,
+            titleOriginLookup,
+            viewerEmail,
+            onReviewsChange: setReviews,
+            onReviewersChange: setReviewers,
+          }}
           onClose={() => setReviewOpen(false)}
-          onReviewsChange={setReviews}
-          onReviewersChange={setReviewers}
         />
       )}
     </Stack>

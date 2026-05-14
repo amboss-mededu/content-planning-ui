@@ -33,12 +33,25 @@ const DOWNSTREAM: Record<StageName, StageName[]> = {
     'consolidate_primary',
     'consolidate_articles',
     'consolidate_sections',
+    'literature_search',
   ],
   extract_milestones: [],
-  map_codes: ['consolidate_primary', 'consolidate_articles', 'consolidate_sections'],
-  consolidate_primary: ['consolidate_articles', 'consolidate_sections'],
-  consolidate_articles: ['consolidate_sections'],
+  map_codes: [
+    'consolidate_primary',
+    'consolidate_articles',
+    'consolidate_sections',
+    'literature_search',
+  ],
+  consolidate_primary: [
+    'consolidate_articles',
+    'consolidate_sections',
+    'literature_search',
+  ],
+  consolidate_articles: ['consolidate_sections', 'literature_search'],
   consolidate_sections: [],
+  // Literature search has no downstream stages today — backlog updates
+  // beyond `sources-searched` are manual.
+  literature_search: [],
 };
 
 export function stagesToReset(stage: StageName): StageName[] {

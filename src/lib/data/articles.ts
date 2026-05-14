@@ -64,6 +64,38 @@ export async function listNewArticleSuggestions(
   return strip<NewArticleSuggestion>(rows);
 }
 
+/**
+ * Bulk fetch of new-article suggestions by PB id, regardless of
+ * specialty. Used by the global "My Backlog" view to enrich
+ * cross-specialty backlog rows with title/type/codes in one shot.
+ * Returns a map keyed by record id for O(1) lookup; rows whose ids
+ * no longer exist are simply omitted.
+ */
+export async function listNewArticleSuggestionsForIds(
+  ids: string[],
+): Promise<Record<string, NewArticleSuggestion>> {
+  const out: Record<string, NewArticleSuggestion> = {};
+  const unique = Array.from(new Set(ids.filter((s) => s.length > 0)));
+  if (unique.length === 0) return out;
+  await connection();
+  const pb = await userClient();
+  // Chunked OR-filter to keep filter strings short. PB's filter has a
+  // generous limit but tens of thousands of ORs would still strain it.
+  const CHUNK = 30;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const filter = chunk.map((id) => `id = "${id}"`).join(' || ');
+    const rows = await pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getFullList({ filter });
+    const stripped = strip<NewArticleSuggestion>(rows);
+    for (const r of stripped) {
+      if (r.id) out[r.id] = r;
+    }
+  }
+  return out;
+}
+
 export async function listArticleUpdateSuggestions(
   slug: string,
 ): Promise<ArticleUpdateSuggestion[]> {

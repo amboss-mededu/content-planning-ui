@@ -1,6 +1,8 @@
 import { Suspense } from 'react';
 import { listCategoryOrchestration } from '@/lib/data/categories';
+import { getTabOverrides } from '@/lib/data/specialties';
 import { CategoriesView } from '../../_components/categories-view';
+import { MarkStepCompleteButton } from '../../_components/mark-step-complete-button';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function CategoriesPage({
@@ -17,6 +19,20 @@ export default async function CategoriesPage({
 }
 
 async function CategoriesData({ slug }: { slug: string }) {
-  const rows = await listCategoryOrchestration(slug);
-  return <CategoriesView rows={rows} slug={slug} />;
+  const [rows, overrides] = await Promise.all([
+    listCategoryOrchestration(slug),
+    getTabOverrides(slug),
+  ]);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <CategoriesView rows={rows} slug={slug} />
+      <div>
+        <MarkStepCompleteButton
+          slug={slug}
+          segment="categories"
+          isComplete={overrides.categories === true}
+        />
+      </div>
+    </div>
+  );
 }
