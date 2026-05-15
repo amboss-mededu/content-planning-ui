@@ -27,13 +27,16 @@ type CategoryStatus = 'not-ready' | 'ready' | 'consolidated';
 function deriveStatus(r: {
   isUnbucketed: boolean;
   numMappedCodes: number;
-  numIncludedCodes: number;
   numCodes: number;
   hasConsolidatedOutput: boolean;
 }): CategoryStatus {
   if (r.isUnbucketed) return 'not-ready';
-  const target = r.numIncludedCodes > 0 ? r.numIncludedCodes : r.numCodes;
-  const mapped = r.numMappedCodes >= target;
+  // Compare mapped against the bucket's total code count, not the
+  // consolidation-step's "included" subset. The included subset can be
+  // smaller than the mapped count (a code can be mapped at the codes
+  // step but later excluded by consolidation), which produced misleading
+  // ratios like 162/157.
+  const mapped = r.numMappedCodes >= r.numCodes;
   if (!mapped) return 'not-ready';
   return r.hasConsolidatedOutput ? 'consolidated' : 'ready';
 }
@@ -138,11 +141,10 @@ export function CategoriesView({
       key: 'numMappedCodes',
       label: 'Mapped',
       description:
-        'Codes in this bucket the mapping pipeline has stamped (mappedAt > 0). Shown as mapped/total — total is # Included when available, else # Codes.',
+        'Codes in this bucket the mapping pipeline has stamped (mappedAt > 0), shown as mapped/total against # Codes — the raw count in the category, not the consolidation-curated # Included subset.',
       render: (r) => {
-        const target = r.numIncludedCodes > 0 ? r.numIncludedCodes : r.numCodes;
-        const tone: ChipTone = r.numMappedCodes < target ? 'amber' : 'none';
-        return <QcChip value={`${r.numMappedCodes}/${target}`} tone={tone} />;
+        const tone: ChipTone = r.numMappedCodes < r.numCodes ? 'amber' : 'none';
+        return <QcChip value={`${r.numMappedCodes}/${r.numCodes}`} tone={tone} />;
       },
       width: 110,
       align: 'center',
