@@ -153,6 +153,11 @@ async function PipelineData({ slug }: { slug: string }) {
   let searched = 0;
   let laterStages = 0;
   let approvedNew = 0;
+  // Per-stage eligibility lists for the bulk-trigger cards. We collect
+  // the underlying newArticleSuggestions PB ids so the cards can POST
+  // them straight to the bulk endpoints.
+  const cortexEligibleIds: string[] = [];
+  const draftEligibleIds: string[] = [];
   for (const r of newArticleSuggestionRecs) {
     const id = r.id;
     if (!id) continue;
@@ -170,6 +175,8 @@ async function PipelineData({ slug }: { slug: string }) {
     } else {
       laterStages++;
     }
+    if (status === 'sources-approved') cortexEligibleIds.push(id);
+    if (status === 'ready-for-llm-draft') draftEligibleIds.push(id);
   }
   const litSearchStats = {
     approvedTotal: approvedNew,
@@ -221,6 +228,8 @@ async function PipelineData({ slug }: { slug: string }) {
       mapCodesHistory={mapCodesHistory}
       articleApprovalStats={articleApprovalStats}
       litSearchStats={litSearchStats}
+      cortexEligibleIds={cortexEligibleIds}
+      draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}
       stageOverrides={stageOverrides}
       stageSkipped={stageSkipped}
