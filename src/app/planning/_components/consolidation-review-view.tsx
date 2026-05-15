@@ -111,6 +111,7 @@ export function ConsolidationReviewView({
   // Categories whose consolidation request is in flight. Drives the rail
   // button's "Starting…" label so consecutive clicks don't fan out runs.
   const [consolidatingSet, setConsolidatingSet] = useState<Set<string>>(new Set());
+  const [isRunningAll, setIsRunningAll] = useState(false);
   const [consolidateError, setConsolidateError] = useState<string | null>(null);
   const router = useRouter();
 
@@ -138,16 +139,25 @@ export function ConsolidationReviewView({
     return m;
   }, [articles, sections]);
 
-  // Rail categories = union of (categories that already have consolidated
-  // output) ∪ (categories that have mapped codes but haven't been
-  // consolidated yet). The second set is essential — without it, a
-  // freshly-mapped category never appears in the rail and the user has
-  // no way to trigger primary consolidation for it.
-  const categories = useMemo(() => {
-    const set = new Set<string>(grouped.keys());
-    for (const cat of Object.keys(mappingByCategory)) set.add(cat);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [grouped, mappingByCategory]);
+  // Rail categories = only those that have produced consolidated output
+  // (articles or sections in `grouped`). Codes-table categories that
+  // contributed nothing don't appear — once consolidation has run, an
+  // empty category means "produced nothing", not "still pending". The
+  // specialty-level "Run consolidation for all categories" button at
+  // the top of the rail covers the bootstrap case where `grouped` is
+  // empty and there's no entry point yet.
+  const categories = useMemo(
+    () => Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)),
+    [grouped],
+  );
+
+  // Specialty-level "any mapping at all?" — controls whether the
+  // run-all button at the top of the rail is shown. If no codes are
+  // mapped yet, the user belongs back on the codes screen first.
+  const hasAnyMapping = useMemo(
+    () => Object.values(mappingByCategory).some((m) => m.mapped > 0),
+    [mappingByCategory],
+  );
 
   const [selectedCategoryRaw, setSelectedCategoryRaw] = useState<string | null>(
     initialCategory,
@@ -307,6 +317,37 @@ export function ConsolidationReviewView({
     [slug],
   );
 
+  // ----- Specialty-level consolidation trigger -----
+  // Omitting `categories` runs primary for every mapped category in
+  // the specialty. The same endpoint handles both bootstrap (no
+  // output yet) and re-run scenarios. `chainSecondaries: true` so
+  // one click produces end-to-end output.
+  const startConsolidationAll = useCallback(async () => {
+    if (isRunningAll) return;
+    setConsolidateError(null);
+    setIsRunningAll(true);
+    try {
+      const res = await fetch('/api/workflows/consolidate-primary', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          specialtySlug: slug,
+          chainSecondaries: true,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsolidateError(body?.error ?? `HTTP ${res.status} starting consolidation`);
+        return;
+      }
+      router.refresh();
+    } catch (e) {
+      setConsolidateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsRunningAll(false);
+    }
+  }, [slug, router, isRunningAll]);
+
   // ----- Per-category consolidation trigger -----
   const startConsolidation = useCallback(
     async (category: string) => {
@@ -373,10 +414,13 @@ export function ConsolidationReviewView({
           counts={counts}
           flaggedSet={flaggedSet}
           mappingByCategory={mappingByCategory}
+          hasAnyMapping={hasAnyMapping}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
           consolidatingSet={consolidatingSet}
           onStartConsolidation={startConsolidation}
+          isRunningAll={isRunningAll}
+          onStartConsolidationAll={startConsolidationAll}
           consolidateError={consolidateError}
           onDismissError={() => setConsolidateError(null)}
         />
@@ -425,7 +469,7 @@ export function ConsolidationReviewView({
           ) : (
             <Text color="secondary">
               {articles.length + sections.length === 0
-                ? `No 1st-pass content for this specialty yet (consolidatedArticles: ${articles.length}, consolidatedSections: ${sections.length}). Run the consolidation pipeline first, or re-seed your data.`
+                ? 'No consolidation output yet for this specialty. Use "Run consolidation for all categories" in the rail to start.'
                 : 'Select a category from the left to start reviewing.'}
             </Text>
           )}
@@ -489,10 +533,13 @@ function CategoryRail({
   counts,
   flaggedSet,
   mappingByCategory,
+  hasAnyMapping,
   selectedCategory,
   onSelect,
   consolidatingSet,
   onStartConsolidation,
+  isRunningAll,
+  onStartConsolidationAll,
   consolidateError,
   onDismissError,
 }: {
@@ -503,13 +550,17 @@ function CategoryRail({
   >;
   flaggedSet: Set<string>;
   mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
+  hasAnyMapping: boolean;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
   consolidatingSet: Set<string>;
   onStartConsolidation: (cat: string) => void;
+  isRunningAll: boolean;
+  onStartConsolidationAll: () => void;
   consolidateError: string | null;
   onDismissError: () => void;
 }) {
+  const hasOutput = categories.length > 0;
   return (
     <div
       style={{
@@ -540,9 +591,25 @@ function CategoryRail({
             {consolidateError}
           </button>
         ) : null}
+        {hasAnyMapping ? (
+          <Button
+            variant={hasOutput ? 'tertiary' : 'primary'}
+            fullWidth
+            onClick={onStartConsolidationAll}
+            disabled={isRunningAll}
+          >
+            {isRunningAll
+              ? 'Consolidating…'
+              : hasOutput
+                ? 'Re-run all consolidation'
+                : 'Run consolidation for all categories'}
+          </Button>
+        ) : null}
         {categories.length === 0 && (
           <Text color="secondary" size="s">
-            No categories yet.
+            {hasAnyMapping
+              ? 'No consolidation output yet. Use the button above to start.'
+              : 'Map some codes to a category first to enable consolidation.'}
           </Text>
         )}
         {categories.map((cat) => {
@@ -612,18 +679,14 @@ function CategoryRail({
                   ) : null}
                 </Inline>
               </button>
-              {mapping?.ready ? (
+              {hasOutput && mapping?.ready ? (
                 <Button
-                  variant={hasOutput ? 'tertiary' : 'secondary'}
+                  variant="tertiary"
                   fullWidth
                   onClick={() => onStartConsolidation(cat)}
                   disabled={isConsolidating}
                 >
-                  {isConsolidating
-                    ? 'Consolidating…'
-                    : hasOutput
-                      ? 'Re-run consolidation'
-                      : 'Start consolidation'}
+                  {isConsolidating ? 'Consolidating…' : 'Re-run consolidation'}
                 </Button>
               ) : null}
             </div>
