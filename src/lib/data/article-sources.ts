@@ -95,6 +95,21 @@ export async function listArticleSourcesForArticleIds(
 }
 
 /**
+ * Single-article admin reader for the writing pipeline. Sorted by rank
+ * ascending (the priority the source should be cited at).
+ */
+export async function listArticleSourcesForArticleAsAdmin(
+  slug: string,
+  articleRecordId: string,
+): Promise<ArticleSourceRecord[]> {
+  const pb = await createAdminClient();
+  return pb.collection<ArticleSourceRecord>('articleSources').getFullList({
+    filter: `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`,
+    sort: 'rank,title',
+  });
+}
+
+/**
  * Bulk-insert ranked sources for a single article from the
  * literature-search worker. Admin-side (no cookies in scope). Replaces
  * any existing rows for this article — re-running a search wipes the

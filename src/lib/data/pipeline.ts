@@ -603,7 +603,7 @@ export async function listEventsAsAdmin(runId: string): Promise<PipelineEventRow
 
 export async function logPipelineEventAsAdmin(args: {
   runId: string;
-  stage: StageName;
+  stage: string;
   level: string;
   message: string;
   metrics?: unknown;

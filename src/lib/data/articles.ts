@@ -154,6 +154,19 @@ export async function listNewArticleSuggestionsAsAdmin(
     .getFullList({ filter: `specialtySlug = "${slug}"` });
 }
 
+export async function getNewArticleSuggestionByIdAsAdmin(
+  id: string,
+): Promise<ArticleSuggestionRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getOne(id);
+  } catch {
+    return null;
+  }
+}
+
 export async function listArticleUpdateSuggestionsAsAdmin(
   slug: string,
 ): Promise<Array<ArticleSuggestionRecord>> {

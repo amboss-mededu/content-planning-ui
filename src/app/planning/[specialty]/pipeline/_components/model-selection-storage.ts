@@ -98,6 +98,11 @@ export const DEFAULT_MODELS: Record<string, ModelSpec> = {
     model: 'gemini-3.1-pro-preview',
     reasoning: 'auto',
   },
+  write_article: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'high',
+  },
 };
 
 /**

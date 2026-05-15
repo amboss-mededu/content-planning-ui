@@ -408,6 +408,59 @@ export interface ExtractedCodeRecord extends PbRecord {
   createdAt: number;
 }
 
+// --- Collection: articleWritingRuns + articleDrafts ------------------------
+
+export type ArticleWritingRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type WritingPassName =
+  | 'primary'
+  | 'secondary'
+  | 'proofreader'
+  | 'style'
+  | 'html'
+  | 'copy';
+
+export type ArticleDraftStatus = 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface ArticleWritingRunRecord extends PbRecord {
+  specialtySlug: string;
+  articleRecordId: string;
+  status: ArticleWritingRunStatus;
+  currentPass?: WritingPassName;
+  startedAt?: number;
+  finishedAt?: number;
+  errorMessage?: string;
+  requestedByEmail?: string;
+  language?: string;
+  articleLength?: string;
+  useTextBubbles?: boolean;
+  modelProvider?: string;
+  modelId?: string;
+  modelReasoning?: string;
+}
+
+export interface ArticleDraftRecord extends PbRecord {
+  runId: string;
+  specialtySlug: string;
+  articleRecordId: string;
+  pass: WritingPassName;
+  status: ArticleDraftStatus;
+  output?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  errorMessage?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  costUsd?: number;
+  modelId?: string;
+}
+
 // --- Collection: userApiKeys -----------------------------------------------
 
 export type ApiKeyTestStatus = 'ok' | 'failed';
