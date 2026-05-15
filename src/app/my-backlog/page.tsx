@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklogForAssignee } from '@/lib/data/article-backlog';
 import { computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleSourcesForArticleIds } from '@/lib/data/article-sources';
-import { listNewArticleSuggestionsForKeys } from '@/lib/data/articles';
+import { listConsolidatedArticlesForKeys } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
@@ -47,6 +47,7 @@ function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
         articleId: r.articleId,
         sectionName: r.sectionName,
         sectionId: r.sectionId,
+        category: r.category,
       }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
@@ -93,7 +94,7 @@ async function MyBacklogData() {
     .filter((k): k is string => !!k);
 
   const [
-    suggestions,
+    articleByKey,
     specialties,
     users,
     codesBySlug,
@@ -101,7 +102,7 @@ async function MyBacklogData() {
     sectionsBySlug,
     sectionReviewsBySlug,
   ] = await Promise.all([
-    listNewArticleSuggestionsForKeys(newRowKeys),
+    listConsolidatedArticlesForKeys(newRowKeys),
     listSpecialties(),
     listAssignableUsers(),
     Promise.all(
@@ -122,9 +123,11 @@ async function MyBacklogData() {
     ),
   ]);
 
-  // Now that we know the current PB id of each resolved suggestion,
-  // fetch its sources.
-  const currentNewIds = Object.values(suggestions)
+  // Now that we know the current PB id of each resolved article,
+  // fetch its attached sources. `articleSources` is still keyed by the
+  // literature-search target's PB id — for consolidatedArticles-backed
+  // rows the count may be empty until lit-search is re-keyed.
+  const currentNewIds = Object.values(articleByKey)
     .map((s) => s.id)
     .filter((id): id is string => !!id);
   const sourcesByArticle = await listArticleSourcesForArticleIds(currentNewIds);
@@ -157,21 +160,20 @@ async function MyBacklogData() {
   for (const b of backlogRows) {
     const type = b.type ?? 'new';
     if (type === 'new') {
-      // Resolve current suggestion through the stable key. Zombies
-      // (key doesn't resolve to any row) are silently skipped — they
-      // remain in the DB but never reach the UI.
-      const suggestion = suggestions[b.articleKey];
-      if (!suggestion?.id) continue;
-      const currentId = suggestion.id;
+      // Resolve current consolidatedArticles row through the stable
+      // articleKey. Zombies (key doesn't resolve) are silently skipped.
+      const article = articleByKey[b.articleKey];
+      if (!article?.id) continue;
+      const currentId = article.id;
       rows.push({
         id: currentId,
         articleKey: b.articleKey,
         type: 'new',
         specialtySlug: b.specialtySlug,
         specialtyName: specialtyNameBySlug[b.specialtySlug] ?? b.specialtySlug,
-        articleTitle: suggestion.articleTitle,
-        articleType: suggestion.articleType,
-        codes: extractCodes(suggestion.codes),
+        articleTitle: article.articleTitle,
+        articleType: article.articleType,
+        codes: extractCodes(article.codes),
         sourcesCount: sourcesByArticle[currentId]?.length ?? 0,
       });
       initialBacklog[b.articleKey] = b;

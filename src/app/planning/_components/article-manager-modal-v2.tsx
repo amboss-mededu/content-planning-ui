@@ -443,7 +443,7 @@ function ReviewManagerView({
               <Text size="s" weight="bold">
                 Previous article titles
               </Text>
-              {previousTitles.map((t) => {
+              {Array.from(new Set(previousTitles)).map((t) => {
                 const origin = titleOriginLookup[t];
                 const tagText =
                   origin?.kind === 'article'
@@ -1472,7 +1472,7 @@ function UpdateReviewView({
                   <Text size="s" weight="bold">
                     Previous names
                   </Text>
-                  {previousNames.map((t) => {
+                  {Array.from(new Set(previousNames)).map((t) => {
                     const origin = titleOriginLookup[t];
                     const formatted =
                       origin?.kind === 'section' || origin?.kind === 'both'

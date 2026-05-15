@@ -21,12 +21,14 @@ function withSectionKey(
   const articleId = typeof r.articleId === 'string' ? r.articleId : undefined;
   const sectionName = typeof r.sectionName === 'string' ? r.sectionName : undefined;
   const sectionId = typeof r.sectionId === 'string' ? r.sectionId : undefined;
+  const category = typeof r.category === 'string' ? r.category : undefined;
   const key = computeSectionKey({
     specialtySlug: slug,
     articleTitle,
     articleId,
     sectionName,
     sectionId,
+    category,
   });
   return key ? { ...r, sectionKey: key } : r;
 }

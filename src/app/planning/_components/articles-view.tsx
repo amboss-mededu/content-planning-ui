@@ -72,7 +72,14 @@ function PreviousTitlesCell({
   if (!titles || titles.length === 0) return <Text size="xs">—</Text>;
   return (
     <Stack space="xxs">
-      {titles.map((t) => {
+      {/*
+       * Dedupe titles before mapping — the LLM occasionally emits the
+       * same precursor suggestion twice under different categories,
+       * which would collide on the React key when we use the title.
+       * The duplicate row carries no extra signal for the editor, so
+       * dropping it is fine.
+       */}
+      {Array.from(new Set(titles)).map((t) => {
         const origin = titleOriginLookup[t];
         const tag =
           origin?.kind === 'section' || origin?.kind === 'both'

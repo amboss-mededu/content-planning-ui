@@ -60,8 +60,20 @@ export const EMPTY_KEY = '';
  * that's a hard error or a silent skip (most code skips).
  *
  * Precedence: `articleId` wins (it's the CMS-side stable id, the only
- * truly canonical identifier we have). Falls back to slug + title for
- * new articles where no CMS row exists yet.
+ * truly canonical identifier we have). Falls back to slug + category +
+ * title for new articles where no CMS row exists yet.
+ *
+ * Why `category` is part of the key: the consolidation pipeline emits
+ * the same disease title under different categories when the disease
+ * spans multiple board sub-specialties (e.g. "Neuroanesthesia" appears
+ * under Cardiac, Vascular, and Neuro categories in the anesthesiology
+ * fixture). Each is a distinct review target — collapsing them into one
+ * articleKey would make approvals indistinguishable.
+ *
+ * Category-less rows (some imported / legacy data) fall back to the
+ * pre-category formula so they don't all collapse into the single
+ * `new::slug::title` bucket either; instead they each get their own
+ * key from whatever title they carry.
  */
 export function computeArticleKey(args: {
   specialtySlug: string;
@@ -69,6 +81,9 @@ export function computeArticleKey(args: {
   /** CMS article id when this row is an update to an existing AMBOSS
    *  article. Empty / undefined for new-article suggestions. */
   articleId?: string | null;
+  /** Per-category bucket the article was consolidated under. Required
+   *  to distinguish same-title-different-category articles. */
+  category?: string | null;
 }): string {
   const articleId = args.articleId?.trim();
   if (articleId) return `upd::${articleId}`;
@@ -78,6 +93,10 @@ export function computeArticleKey(args: {
   const slug = args.specialtySlug.trim();
   if (!slug) return EMPTY_KEY;
 
+  const category = args.category?.trim();
+  if (category) {
+    return `new::${slug}::${normalizeForKey(category)}::${normalizeForKey(title)}`;
+  }
   return `new::${slug}::${normalizeForKey(title)}`;
 }
 
@@ -96,6 +115,7 @@ export function computeSectionKey(args: {
   articleId?: string | null;
   sectionName?: string | null;
   sectionId?: string | null;
+  category?: string | null;
 }): string {
   const articleId = args.articleId?.trim();
   const sectionId = args.sectionId?.trim();
@@ -106,5 +126,9 @@ export function computeSectionKey(args: {
   const slug = args.specialtySlug.trim();
   if (!articleTitle || !sectionName || !slug) return EMPTY_KEY;
 
+  const category = args.category?.trim();
+  if (category) {
+    return `sec::${slug}::${normalizeForKey(category)}::${normalizeForKey(articleTitle)}::${normalizeForKey(sectionName)}`;
+  }
   return `sec::${slug}::${normalizeForKey(articleTitle)}::${normalizeForKey(sectionName)}`;
 }

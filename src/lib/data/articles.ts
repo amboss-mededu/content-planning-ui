@@ -24,10 +24,12 @@ function withArticleKey(
 ): Record<string, unknown> {
   const articleTitle = typeof r.articleTitle === 'string' ? r.articleTitle : undefined;
   const articleId = typeof r.articleId === 'string' ? r.articleId : undefined;
+  const category = typeof r.category === 'string' ? r.category : undefined;
   const key = computeArticleKey({
     specialtySlug: slug,
     articleTitle,
     articleId,
+    category,
   });
   return key ? { ...r, articleKey: key } : r;
 }
@@ -74,6 +76,36 @@ export async function listConsolidatedArticles(
     .collection<ConsolidatedArticleRecord>('consolidatedArticles')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   return strip<ConsolidatedArticle>(rows);
+}
+
+/**
+ * Bulk fetch of consolidatedArticles by `articleKey`, regardless of
+ * specialty. Used by the global "My Backlog" view so each backlog row
+ * resolves to the current PB row via the stable key.
+ */
+export async function listConsolidatedArticlesForKeys(
+  keys: string[],
+): Promise<Record<string, ConsolidatedArticle>> {
+  const out: Record<string, ConsolidatedArticle> = {};
+  const unique = Array.from(new Set(keys.filter((s) => s.length > 0)));
+  if (unique.length === 0) return out;
+  await connection();
+  const pb = await userClient();
+  const CHUNK = 30;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const filter = chunk
+      .map((k) => `articleKey = "${k.replace(/"/g, '\\"')}"`)
+      .join(' || ');
+    const rows = await pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getFullList({ filter });
+    const stripped = strip<ConsolidatedArticle>(rows);
+    for (const r of stripped) {
+      if (r.articleKey) out[r.articleKey] = r;
+    }
+  }
+  return out;
 }
 
 export async function listNewArticleSuggestions(

@@ -4,14 +4,14 @@ import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticle } from '@/lib/data/article-sources';
-import { listNewArticleSuggestions } from '@/lib/data/articles';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import { listAssignableUsers } from '@/lib/data/users';
 import type { ArticleBacklogRecord, ArticleSourceRecord } from '@/lib/pb/types';
-import type { ConsolidatedSection, NewArticleSuggestion } from '@/lib/types';
+import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
 import { type BacklogRow, BacklogView } from '../../_components/backlog-view';
 import {
   type CategoryLookup,
@@ -34,22 +34,34 @@ export default async function BacklogPage({
   );
 }
 
-function projectNewSuggestion(
+/**
+ * Project a `consolidatedArticles` row into a backlog row. The backlog
+ * intentionally reads from `consolidatedArticles` (not `newArticleSuggestions`)
+ * so the review→backlog flow lives in one ID space — anything approved
+ * in /consolidation-review surfaces here without a cross-collection join.
+ */
+function projectNewArticle(
   slug: string,
-  r: NewArticleSuggestion,
+  r: ConsolidatedArticle,
   sourcesByArticle: Record<string, ArticleSourceRecord[]>,
 ): BacklogRow {
   return {
     id: r.id ?? '',
-    articleKey: computeArticleKey({
-      specialtySlug: slug,
-      articleTitle: r.articleTitle,
-      articleId: r.articleId,
-    }),
+    articleKey:
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        category: r.category,
+      }),
     type: 'new',
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     codes: extractCodes(r.codes),
+    // articleSources currently keys by the literature-search target's
+    // PB id — historically a `newArticleSuggestions` id. Sources won't
+    // appear until literature-search is re-keyed (tracked as follow-up).
     sourcesCount: r.id ? (sourcesByArticle[r.id]?.length ?? 0) : 0,
   };
 }
@@ -68,6 +80,7 @@ function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
         articleId: r.articleId,
         sectionName: r.sectionName,
         sectionId: r.sectionId,
+        category: r.category,
       }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
@@ -98,7 +111,7 @@ function unionCodes(codes: EmbeddedCode[]): EmbeddedCode[] {
 
 async function BacklogData({ slug }: { slug: string }) {
   const [
-    newRecs,
+    articleRecs,
     reviewRecs,
     sectionRecs,
     sectionReviewRecs,
@@ -109,7 +122,7 @@ async function BacklogData({ slug }: { slug: string }) {
     commentsByArticleKind,
     user,
   ] = await Promise.all([
-    listNewArticleSuggestions(slug),
+    listConsolidatedArticles(slug),
     listArticleReviews(slug),
     listConsolidatedSections(slug),
     listSectionReviews(slug),
@@ -124,21 +137,23 @@ async function BacklogData({ slug }: { slug: string }) {
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
-  // type='new' rows: approved 2nd-pass new article suggestions.
-  // Approval is joined by articleKey (stable across consolidation re-
-  // runs), not by PB id. Suggestions whose key can't be computed (no
-  // title) are filtered out — they couldn't be reviewed in the first
-  // place.
+  // type='new' rows: every consolidatedArticles row whose review is
+  // approved. Both the review-pass and the backlog read from the same
+  // collection — articleReviews.articleKey resolves directly against
+  // consolidatedArticles.articleKey, no cross-collection join needed.
   const newRows: BacklogRow[] = [];
-  for (const r of newRecs) {
-    const key = computeArticleKey({
-      specialtySlug: slug,
-      articleTitle: r.articleTitle,
-      articleId: r.articleId,
-    });
+  for (const r of articleRecs) {
+    const key =
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        category: r.category,
+      });
     if (!key) continue;
     if (reviewRecs[key]?.status !== 'approved') continue;
-    newRows.push(projectNewSuggestion(slug, r, sourcesByArticle));
+    newRows.push(projectNewArticle(slug, r, sourcesByArticle));
   }
 
   // type='update' rows: aggregate approved section reviews by parent

@@ -135,6 +135,7 @@ async function main(): Promise<void> {
               specialtySlug: slug,
               articleTitle: cleaned.articleTitle,
               articleId: cleaned.articleId,
+              category: cleaned.category,
             }),
           };
         }),
@@ -146,13 +147,24 @@ async function main(): Promise<void> {
         pb,
         'newArticleSuggestions',
         newArticles.map(({ index: _i, ...r }) => {
-          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          const cleaned = { ...stripUndef(r), specialtySlug: slug } as Record<
+            string,
+            unknown
+          >;
           return {
             ...cleaned,
             articleKey: computeArticleKey({
               specialtySlug: slug,
-              articleTitle: cleaned.articleTitle,
-              articleId: cleaned.articleId,
+              articleTitle:
+                typeof cleaned.articleTitle === 'string'
+                  ? cleaned.articleTitle
+                  : undefined,
+              articleId:
+                typeof cleaned.articleId === 'string' ? cleaned.articleId : undefined,
+              // newArticleSuggestions has no `category` column today; read
+              // through as `unknown` in case xlsx fixtures sneak one in.
+              category:
+                typeof cleaned.category === 'string' ? cleaned.category : undefined,
             }),
           };
         }),
@@ -164,13 +176,22 @@ async function main(): Promise<void> {
         pb,
         'articleUpdateSuggestions',
         updateArticles.map(({ index: _i, ...r }) => {
-          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          const cleaned = { ...stripUndef(r), specialtySlug: slug } as Record<
+            string,
+            unknown
+          >;
           return {
             ...cleaned,
             articleKey: computeArticleKey({
               specialtySlug: slug,
-              articleTitle: cleaned.articleTitle,
-              articleId: cleaned.articleId,
+              articleTitle:
+                typeof cleaned.articleTitle === 'string'
+                  ? cleaned.articleTitle
+                  : undefined,
+              articleId:
+                typeof cleaned.articleId === 'string' ? cleaned.articleId : undefined,
+              category:
+                typeof cleaned.category === 'string' ? cleaned.category : undefined,
             }),
           };
         }),
@@ -191,6 +212,7 @@ async function main(): Promise<void> {
               articleId: cleaned.articleId,
               sectionName: cleaned.sectionName,
               sectionId: cleaned.sectionId,
+              category: cleaned.category,
             }),
           };
         }),

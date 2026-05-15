@@ -48,6 +48,7 @@ function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
         specialtySlug: slug,
         articleTitle: r.articleTitle,
         articleId: r.articleId,
+        category: r.category,
       }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
@@ -75,6 +76,9 @@ function projectSuggestion(
         specialtySlug: slug,
         articleTitle: r.articleTitle,
         articleId: r.articleId,
+        // 2nd-pass suggestion rows don't carry `category` in the
+        // schema — the field is on consolidatedArticles only — so the
+        // fallback formula kicks in (slug + title).
       }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
