@@ -46,6 +46,11 @@ export type MyBacklogRow = {
   codes: EmbeddedCode[];
   /** Sources attached (type='new' only — 0 for updates). */
   sourcesCount: number;
+  /** Of those, how many uploaded to Gemini Files API. The my-backlog
+   *  view doesn't expose the upload button itself; the field exists
+   *  only to satisfy `BacklogRow` when the row is handed off to the
+   *  ArticleManagerModalV2 opener. */
+  uploadedSourcesCount: number;
   /** Approved section changes for type='update' rows. */
   sections?: SectionRow[];
 };

@@ -52,6 +52,14 @@ export type StageName =
   | 'consolidate_sections'
   | 'literature_search';
 
+/**
+ * Event-log scope is wider than `StageName` because some sub-pipelines
+ * (article writing) don't have a row in the specialty's `pipelineStages`
+ * table but still produce useful events. `EventStageName` is the
+ * superset that the event log + UI filters accept.
+ */
+export type EventStageName = StageName | 'write_article';
+
 export type StageStatus =
   | 'pending'
   | 'running'

@@ -10,7 +10,7 @@ import {
   listEventsAsAdmin,
   logPipelineEventAsAdmin,
 } from '@/lib/data/pipeline';
-import type { StageName } from './db-writes';
+import type { EventStageName, StageName } from './db-writes';
 
 export type EventLevel = 'info' | 'warn' | 'error';
 
@@ -42,11 +42,19 @@ export type EventMetrics = {
   invalidIds?: string[];
   mcpToolCalls?: number;
   mcpToolNames?: string[];
+  /** Which writing-pipeline pass produced this event (write_article only). */
+  pass?: 'primary' | 'secondary' | 'proofreader' | 'style' | 'html' | 'copy';
+  /** Total pass count for the write-article run header log. */
+  passes?: number;
+  /** Source count for the write-article run header log. */
+  sources?: number;
+  /** Number of Gemini Files PDFs attached to a writing-pass request. */
+  attachedFiles?: number;
 };
 
 export async function logEvent(input: {
   runId: string;
-  stage: StageName;
+  stage: EventStageName;
   level: EventLevel;
   message: string;
   metrics?: EventMetrics;
