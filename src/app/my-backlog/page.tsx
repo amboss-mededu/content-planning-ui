@@ -85,11 +85,12 @@ async function MyBacklogData() {
   const specialtySlugs = Array.from(new Set(backlogRows.map((r) => r.specialtySlug)));
 
   // type='new' rows resolve their current suggestion by `articleKey`
-  // (stable across consolidation re-runs). Once we have the
-  // suggestion, its `.id` is the current PB id we use to look up
-  // attached sources.
+  // (stable across consolidation re-runs). Treat empty-string `type`
+  // as 'new' too — PB's `select` field defaults to '' rather than
+  // null when the column was added after a row was created, so the
+  // `?? 'new'` fallback alone misses legacy rows.
   const newRowKeys = backlogRows
-    .filter((r) => (r.type ?? 'new') === 'new')
+    .filter((r) => !r.type || r.type === 'new')
     .map((r) => r.articleKey)
     .filter((k): k is string => !!k);
 
@@ -158,7 +159,7 @@ async function MyBacklogData() {
   const initialSourcesByArticle: Record<string, ArticleSourceRecord[]> = {};
 
   for (const b of backlogRows) {
-    const type = b.type ?? 'new';
+    const type = b.type || 'new';
     if (type === 'new') {
       // Resolve current newArticleSuggestions row through the stable
       // articleKey. Zombies (key doesn't resolve) are silently skipped.
