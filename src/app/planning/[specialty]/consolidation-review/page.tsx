@@ -160,28 +160,45 @@ async function ConsolidationReviewData({
     sectionRecs,
   );
 
+  const articles = articleRecs.map((r) => projectArticle(slug, r));
+  const sections = sectionRecs.map((r) => projectSection(slug, r));
+
+  // The data layer returns reviews keyed by articleKey / sectionKey
+  // (stable across consolidation re-runs). The downstream view + modal
+  // do their O(1) lookups by PB id so the inline table is responsive
+  // even when a row's logical key has just changed. Translate here:
+  // for each current row that has both an id and a key, copy the
+  // review's status/reviewer/notes into the id-keyed map. Reviews
+  // whose key doesn't match any current row (zombies — producer was
+  // deleted before the keys migration) are silently dropped.
   const initialArticleReviews: ReviewMap = {};
   const initialArticleReviewers: ReviewerMap = {};
   const initialNotesByArticle: Record<string, string> = {};
-  for (const [id, r] of Object.entries(articleReviewRecs)) {
-    initialArticleReviews[id] = r.status;
-    initialArticleReviewers[id] = {
+  for (const a of articles) {
+    if (!a.id || !a.articleKey) continue;
+    const r = articleReviewRecs[a.articleKey];
+    if (!r) continue;
+    initialArticleReviews[a.id] = r.status;
+    initialArticleReviewers[a.id] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
-    if (r.notes) initialNotesByArticle[id] = r.notes;
+    if (r.notes) initialNotesByArticle[a.id] = r.notes;
   }
 
   const initialSectionReviews: ReviewMap = {};
   const initialSectionReviewers: ReviewerMap = {};
   const initialNotesBySection: Record<string, string> = {};
-  for (const [id, r] of Object.entries(sectionReviewRecs)) {
-    initialSectionReviews[id] = r.status;
-    initialSectionReviewers[id] = {
+  for (const s of sections) {
+    if (!s.id || !s.sectionKey) continue;
+    const r = sectionReviewRecs[s.sectionKey];
+    if (!r) continue;
+    initialSectionReviews[s.id] = r.status;
+    initialSectionReviewers[s.id] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
-    if (r.notes) initialNotesBySection[id] = r.notes;
+    if (r.notes) initialNotesBySection[s.id] = r.notes;
   }
 
   // Article-level update threads live under recordKind='article' with a
@@ -198,9 +215,6 @@ async function ConsolidationReviewData({
   for (const [cat, r] of Object.entries(categoryReviewRecs)) {
     if (r.status === 'flagged-for-rerun') flaggedCategories.add(cat);
   }
-
-  const articles = articleRecs.map((r) => projectArticle(slug, r));
-  const sections = sectionRecs.map((r) => projectSection(slug, r));
 
   return (
     <ConsolidationReviewView

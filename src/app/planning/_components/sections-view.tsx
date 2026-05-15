@@ -223,13 +223,17 @@ function buildArticleGroups(
   sections: SectionRow[],
   reviews: ReviewMap,
 ): ArticleGroupRow[] {
+  // Group by `articleId || articleTitle` so two CMS articles that
+  // happen to share a display title stay as separate groups in the
+  // aggregate view. Keying by title alone collapsed them into one row
+  // and tripped React's duplicate-key check on the table.
   const byKey = new Map<string, ArticleGroupRow>();
   for (const s of sections) {
-    const key = s.articleTitle ?? '(no article)';
+    const key = s.articleId || s.articleTitle || '(no article)';
     let g = byKey.get(key);
     if (!g) {
       g = {
-        articleTitle: key,
+        articleTitle: s.articleTitle ?? '(no article)',
         articleId: s.articleId,
         sections: [],
         sectionCount: 0,
@@ -591,7 +595,7 @@ export function SectionsView({
         <DataTable
           rows={groupRows}
           columns={groupColumns}
-          getRowKey={(g) => g.articleTitle}
+          getRowKey={(g) => g.articleId || g.articleTitle}
           // Keep the toolbar's visibleRows aligned with the underlying
           // section set the Start review buttons walk — the aggregate
           // table's filters only affect the visible groups, but reviews

@@ -199,12 +199,10 @@ export function ConsolidationReviewView({
       let articleApproved = 0;
       let sectionApproved = 0;
       for (const a of bucket.articles) {
-        if (a.articleKey && articleReviews[a.articleKey] === 'approved')
-          articleApproved++;
+        if (a.id && articleReviews[a.id] === 'approved') articleApproved++;
       }
       for (const s of bucket.sections) {
-        if (s.sectionKey && sectionReviews[s.sectionKey] === 'approved')
-          sectionApproved++;
+        if (s.id && sectionReviews[s.id] === 'approved') sectionApproved++;
       }
       out[cat] = {
         articleApproved,
@@ -225,15 +223,19 @@ export function ConsolidationReviewView({
     (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
       if (pairs.length === 0) return;
       const now = Date.now();
+      // Optimistic mirror — the local maps are keyed by the row's PB
+      // id (`articleRecordId`), so the inline table can do an O(1)
+      // status lookup without crossing into the key space. The server
+      // action persists with the stable key alongside the id.
       setArticleReviews((prev) => {
         const next = { ...prev };
-        for (const p of pairs) next[p.articleKey] = 'approved';
+        for (const p of pairs) next[p.articleRecordId] = 'approved';
         return next;
       });
       setArticleReviewers((prev) => {
         const next = { ...prev };
         for (const p of pairs)
-          next[p.articleKey] = { reviewerEmail: viewerEmail, reviewedAt: now };
+          next[p.articleRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
@@ -249,13 +251,13 @@ export function ConsolidationReviewView({
       const now = Date.now();
       setSectionReviews((prev) => {
         const next = { ...prev };
-        for (const p of pairs) next[p.sectionKey] = 'approved';
+        for (const p of pairs) next[p.sectionRecordId] = 'approved';
         return next;
       });
       setSectionReviewers((prev) => {
         const next = { ...prev };
         for (const p of pairs)
-          next[p.sectionKey] = { reviewerEmail: viewerEmail, reviewedAt: now };
+          next[p.sectionRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
@@ -268,13 +270,13 @@ export function ConsolidationReviewView({
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
     const articlePairs = selectedBucket.articles
-      .filter((a) => a.articleKey && a.id && articleReviews[a.articleKey] !== 'approved')
+      .filter((a) => a.articleKey && a.id && articleReviews[a.id] !== 'approved')
       .map((a) => ({
         articleKey: a.articleKey as string,
         articleRecordId: a.id as string,
       }));
     const sectionPairs = selectedBucket.sections
-      .filter((s) => s.sectionKey && s.id && sectionReviews[s.sectionKey] !== 'approved')
+      .filter((s) => s.sectionKey && s.id && sectionReviews[s.id] !== 'approved')
       .map((s) => ({
         sectionKey: s.sectionKey as string,
         sectionRecordId: s.id as string,
@@ -676,12 +678,8 @@ function CategoryDetailPane({
   onRowClickSection: (id: string) => void;
 }) {
   const unapprovedCount =
-    bucket.articles.filter(
-      (a) => a.articleKey && articleReviews[a.articleKey] !== 'approved',
-    ).length +
-    bucket.sections.filter(
-      (s) => s.sectionKey && sectionReviews[s.sectionKey] !== 'approved',
-    ).length;
+    bucket.articles.filter((a) => a.id && articleReviews[a.id] !== 'approved').length +
+    bucket.sections.filter((s) => s.id && sectionReviews[s.id] !== 'approved').length;
 
   return (
     <Stack space="m">
@@ -724,8 +722,7 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const a of bucket.articles) {
-            if (a.id && a.articleKey && articleReviews[a.articleKey] !== 'approved')
-              next.add(a.id);
+            if (a.id && articleReviews[a.id] !== 'approved') next.add(a.id);
           }
           setSelectedArticleIds(next);
         }}
@@ -751,8 +748,7 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const s of bucket.sections) {
-            if (s.id && s.sectionKey && sectionReviews[s.sectionKey] !== 'approved')
-              next.add(s.id);
+            if (s.id && sectionReviews[s.id] !== 'approved') next.add(s.id);
           }
           setSelectedSectionIds(next);
         }}
@@ -824,9 +820,7 @@ function ArticleSubTable({
   onApproveSelected: () => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter(
-    (r) => r.articleKey && reviews[r.articleKey] !== 'approved',
-  );
+  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
@@ -872,8 +866,8 @@ function ArticleSubTable({
           <tbody>
             {rows.map((r) => {
               if (!r.id) return null;
-              const status = r.articleKey ? reviews[r.articleKey] : undefined;
               const rowId = r.id;
+              const status = reviews[rowId];
               const rowStyle: CSSProperties = {
                 ...rowTint(status),
                 cursor: 'pointer',
@@ -932,9 +926,7 @@ function SectionSubTable({
   onApproveSelected: () => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter(
-    (r) => r.sectionKey && reviews[r.sectionKey] !== 'approved',
-  );
+  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
@@ -983,7 +975,7 @@ function SectionSubTable({
             {rows.map((r) => {
               if (!r.id) return null;
               const rowId = r.id;
-              const status = r.sectionKey ? reviews[r.sectionKey] : undefined;
+              const status = reviews[rowId];
               const rowStyle: CSSProperties = {
                 ...rowTint(status),
                 cursor: 'pointer',
