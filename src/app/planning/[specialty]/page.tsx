@@ -22,16 +22,33 @@ async function OverviewData({ slug }: { slug: string }) {
   if (!specialty) return null;
 
   const counts = await getOverviewCounts(slug);
+  const base = `/planning/${slug}`;
 
   const statItems = [
-    { label: 'Codes', value: counts.codes, hint: `${counts.mappedCodes} mapped` },
-    { label: 'Categories', value: counts.categories },
     {
-      label: 'Consolidated articles',
-      value: counts.consolidatedArticles,
-      hint: `${counts.newArticles} new suggestions`,
+      label: 'Codes',
+      value: counts.codes,
+      hint: `${counts.mappedCodes} mapped`,
+      href: `${base}/mapping`,
     },
-    { label: 'Consolidated sections', value: counts.consolidatedSections },
+    {
+      label: 'Categories',
+      value: counts.sourceCategories,
+      hint: `${counts.consolidationCategories} consolidation categories`,
+      href: `${base}/categories`,
+    },
+    {
+      label: 'New articles',
+      value: counts.newArticles,
+      hint: `${counts.newArticlesApproved} approved`,
+      href: `${base}/articles`,
+    },
+    {
+      label: 'Article updates',
+      value: counts.articleUpdates,
+      hint: `${counts.sectionsApproved} sections approved across ${counts.articlesWithApprovedSections} articles`,
+      href: `${base}/sections`,
+    },
   ];
 
   return <OverviewView stats={statItems} />;
