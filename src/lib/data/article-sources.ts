@@ -171,6 +171,9 @@ export async function listArticleSourcesForArticleAsAdmin(
  * `uri` becomes the canonical pointer the writing pipeline attaches
  * as a FilePart on `generateText`; `geminiFilename` is the resource
  * name (e.g. `files/abc-xyz`) so we can later DELETE on cleanup.
+ *
+ * The URI is short-lived (~48h per Google). Treat it as a transient
+ * per-run cache — the writing workflow re-uploads if expired.
  */
 export async function markSourceUploadedAsAdmin(
   sourceId: string,
@@ -178,6 +181,19 @@ export async function markSourceUploadedAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   await pb.collection('articleSources').update(sourceId, patch);
+}
+
+/**
+ * Mark a single articleSources row as registered in Cortex CMS.
+ * The cortexSourceId is the canonical ID used in the final article
+ * HTML when citing the source.
+ */
+export async function markSourceCortexRegisteredAsAdmin(
+  sourceId: string,
+  cortexSourceId: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { cortexSourceId });
 }
 
 /**

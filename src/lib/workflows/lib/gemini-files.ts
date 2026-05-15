@@ -118,3 +118,111 @@ export async function deleteGeminiFile(apiKey: string, name: string): Promise<vo
     /* swallow — best-effort cleanup */
   }
 }
+
+// --- JIT per-article ensure-uploaded ---------------------------------------
+
+import {
+  listArticleSourcesForArticleAsAdmin,
+  markSourceUploadedAsAdmin,
+} from '@/lib/data/article-sources';
+
+export type EnsureUploadOutcome = {
+  sourceId: string;
+  title: string;
+  status: 'uploaded' | 'reused' | 'failed' | 'no-url';
+  uri?: string;
+  error?: string;
+};
+
+async function fetchPdfBytes(
+  url: string,
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) {
+    throw new Error(`source URL ${res.status} ${res.statusText}`);
+  }
+  const buf = await res.arrayBuffer();
+  const ct = res.headers.get('content-type')?.split(';')[0].trim() ?? '';
+  const mimeType = ct.startsWith('application/') ? ct : 'application/pdf';
+  return { bytes: new Uint8Array(buf), mimeType };
+}
+
+/**
+ * Internal helper called by the writing workflow at the start of each
+ * run. Walks the article's source rows, fetches each PDF from
+ * `source.url`, uploads to Gemini Files API, persists `{ uri,
+ * mimeType, geminiFilename }` back on the row.
+ *
+ * Reuses a previously-uploaded URI when it was stamped within the
+ * last `cacheMaxAgeMs` (default 24h; Files API URIs expire after 48h,
+ * so we re-upload conservatively).
+ *
+ * Throws only on missing API key. Per-source failures are recorded as
+ * outcomes — the writing workflow proceeds with whatever PDFs are
+ * available, and the LLM passes that don't need a PDF still run.
+ */
+export async function ensureGeminiUploadsForArticle(input: {
+  apiKey: string;
+  specialtySlug: string;
+  articleRecordId: string;
+  cacheMaxAgeMs?: number;
+}): Promise<{
+  outcomes: EnsureUploadOutcome[];
+  counts: { uploaded: number; reused: number; failed: number; noUrl: number };
+}> {
+  const maxAge = input.cacheMaxAgeMs ?? 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const sources = await listArticleSourcesForArticleAsAdmin(
+    input.specialtySlug,
+    input.articleRecordId,
+  );
+
+  const outcomes: EnsureUploadOutcome[] = [];
+  for (const s of sources) {
+    const cachedAt = s.updated ? Date.parse(s.updated) : 0;
+    if (s.uri && cachedAt > 0 && now - cachedAt < maxAge) {
+      outcomes.push({ sourceId: s.id, title: s.title, status: 'reused', uri: s.uri });
+      continue;
+    }
+    if (!s.url) {
+      outcomes.push({ sourceId: s.id, title: s.title, status: 'no-url' });
+      continue;
+    }
+    try {
+      const { bytes, mimeType } = await fetchPdfBytes(s.url);
+      const uploaded = await uploadPdfToGemini({
+        apiKey: input.apiKey,
+        bytes,
+        mimeType,
+        displayName: s.originalFilename || `${s.title}.pdf`,
+      });
+      await markSourceUploadedAsAdmin(s.id, {
+        uri: uploaded.uri,
+        mimeType: uploaded.mimeType,
+        geminiFilename: uploaded.name,
+      });
+      outcomes.push({
+        sourceId: s.id,
+        title: s.title,
+        status: 'uploaded',
+        uri: uploaded.uri,
+      });
+    } catch (e) {
+      outcomes.push({
+        sourceId: s.id,
+        title: s.title,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return {
+    outcomes,
+    counts: {
+      uploaded: outcomes.filter((o) => o.status === 'uploaded').length,
+      reused: outcomes.filter((o) => o.status === 'reused').length,
+      failed: outcomes.filter((o) => o.status === 'failed').length,
+      noUrl: outcomes.filter((o) => o.status === 'no-url').length,
+    },
+  };
+}

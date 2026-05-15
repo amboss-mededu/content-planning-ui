@@ -17,6 +17,7 @@
 
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
 import { computeArticleKey } from '@/lib/data/article-keys';
+import { listArticleSourcesForArticleAsAdmin } from '@/lib/data/article-sources';
 import {
   getWritingRunAsAdmin,
   updateWritingRunAsAdmin,
@@ -24,6 +25,7 @@ import {
 } from '@/lib/data/article-writing';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
 import { logEvent } from '../lib/events';
+import { ensureGeminiUploadsForArticle } from '../lib/gemini-files';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import { runWritingPass } from './passes';
@@ -81,6 +83,40 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
     },
   });
 
+  // JIT: ensure each source has a fresh Gemini Files API URI. We always
+  // attempt this — even when the caller passed `sources` already loaded
+  // from the loader — because the URI is short-lived (~48h) and the run
+  // may execute long after the editor approved sources. Re-reads sources
+  // afterwards so `primary` + `proofreader` see the latest URIs.
+  let liveSources: ArticleSourceRecord[] = input.sources;
+  if (input.apiKeys.google) {
+    try {
+      const { counts } = await ensureGeminiUploadsForArticle({
+        apiKey: input.apiKeys.google,
+        specialtySlug: input.specialtySlug,
+        articleRecordId: input.articleRecordId,
+      });
+      await logEvent({
+        runId: input.runId,
+        stage: 'write_article',
+        level: 'info',
+        message: `Gemini Files: ${counts.uploaded} uploaded · ${counts.reused} reused${counts.failed ? ` · ${counts.failed} failed` : ''}${counts.noUrl ? ` · ${counts.noUrl} no-url` : ''}`,
+        metrics: counts,
+      });
+      liveSources = await listArticleSourcesForArticleAsAdmin(
+        input.specialtySlug,
+        input.articleRecordId,
+      );
+    } catch (e) {
+      await logEvent({
+        runId: input.runId,
+        stage: 'write_article',
+        level: 'error',
+        message: `Gemini Files upload failed (continuing without): ${e instanceof Error ? e.message : String(e)}`,
+      }).catch(() => {});
+    }
+  }
+
   let previousOutput = '';
 
   try {
@@ -132,7 +168,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
           language: input.language,
           articleLength: input.articleLength,
           useTextBubbles: input.useTextBubbles,
-          sources: input.sources,
+          sources: liveSources,
           model: input.model,
           apiKeys: input.apiKeys,
           previousOutput,
