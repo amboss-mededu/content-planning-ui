@@ -172,8 +172,8 @@ async function MyBacklogData() {
         articleType: article.articleType,
         codes: extractCodes(article.codes),
         sourcesCount: sourcesByKey[b.articleKey]?.length ?? 0,
-        uploadedSourcesCount:
-          sourcesByKey[b.articleKey]?.filter((s) => s.uri).length ?? 0,
+        registeredSourcesCount:
+          sourcesByKey[b.articleKey]?.filter((s) => s.cortexSourceId).length ?? 0,
       });
       initialBacklog[b.articleKey] = b;
       initialSourcesByArticleKey[b.articleKey] = sourcesByKey[b.articleKey] ?? [];
@@ -202,7 +202,7 @@ async function MyBacklogData() {
         articleType: undefined,
         codes: unionCodes(approvedSections.flatMap((s) => s.codes)),
         sourcesCount: 0,
-        uploadedSourcesCount: 0,
+        registeredSourcesCount: 0,
         sections: approvedSections,
       });
       initialBacklog[b.articleKey] = b;

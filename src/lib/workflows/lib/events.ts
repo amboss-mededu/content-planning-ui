@@ -50,6 +50,12 @@ export type EventMetrics = {
   sources?: number;
   /** Number of Gemini Files PDFs attached to a writing-pass request. */
   attachedFiles?: number;
+  /** Gemini Files ensure-upload counters logged at the start of a
+   *  writing run (the JIT PDF upload pre-step). */
+  uploaded?: number;
+  reused?: number;
+  failed?: number;
+  noUrl?: number;
 };
 
 export async function logEvent(input: {

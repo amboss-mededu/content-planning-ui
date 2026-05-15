@@ -62,7 +62,7 @@ function projectNewArticle(
     articleType: r.articleType,
     codes: extractCodes(r.codes),
     sourcesCount: sources.length,
-    uploadedSourcesCount: sources.filter((s) => s.uri).length,
+    registeredSourcesCount: sources.filter((s) => s.cortexSourceId).length,
   };
 }
 
@@ -190,7 +190,7 @@ async function BacklogData({ slug }: { slug: string }) {
       articleType: undefined,
       codes,
       sourcesCount: 0,
-      uploadedSourcesCount: 0,
+      registeredSourcesCount: 0,
       sections: projected,
     });
   }

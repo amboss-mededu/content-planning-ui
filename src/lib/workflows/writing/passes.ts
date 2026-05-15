@@ -7,9 +7,10 @@
  * `write-article.ts` is responsible for sequencing + persistence.
  *
  * Source PDFs:
- *   Editors trigger an upload to Gemini Files API for an article's
- *   sources via `/api/workflows/upload-article-pdfs`. When a source row
- *   has a `uri` set, the primary + proofreader passes attach it as a
+ *   The writing orchestrator calls `ensureGeminiUploadsForArticle` at
+ *   the start of each run, JIT-uploading each source's PDF to Gemini
+ *   Files API and stamping the `uri` on the row. When a source row has
+ *   a `uri` set, the primary + proofreader passes attach it as a
  *   FilePart (the AI SDK serializes `data: new URL(uri)` to Gemini's
  *   `fileData` wire format). Sources without a URI still appear in the
  *   text-metadata block so the model knows what's referenced.

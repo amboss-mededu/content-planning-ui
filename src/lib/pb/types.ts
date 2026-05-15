@@ -238,6 +238,11 @@ export interface ArticleSourceRecord extends PbRecord {
   geminiFilename?: string;
   uri?: string;
   mimeType?: string;
+  /** ID returned by Cortex CMS after registering the source metadata
+   *  (title, URL, authors, etc.). Populated by the Stage 2 trigger;
+   *  empty until then. PDFs themselves are NOT uploaded to Cortex —
+   *  only the source metadata. */
+  cortexSourceId?: string;
 }
 
 // --- Collection: reviewComments --------------------------------------------
