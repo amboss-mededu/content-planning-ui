@@ -25,8 +25,12 @@ export interface OverviewCounts {
   /** Of those, how many have an `approved` articleReviews row keyed by
    *  the suggestion's articleKey. */
   newArticlesApproved: number;
-  /** 2nd-pass deduped article-update output. */
-  articleUpdates: number;
+  /** Distinct parent CMS articleIds across all proposed section
+   *  changes (`consolidatedSections`). Drives the "Article updates" card
+   *  big number — `articleUpdateSuggestions` is the 2nd-pass deduped
+   *  output and is empty for specialties whose secondary stage hasn't
+   *  produced output yet, so we count the 1st-pass source instead. */
+  articlesWithUpdates: number;
   /** Approved `sectionReviews` rows for the specialty. */
   sectionsApproved: number;
   /** Distinct parent CMS articleIds among approved sections. */
@@ -54,7 +58,7 @@ export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}"`;
 
-  const [codes, newSuggestions, articleReviews, sections, sectionReviews, updates] =
+  const [codes, newSuggestions, articleReviews, sections, sectionReviews] =
     await Promise.all([
       pb.collection<CodeRecord>('codes').getFullList({ filter }),
       pb
@@ -65,9 +69,6 @@ export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
         .collection<ConsolidatedSectionRecord>('consolidatedSections')
         .getFullList({ filter }),
       pb.collection<SectionReviewRecord>('sectionReviews').getFullList({ filter }),
-      pb
-        .collection('articleUpdateSuggestions')
-        .getList(1, 1, { filter, skipTotal: false }),
     ]);
 
   let mappedCodes = 0;
@@ -91,19 +92,21 @@ export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
     if (s.articleKey && approvedArticleKeys.has(s.articleKey)) newArticlesApproved++;
   }
 
-  // Approved section reviews keyed by sectionKey; resolve each to its
-  // parent CMS articleId via consolidatedSections so we can count
-  // distinct parent articles.
+  // Walk consolidatedSections once to compute both the universe of
+  // articles that have a proposed update and the approved subset.
   const approvedSectionKeys = new Set<string>();
   for (const r of sectionReviews) {
     if (r.status === 'approved' && r.sectionKey) approvedSectionKeys.add(r.sectionKey);
   }
+  const articlesWithUpdates = new Set<string>();
   const articlesWithApprovedSections = new Set<string>();
   let sectionsApproved = 0;
   for (const s of sections) {
-    if (!s.sectionKey || !approvedSectionKeys.has(s.sectionKey)) continue;
-    sectionsApproved++;
-    if (s.articleId) articlesWithApprovedSections.add(s.articleId);
+    if (s.articleId) articlesWithUpdates.add(s.articleId);
+    if (s.sectionKey && approvedSectionKeys.has(s.sectionKey)) {
+      sectionsApproved++;
+      if (s.articleId) articlesWithApprovedSections.add(s.articleId);
+    }
   }
 
   return {
@@ -113,7 +116,7 @@ export async function getOverviewCounts(slug: string): Promise<OverviewCounts> {
     consolidationCategories: consolidationCats.size,
     newArticles: newSuggestions.length,
     newArticlesApproved,
-    articleUpdates: updates.totalItems,
+    articlesWithUpdates: articlesWithUpdates.size,
     sectionsApproved,
     articlesWithApprovedSections: articlesWithApprovedSections.size,
   };
