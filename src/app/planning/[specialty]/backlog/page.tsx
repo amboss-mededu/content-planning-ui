@@ -4,6 +4,7 @@ import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
+import { listLatestWritingRunsForArticles } from '@/lib/data/article-writing';
 import { listNewArticleSuggestions } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
@@ -118,6 +119,7 @@ async function BacklogData({ slug }: { slug: string }) {
     users,
     commentsByArticleKind,
     user,
+    writingRunsByArticle,
   ] = await Promise.all([
     listNewArticleSuggestions(slug),
     listArticleReviews(slug),
@@ -129,6 +131,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listAssignableUsers(),
     listReviewComments(slug, 'article'),
     getCurrentUser(),
+    listLatestWritingRunsForArticles(slug),
   ]);
 
   const categoryLookup: CategoryLookup = {};
@@ -209,6 +212,7 @@ async function BacklogData({ slug }: { slug: string }) {
       initialBacklog={initialBacklog}
       initialSourcesByArticleKey={sourcesByKey}
       initialCommentsByArticle={initialCommentsByArticle}
+      initialWritingRuns={writingRunsByArticle}
       viewerEmail={user?.email ?? undefined}
     />
   );

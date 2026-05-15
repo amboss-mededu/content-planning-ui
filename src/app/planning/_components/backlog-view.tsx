@@ -12,6 +12,7 @@ import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
   ArticleSourceRecord,
+  ArticleWritingRunRecord,
   ReviewCommentRecord,
 } from '@/lib/pb/types';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
@@ -28,6 +29,7 @@ import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
 import type { SectionRow } from './sections-view';
+import { StartWritingButton } from './start-writing-button';
 
 export type BacklogRow = {
   /** For type='new': PB id of the underlying newArticleSuggestions row.
@@ -92,6 +94,7 @@ export function BacklogView({
   initialBacklog,
   initialSourcesByArticleKey,
   initialCommentsByArticle,
+  initialWritingRuns,
   viewerEmail,
 }: {
   slug: string;
@@ -101,6 +104,7 @@ export function BacklogView({
   initialBacklog: Record<string, ArticleBacklogRecord>;
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
+  initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
   viewerEmail?: string;
 }) {
   const params = useSearchParams();
@@ -441,6 +445,28 @@ export function BacklogView({
           >
             View
           </Button>
+        ),
+    },
+    {
+      key: 'draft',
+      label: 'Draft',
+      description:
+        'Kick off the 6-pass LLM article draft. New articles only — updates use a different editorial path.',
+      width: 220,
+      verticalAlign: 'middle',
+      align: 'left',
+      render: (r) =>
+        r.type === 'update' ? (
+          <Text size="xs" color="secondary">
+            —
+          </Text>
+        ) : (
+          <StartWritingButton
+            slug={slug}
+            articleRecordId={r.id}
+            hasSources={r.sourcesCount > 0}
+            initialRun={initialWritingRuns?.[r.id] ?? null}
+          />
         ),
     },
   ];
