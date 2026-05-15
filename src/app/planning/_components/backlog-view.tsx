@@ -31,8 +31,15 @@ import type { SectionRow } from './sections-view';
 
 export type BacklogRow = {
   /** For type='new': PB id of the underlying newArticleSuggestions row.
-   *  For type='update': the parent article's CMS articleId. */
+   *  For type='update': the parent article's CMS articleId. Use this
+   *  for click-target routing only — cross-collection joins go through
+   *  `articleKey`. */
   id: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Computed by the loader page from
+   *  the row's current title (or CMS articleId for updates); never
+   *  synthesized client-side. */
+  articleKey: string;
   /** Discriminator. type='update' rows are built by aggregating approved
    *  section reviews; type='new' rows mirror approved newArticleSuggestions. */
   type: 'new' | 'update';
@@ -117,25 +124,29 @@ export function BacklogView({
     window.history.replaceState(null, '', next);
   }, [statusFilter, assigneeFilter]);
 
+  // State + actions are keyed by articleKey (stable across re-runs).
+  // `articleRecordId` is still threaded through for the PB row's
+  // breadcrumb column, but it is never used as a lookup key.
+
   const statusOf = useCallback(
-    (id: string): ArticleBacklogStatus => backlog[id]?.status ?? 'waiting-for-sources',
+    (key: string): ArticleBacklogStatus => backlog[key]?.status ?? 'waiting-for-sources',
     [backlog],
   );
   const assigneeOf = useCallback(
-    (id: string): string => backlog[id]?.assigneeEmail ?? '',
+    (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
 
   const filtered = useMemo(() => {
     let out = rows;
     if (statusFilter) {
-      out = out.filter((r) => statusOf(r.id) === statusFilter);
+      out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
     }
     if (assigneeFilter) {
       if (assigneeFilter === '__unassigned__') {
-        out = out.filter((r) => !assigneeOf(r.id));
+        out = out.filter((r) => !assigneeOf(r.articleKey));
       } else {
-        out = out.filter((r) => assigneeOf(r.id) === assigneeFilter);
+        out = out.filter((r) => assigneeOf(r.articleKey) === assigneeFilter);
       }
     }
     return out;
@@ -146,7 +157,7 @@ export function BacklogView({
     let inProgress = 0;
     let waiting = 0;
     for (const r of rows) {
-      const s = statusOf(r.id);
+      const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
@@ -154,78 +165,82 @@ export function BacklogView({
     return { published, inProgress, waiting };
   }, [rows, statusOf]);
 
-  // Picking a status in the inline cell. Selecting 'unassigned' is the
-  // reset path — delete the PB row entirely so the article returns to
-  // its default state. Any other value is an upsert.
   async function handleStatusChange(
-    rowId: string,
+    articleKey: string,
+    articleRecordId: string,
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
-    const prev = backlog[rowId];
+    const prev = backlog[articleKey];
     if (next === 'unassigned') {
       setBacklog((curr) => {
         const copy = { ...curr };
-        delete copy[rowId];
+        delete copy[articleKey];
         return copy;
       });
       try {
-        await clearBacklogRow(slug, rowId);
+        await clearBacklogRow(slug, articleKey);
       } catch (e) {
-        setBacklog((curr) => (prev ? { ...curr, [rowId]: prev } : curr));
+        setBacklog((curr) => (prev ? { ...curr, [articleKey]: prev } : curr));
         console.error('clearBacklogRow failed', e);
       }
       return;
     }
     setBacklog((curr) => ({
       ...curr,
-      [rowId]: {
-        ...(curr[rowId] ?? ({} as ArticleBacklogRecord)),
-        articleRecordId: rowId,
+      [articleKey]: {
+        ...(curr[articleKey] ?? ({} as ArticleBacklogRecord)),
+        articleKey,
+        articleRecordId,
         specialtySlug: slug,
         status: next,
-        assigneeEmail: curr[rowId]?.assigneeEmail ?? '',
+        assigneeEmail: curr[articleKey]?.assigneeEmail ?? '',
         lastChangedByEmail: viewerEmail ?? '',
         lastChangedAt: Date.now(),
         ...(notes !== undefined ? { notes } : {}),
       } as ArticleBacklogRecord,
     }));
     try {
-      await setBacklogStatus(slug, rowId, next, notes);
+      await setBacklogStatus(slug, articleKey, articleRecordId, next, notes);
     } catch (e) {
       setBacklog((curr) => {
         const copy = { ...curr };
-        if (prev) copy[rowId] = prev;
-        else delete copy[rowId];
+        if (prev) copy[articleKey] = prev;
+        else delete copy[articleKey];
         return copy;
       });
       console.error('setBacklogStatus failed', e);
     }
   }
 
-  async function handleAssigneeChange(rowId: string, nextEmail: string): Promise<void> {
-    const prev = backlog[rowId];
+  async function handleAssigneeChange(
+    articleKey: string,
+    articleRecordId: string,
+    nextEmail: string,
+  ): Promise<void> {
+    const prev = backlog[articleKey];
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
 
     setBacklog((curr) => ({
       ...curr,
-      [rowId]: {
-        ...(curr[rowId] ?? ({} as ArticleBacklogRecord)),
-        articleRecordId: rowId,
+      [articleKey]: {
+        ...(curr[articleKey] ?? ({} as ArticleBacklogRecord)),
+        articleKey,
+        articleRecordId,
         specialtySlug: slug,
-        status: curr[rowId]?.status ?? 'waiting-for-sources',
+        status: curr[articleKey]?.status ?? 'waiting-for-sources',
         assigneeEmail: emailOrNull ?? '',
         lastChangedByEmail: viewerEmail ?? '',
         lastChangedAt: Date.now(),
       } as ArticleBacklogRecord,
     }));
     try {
-      await setBacklogAssignee(slug, rowId, emailOrNull);
+      await setBacklogAssignee(slug, articleKey, articleRecordId, emailOrNull);
     } catch (e) {
       setBacklog((curr) => {
         const copy = { ...curr };
-        if (prev) copy[rowId] = prev;
-        else delete copy[rowId];
+        if (prev) copy[articleKey] = prev;
+        else delete copy[articleKey];
         return copy;
       });
       console.error('setBacklogAssignee failed', e);
@@ -301,13 +316,13 @@ export function BacklogView({
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => STATUS_LABEL[statusOf(r.id)],
+      accessor: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
-      filterValue: (r) => STATUS_LABEL[statusOf(r.id)],
+      filterValue: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
-        const s = statusOf(r.id);
+        const s = statusOf(r.articleKey);
         return (
           <span
             style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
@@ -320,7 +335,11 @@ export function BacklogView({
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
-                handleStatusChange(r.id, e.target.value as ArticleBacklogStatus);
+                handleStatusChange(
+                  r.articleKey,
+                  r.id,
+                  e.target.value as ArticleBacklogStatus,
+                );
               }}
             >
               {STATUS_OPTIONS.map((o) => (
@@ -341,14 +360,14 @@ export function BacklogView({
       width: 180,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => NEXT_ACTION[statusOf(r.id)],
+      accessor: (r) => NEXT_ACTION[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: Array.from(
         new Set(Object.values(NEXT_ACTION).filter((v) => v !== '—')),
       ).map((v) => ({ value: v, label: v })),
-      filterValue: (r) => NEXT_ACTION[statusOf(r.id)],
-      render: (r) => <Text>{NEXT_ACTION[statusOf(r.id)]}</Text>,
+      filterValue: (r) => NEXT_ACTION[statusOf(r.articleKey)],
+      render: (r) => <Text>{NEXT_ACTION[statusOf(r.articleKey)]}</Text>,
     },
     {
       key: 'assignee',
@@ -357,7 +376,7 @@ export function BacklogView({
       width: 200,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => assigneeOf(r.id) || null,
+      accessor: (r) => assigneeOf(r.articleKey) || null,
       type: 'string',
       filterable: true,
       filterOptions: [
@@ -367,13 +386,13 @@ export function BacklogView({
           label: u.name ?? u.email,
         })),
       ],
-      filterValue: (r) => assigneeOf(r.id) || '__unassigned__',
+      filterValue: (r) => assigneeOf(r.articleKey) || '__unassigned__',
       render: (r) => (
         <select
           aria-label="Assignee"
           style={inlineSelectStyle}
-          value={assigneeOf(r.id)}
-          onChange={(e) => handleAssigneeChange(r.id, e.target.value)}
+          value={assigneeOf(r.articleKey)}
+          onChange={(e) => handleAssigneeChange(r.articleKey, r.id, e.target.value)}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -489,14 +508,14 @@ export function BacklogView({
             stage: 'backlog',
             slug,
             article: managerRow,
-            currentStatus: statusOf(managerArticleId),
+            currentStatus: statusOf(managerRow.articleKey),
             sources: initialSourcesByArticle[managerArticleId] ?? [],
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) =>
-              handleStatusChange(managerArticleId, next, notes),
+              handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
           }}
           onClose={() => setManagerArticleId(null)}
         />
@@ -509,13 +528,13 @@ export function BacklogView({
             slug,
             article: managerRow,
             sections: managerRow.sections ?? [],
-            currentStatus: statusOf(managerArticleId),
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            currentStatus: statusOf(managerRow.articleKey),
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) =>
-              handleStatusChange(managerArticleId, next, notes),
+              handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
           }}
           onClose={() => setManagerArticleId(null)}
         />

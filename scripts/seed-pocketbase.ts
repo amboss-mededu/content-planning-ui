@@ -16,6 +16,7 @@
  * `npm run import-board` against board_specialty_mapping_competencies.xlsx.
  */
 
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { bulkCreate, clearCollection, pbAdminClient } from './_lib/pb';
 import { buildXlsxRegistry, createXlsxRepos } from './_lib/xlsx';
 
@@ -126,10 +127,17 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'consolidatedArticles',
-        consolidatedArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        consolidatedArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${consolidatedArticles.length} consolidatedArticles`);
     }
@@ -137,10 +145,17 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'newArticleSuggestions',
-        newArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        newArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${newArticles.length} newArticleSuggestions`);
     }
@@ -148,10 +163,17 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'articleUpdateSuggestions',
-        updateArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        updateArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${updateArticles.length} articleUpdateSuggestions`);
     }
@@ -159,10 +181,19 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'consolidatedSections',
-        sections.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        sections.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            sectionKey: computeSectionKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+              sectionName: cleaned.sectionName,
+              sectionId: cleaned.sectionId,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${sections.length} consolidatedSections`);
     }

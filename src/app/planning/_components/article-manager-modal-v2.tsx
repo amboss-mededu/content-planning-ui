@@ -276,6 +276,11 @@ function ReviewManagerView({
   async function decide(status: ReviewStatus) {
     if (!current) return;
     const rowId = current.id;
+    const articleKey = current.articleKey ?? '';
+    if (!articleKey) {
+      console.error('decide: row has no articleKey — cannot persist review');
+      return;
+    }
     const notesValue = notesById[rowId] ?? '';
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
@@ -288,7 +293,7 @@ function ReviewManagerView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await submitArticleReview(slug, rowId, status, notesValue);
+      await submitArticleReview(slug, articleKey, rowId, status, notesValue);
     } catch (err) {
       console.error('submitArticleReview failed', err);
       const revertedReviews = { ...reviews };
@@ -308,6 +313,8 @@ function ReviewManagerView({
   async function clearDecision() {
     if (!current) return;
     const rowId = current.id;
+    const articleKey = current.articleKey ?? '';
+    if (!articleKey) return;
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
@@ -318,7 +325,7 @@ function ReviewManagerView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await resetArticleReview(slug, rowId);
+      await resetArticleReview(slug, articleKey);
     } catch (err) {
       console.error('resetArticleReview failed', err);
     } finally {
@@ -482,8 +489,9 @@ function ReviewManagerView({
             key={current.id}
             slug={slug}
             recordKind="article"
+            recordKey={current.articleKey ?? ''}
             recordId={current.id}
-            initialComments={initialCommentsByArticle[current.id] ?? []}
+            initialComments={initialCommentsByArticle[current.articleKey ?? ''] ?? []}
             viewerEmail={viewerEmail}
           />
         </div>
@@ -673,6 +681,7 @@ function BacklogManagerView({
           <CommentsSection
             slug={slug}
             recordKind="article"
+            recordKey={article.articleKey}
             recordId={article.id}
             initialComments={initialComments}
             viewerEmail={viewerEmail}
@@ -1237,7 +1246,17 @@ function UpdateReviewView({
     }
   }
 
+  function sectionKeyOf(rowId: string): string {
+    const row = sorted.find((r) => r.id === rowId);
+    return row?.sectionKey ?? '';
+  }
+
   async function setRowStatus(rowId: string, status: ReviewStatus, notes?: string) {
+    const sectionKey = sectionKeyOf(rowId);
+    if (!sectionKey) {
+      console.error('setRowStatus: row has no sectionKey — cannot persist review');
+      return;
+    }
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
     const nextReviewers: ReviewerMap = {
@@ -1249,7 +1268,7 @@ function UpdateReviewView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await submitSectionReview(slug, rowId, status, notes);
+      await submitSectionReview(slug, sectionKey, rowId, status, notes);
     } catch (err) {
       console.error('submitSectionReview failed', err);
       const revertedReviews = { ...reviews };
@@ -1266,6 +1285,8 @@ function UpdateReviewView({
   }
 
   async function clearRowStatus(rowId: string) {
+    const sectionKey = sectionKeyOf(rowId);
+    if (!sectionKey) return;
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
@@ -1276,7 +1297,7 @@ function UpdateReviewView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await resetSectionReview(slug, rowId);
+      await resetSectionReview(slug, sectionKey, rowId);
     } catch (err) {
       console.error('resetSectionReview failed', err);
     } finally {
@@ -1489,8 +1510,9 @@ function UpdateReviewView({
                 key={current.id}
                 slug={slug}
                 recordKind="section"
+                recordKey={current.sectionKey ?? ''}
                 recordId={current.id}
-                initialComments={initialCommentsBySection[current.id] ?? []}
+                initialComments={initialCommentsBySection[current.sectionKey ?? ''] ?? []}
                 viewerEmail={viewerEmail}
               />
             </>
@@ -1803,7 +1825,8 @@ function UpdateArticleViewBody({
         key={articleKey}
         slug={slug}
         recordKind="article"
-        recordId={`pa:${articleKey}`}
+        recordKey={`upd::${articleKey}`}
+        recordId={articleKey}
         initialComments={initialComments}
         viewerEmail={viewerEmail}
       />
@@ -1944,7 +1967,8 @@ function BacklogUpdateView({
           <CommentsSection
             slug={slug}
             recordKind="article"
-            recordId={`pa:${article.id}`}
+            recordKey={article.articleKey}
+            recordId={article.id}
             initialComments={initialComments}
             viewerEmail={viewerEmail}
           />

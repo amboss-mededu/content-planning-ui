@@ -1,8 +1,9 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklogForAssignee } from '@/lib/data/article-backlog';
+import { computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleSourcesForArticleIds } from '@/lib/data/article-sources';
-import { listNewArticleSuggestionsForIds } from '@/lib/data/articles';
+import { listNewArticleSuggestionsForKeys } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
@@ -32,15 +33,25 @@ export default function MyBacklogPage() {
   );
 }
 
-function projectSection(r: ConsolidatedSection): SectionRow {
+function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
   const codes = extractCodes(r.codes);
   const updateType: 'new' | 'update' | null =
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
     id: r.id,
+    sectionKey:
+      r.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        sectionName: r.sectionName,
+        sectionId: r.sectionId,
+      }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
     sectionName: r.sectionName,
+    sectionId: r.sectionId,
     updateType,
     category: r.category,
     codes,
@@ -72,16 +83,17 @@ async function MyBacklogData() {
   const backlogRows = await listArticleBacklogForAssignee(user.email);
   const specialtySlugs = Array.from(new Set(backlogRows.map((r) => r.specialtySlug)));
 
-  // type='new' rows mirror approved newArticleSuggestions; look those up
-  // by PB id. Update rows need per-specialty section data and are batched
-  // by slug to keep the query count bounded.
-  const newRowArticleIds = backlogRows
+  // type='new' rows resolve their current suggestion by `articleKey`
+  // (stable across consolidation re-runs). Once we have the
+  // suggestion, its `.id` is the current PB id we use to look up
+  // attached sources.
+  const newRowKeys = backlogRows
     .filter((r) => (r.type ?? 'new') === 'new')
-    .map((r) => r.articleRecordId);
+    .map((r) => r.articleKey)
+    .filter((k): k is string => !!k);
 
   const [
     suggestions,
-    sourcesByArticle,
     specialties,
     users,
     codesBySlug,
@@ -89,8 +101,7 @@ async function MyBacklogData() {
     sectionsBySlug,
     sectionReviewsBySlug,
   ] = await Promise.all([
-    listNewArticleSuggestionsForIds(newRowArticleIds),
-    listArticleSourcesForArticleIds(newRowArticleIds),
+    listNewArticleSuggestionsForKeys(newRowKeys),
     listSpecialties(),
     listAssignableUsers(),
     Promise.all(
@@ -111,17 +122,20 @@ async function MyBacklogData() {
     ),
   ]);
 
-  // `pa:`-prefixed comments belong to type='update' rows; rest belong to
-  // type='new'. PB record ids are globally unique, so flattening into one
-  // map is safe.
+  // Now that we know the current PB id of each resolved suggestion,
+  // fetch its sources.
+  const currentNewIds = Object.values(suggestions)
+    .map((s) => s.id)
+    .filter((id): id is string => !!id);
+  const sourcesByArticle = await listArticleSourcesForArticleIds(currentNewIds);
+
+  // `listReviewComments` now returns comments grouped by `recordKey`
+  // (the stable id). Merge across specialties into one flat map for
+  // O(1) lookup in the view.
   const initialCommentsByArticle: Record<string, ReviewCommentRecord[]> = {};
   for (const [, byArticle] of commentsBySlug) {
-    for (const [recordId, list] of Object.entries(byArticle)) {
-      if (recordId.startsWith('pa:')) {
-        initialCommentsByArticle[recordId.slice(3)] = list;
-      } else {
-        initialCommentsByArticle[recordId] = list;
-      }
+    for (const [recordKey, list] of Object.entries(byArticle)) {
+      initialCommentsByArticle[recordKey] = list;
     }
   }
 
@@ -143,36 +157,43 @@ async function MyBacklogData() {
   for (const b of backlogRows) {
     const type = b.type ?? 'new';
     if (type === 'new') {
-      const suggestion = suggestions[b.articleRecordId];
-      if (!suggestion) continue;
+      // Resolve current suggestion through the stable key. Zombies
+      // (key doesn't resolve to any row) are silently skipped — they
+      // remain in the DB but never reach the UI.
+      const suggestion = suggestions[b.articleKey];
+      if (!suggestion?.id) continue;
+      const currentId = suggestion.id;
       rows.push({
-        id: b.articleRecordId,
+        id: currentId,
+        articleKey: b.articleKey,
         type: 'new',
         specialtySlug: b.specialtySlug,
         specialtyName: specialtyNameBySlug[b.specialtySlug] ?? b.specialtySlug,
         articleTitle: suggestion.articleTitle,
         articleType: suggestion.articleType,
         codes: extractCodes(suggestion.codes),
-        sourcesCount: sourcesByArticle[b.articleRecordId]?.length ?? 0,
+        sourcesCount: sourcesByArticle[currentId]?.length ?? 0,
       });
-      initialBacklog[b.articleRecordId] = b;
-      initialSourcesByArticle[b.articleRecordId] =
-        sourcesByArticle[b.articleRecordId] ?? [];
+      initialBacklog[b.articleKey] = b;
+      initialSourcesByArticle[currentId] = sourcesByArticle[currentId] ?? [];
     } else {
-      // type='update': aggregate approved sections for the parent article.
+      // type='update': the backlog row's articleKey is `upd::<cms-articleId>`.
+      // Resolve to approved sections under the same parent CMS articleId.
+      const parentArticleId = b.articleRecordId;
       const sectionRecs = sectionsBySpecialty.get(b.specialtySlug) ?? [];
       const sectionReviews = sectionReviewsBySpecialty.get(b.specialtySlug) ?? {};
       const approvedSections = sectionRecs
         .filter(
           (s) =>
-            s.articleId === b.articleRecordId &&
-            s.id &&
-            sectionReviews[s.id]?.status === 'approved',
+            s.articleId === parentArticleId &&
+            s.sectionKey &&
+            sectionReviews[s.sectionKey]?.status === 'approved',
         )
-        .map(projectSection);
+        .map((s) => projectSection(b.specialtySlug, s));
       if (approvedSections.length === 0) continue;
       rows.push({
-        id: b.articleRecordId,
+        id: parentArticleId,
+        articleKey: b.articleKey,
         type: 'update',
         specialtySlug: b.specialtySlug,
         specialtyName: specialtyNameBySlug[b.specialtySlug] ?? b.specialtySlug,
@@ -182,7 +203,7 @@ async function MyBacklogData() {
         sourcesCount: 0,
         sections: approvedSections,
       });
-      initialBacklog[b.articleRecordId] = b;
+      initialBacklog[b.articleKey] = b;
     }
   }
 

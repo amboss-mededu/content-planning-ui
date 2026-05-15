@@ -199,10 +199,12 @@ export function ConsolidationReviewView({
       let articleApproved = 0;
       let sectionApproved = 0;
       for (const a of bucket.articles) {
-        if (a.id && articleReviews[a.id] === 'approved') articleApproved++;
+        if (a.articleKey && articleReviews[a.articleKey] === 'approved')
+          articleApproved++;
       }
       for (const s of bucket.sections) {
-        if (s.id && sectionReviews[s.id] === 'approved') sectionApproved++;
+        if (s.sectionKey && sectionReviews[s.sectionKey] === 'approved')
+          sectionApproved++;
       }
       out[cat] = {
         articleApproved,
@@ -214,46 +216,50 @@ export function ConsolidationReviewView({
   }, [grouped, articleReviews, sectionReviews]);
 
   // ----- Bulk approvals -----
+  // Optimistic state is keyed by articleKey/sectionKey (the stable id);
+  // the server action takes the pair (key, current PB id) so the
+  // legacy `articleRecordId` column on the PB row keeps tracking the
+  // freshest underlying row.
+
   const approveArticles = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
+    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
+      if (pairs.length === 0) return;
       const now = Date.now();
-      // Optimistic mirror — the server action also persists via the
-      // updateTag round-trip but we don't want to wait on it to keep
-      // the rail counts responsive.
       setArticleReviews((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = 'approved';
+        for (const p of pairs) next[p.articleKey] = 'approved';
         return next;
       });
       setArticleReviewers((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        for (const p of pairs)
+          next[p.articleKey] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
-        await bulkApproveArticleReviews(slug, ids);
+        await bulkApproveArticleReviews(slug, pairs);
       });
     },
     [slug, viewerEmail],
   );
 
   const approveSections = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
+    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
+      if (pairs.length === 0) return;
       const now = Date.now();
       setSectionReviews((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = 'approved';
+        for (const p of pairs) next[p.sectionKey] = 'approved';
         return next;
       });
       setSectionReviewers((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        for (const p of pairs)
+          next[p.sectionKey] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
-        await bulkApproveSectionReviews(slug, ids);
+        await bulkApproveSectionReviews(slug, pairs);
       });
     },
     [slug, viewerEmail],
@@ -261,14 +267,20 @@ export function ConsolidationReviewView({
 
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
-    const articleIds = selectedBucket.articles
-      .filter((a) => a.id && articleReviews[a.id] !== 'approved')
-      .map((a) => a.id as string);
-    const sectionIds = selectedBucket.sections
-      .filter((s) => s.id && sectionReviews[s.id] !== 'approved')
-      .map((s) => s.id as string);
-    approveArticles(articleIds);
-    approveSections(sectionIds);
+    const articlePairs = selectedBucket.articles
+      .filter((a) => a.articleKey && a.id && articleReviews[a.articleKey] !== 'approved')
+      .map((a) => ({
+        articleKey: a.articleKey as string,
+        articleRecordId: a.id as string,
+      }));
+    const sectionPairs = selectedBucket.sections
+      .filter((s) => s.sectionKey && s.id && sectionReviews[s.sectionKey] !== 'approved')
+      .map((s) => ({
+        sectionKey: s.sectionKey as string,
+        sectionRecordId: s.id as string,
+      }));
+    approveArticles(articlePairs);
+    approveSections(sectionPairs);
     setSelectedArticleIds(new Set());
     setSelectedSectionIds(new Set());
   }, [selectedBucket, articleReviews, sectionReviews, approveArticles, approveSections]);
@@ -382,11 +394,25 @@ export function ConsolidationReviewView({
               setSelectedSectionIds={setSelectedSectionIds}
               categoryLookup={categoryLookup}
               onApproveSelectedArticles={() => {
-                approveArticles(Array.from(selectedArticleIds));
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.articles
+                  .filter((a) => a.id && a.articleKey && selectedArticleIds.has(a.id))
+                  .map((a) => ({
+                    articleKey: a.articleKey as string,
+                    articleRecordId: a.id as string,
+                  }));
+                approveArticles(pairs);
                 setSelectedArticleIds(new Set());
               }}
               onApproveSelectedSections={() => {
-                approveSections(Array.from(selectedSectionIds));
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.sections
+                  .filter((s) => s.id && s.sectionKey && selectedSectionIds.has(s.id))
+                  .map((s) => ({
+                    sectionKey: s.sectionKey as string,
+                    sectionRecordId: s.id as string,
+                  }));
+                approveSections(pairs);
                 setSelectedSectionIds(new Set());
               }}
               onApproveAll={approveAllInCategory}
@@ -650,8 +676,12 @@ function CategoryDetailPane({
   onRowClickSection: (id: string) => void;
 }) {
   const unapprovedCount =
-    bucket.articles.filter((a) => a.id && articleReviews[a.id] !== 'approved').length +
-    bucket.sections.filter((s) => s.id && sectionReviews[s.id] !== 'approved').length;
+    bucket.articles.filter(
+      (a) => a.articleKey && articleReviews[a.articleKey] !== 'approved',
+    ).length +
+    bucket.sections.filter(
+      (s) => s.sectionKey && sectionReviews[s.sectionKey] !== 'approved',
+    ).length;
 
   return (
     <Stack space="m">
@@ -694,7 +724,8 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const a of bucket.articles) {
-            if (a.id && articleReviews[a.id] !== 'approved') next.add(a.id);
+            if (a.id && a.articleKey && articleReviews[a.articleKey] !== 'approved')
+              next.add(a.id);
           }
           setSelectedArticleIds(next);
         }}
@@ -720,7 +751,8 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const s of bucket.sections) {
-            if (s.id && sectionReviews[s.id] !== 'approved') next.add(s.id);
+            if (s.id && s.sectionKey && sectionReviews[s.sectionKey] !== 'approved')
+              next.add(s.id);
           }
           setSelectedSectionIds(next);
         }}
@@ -792,7 +824,9 @@ function ArticleSubTable({
   onApproveSelected: () => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
+  const unapprovedRows = rows.filter(
+    (r) => r.articleKey && reviews[r.articleKey] !== 'approved',
+  );
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
@@ -838,7 +872,7 @@ function ArticleSubTable({
           <tbody>
             {rows.map((r) => {
               if (!r.id) return null;
-              const status = reviews[r.id];
+              const status = r.articleKey ? reviews[r.articleKey] : undefined;
               const rowId = r.id;
               const rowStyle: CSSProperties = {
                 ...rowTint(status),
@@ -898,7 +932,9 @@ function SectionSubTable({
   onApproveSelected: () => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
+  const unapprovedRows = rows.filter(
+    (r) => r.sectionKey && reviews[r.sectionKey] !== 'approved',
+  );
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
@@ -947,7 +983,7 @@ function SectionSubTable({
             {rows.map((r) => {
               if (!r.id) return null;
               const rowId = r.id;
-              const status = reviews[rowId];
+              const status = r.sectionKey ? reviews[r.sectionKey] : undefined;
               const rowStyle: CSSProperties = {
                 ...rowTint(status),
                 cursor: 'pointer',

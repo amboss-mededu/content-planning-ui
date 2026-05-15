@@ -17,9 +17,9 @@ async function userClient(): Promise<PocketBase> {
 }
 
 /**
- * Returns backlog rows for the specialty keyed by `articleRecordId`
- * (the PB id of the underlying newArticleSuggestions row) so the view
- * can look up workflow state per article in O(1).
+ * Returns backlog rows for the specialty keyed by `articleKey` —
+ * the stable, content-derived identifier (see `article-keys.ts`).
+ * Zombies (empty key) are filtered out.
  */
 export async function listArticleBacklog(
   slug: string,
@@ -30,15 +30,18 @@ export async function listArticleBacklog(
     .collection<ArticleBacklogRecord>('articleBacklog')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   const out: Record<string, ArticleBacklogRecord> = {};
-  for (const r of rows) out[r.articleRecordId] = r;
+  for (const r of rows) {
+    if (!r.articleKey) continue;
+    out[r.articleKey] = r;
+  }
   return out;
 }
 
 /**
  * Cross-specialty scan: every backlog row currently assigned to
- * `email`. Returned as an array because rows from different
- * specialties can share an `articleRecordId` and a slug-keyed map
- * would lose that distinction.
+ * `email`. Returned as an array (per-specialty grouping happens
+ * downstream) and only rows with a non-empty `articleKey` are
+ * returned — zombies stay in the DB but never reach the UI.
  */
 export async function listArticleBacklogForAssignee(
   email: string,
@@ -46,21 +49,30 @@ export async function listArticleBacklogForAssignee(
   if (!email) return [];
   await connection();
   const pb = await userClient();
-  return pb
+  const rows = await pb
     .collection<ArticleBacklogRecord>('articleBacklog')
     .getFullList({ filter: `assigneeEmail = "${email}"` });
+  return rows.filter((r) => r.articleKey);
 }
 
 async function upsertBacklog(
   pb: PocketBase,
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   patch: Record<string, unknown>,
   changedByEmail: string | null,
 ): Promise<void> {
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  if (!articleKey) {
+    throw new Error('upsertBacklog: articleKey is required');
+  }
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   const base: Record<string, unknown> = {
     specialtySlug: slug,
+    articleKey,
+    // Keep articleRecordId populated for the deprecated old code paths
+    // and as a debugging breadcrumb in the DB. It's overwritten each
+    // upsert so it always reflects the latest known PB id.
     articleRecordId,
     lastChangedByEmail: changedByEmail ?? '',
     lastChangedAt: Date.now(),
@@ -85,6 +97,7 @@ async function upsertBacklog(
 
 export async function setArticleBacklogStatus(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   status: ArticleBacklogStatus,
   changedByEmail: string | null,
@@ -93,11 +106,12 @@ export async function setArticleBacklogStatus(
   const pb = await userClient();
   const patch: Record<string, unknown> = { status };
   if (notes !== undefined) patch.notes = notes;
-  await upsertBacklog(pb, slug, articleRecordId, patch, changedByEmail);
+  await upsertBacklog(pb, slug, articleKey, articleRecordId, patch, changedByEmail);
 }
 
 export async function setArticleBacklogAssignee(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   assigneeEmail: string | null,
   changedByEmail: string | null,
@@ -106,6 +120,7 @@ export async function setArticleBacklogAssignee(
   await upsertBacklog(
     pb,
     slug,
+    articleKey,
     articleRecordId,
     { assigneeEmail: assigneeEmail ?? '' },
     changedByEmail,
@@ -114,10 +129,11 @@ export async function setArticleBacklogAssignee(
 
 export async function clearArticleBacklog(
   slug: string,
-  articleRecordId: string,
+  articleKey: string,
 ): Promise<void> {
+  if (!articleKey) return;
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     const existing = await pb
       .collection<ArticleBacklogRecord>('articleBacklog')
@@ -130,33 +146,35 @@ export async function clearArticleBacklog(
 }
 
 /**
- * Admin-side status writer for the literature-search worker (no cookies
+ * Admin-side status writer for the article-writing worker (no cookies
  * in scope). Same upsert semantics as `setArticleBacklogStatus`.
  */
 export async function setArticleBacklogStatusAsAdmin(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   status: ArticleBacklogStatus,
   changedByEmail: string | null,
 ): Promise<void> {
   const pb = await createAdminClient();
-  await upsertBacklog(pb, slug, articleRecordId, { status }, changedByEmail);
+  await upsertBacklog(pb, slug, articleKey, articleRecordId, { status }, changedByEmail);
 }
 
 /**
- * Idempotent: create an articleBacklog row of type='update' for the given
- * parent article if one doesn't already exist. Called from
- * `submitSectionReview` when any section under a parent is approved; we
- * don't want to clobber an existing row's status (an editor may have
- * already advanced it past 'waiting-for-sources').
+ * Idempotent: create an articleBacklog row of type='update' for the
+ * given parent CMS article if one doesn't already exist. For update
+ * rows, `articleKey` and `articleRecordId` both encode the CMS
+ * articleId — `articleKey` as the canonical `upd::<articleId>` token
+ * used by joins, `articleRecordId` as the raw id for older code.
  */
 export async function ensureUpdateBacklogRow(
   slug: string,
   parentArticleId: string,
   changedByEmail: string | null,
 ): Promise<void> {
+  const articleKey = `upd::${parentArticleId}`;
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${parentArticleId}"`;
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
     return;
@@ -164,6 +182,7 @@ export async function ensureUpdateBacklogRow(
     if (e instanceof ClientResponseError && e.status === 404) {
       await pb.collection('articleBacklog').create({
         specialtySlug: slug,
+        articleKey,
         articleRecordId: parentArticleId,
         type: 'update',
         status: 'waiting-for-sources',
@@ -178,15 +197,15 @@ export async function ensureUpdateBacklogRow(
 
 /**
  * Tear down an update-type backlog row. Used when the last approved
- * section under the parent article is unreviewed/rejected — the row
- * lost its only justification for existing.
+ * section under the parent article is unreviewed/rejected.
  */
 export async function clearUpdateBacklogRow(
   slug: string,
   parentArticleId: string,
 ): Promise<void> {
+  const articleKey = `upd::${parentArticleId}`;
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${parentArticleId}" && type = "update"`;
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}" && type = "update"`;
   try {
     const existing = await pb
       .collection<ArticleBacklogRecord>('articleBacklog')

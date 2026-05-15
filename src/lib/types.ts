@@ -105,6 +105,8 @@ export type CodeCategory = {
 export type ConsolidatedArticle = {
   /** PB record id (preserved by the data layer for the review-pass keying). */
   id?: string;
+  /** Stable, content-derived identifier — see `lib/data/article-keys.ts`. */
+  articleKey?: string;
   index?: string;
   articleTitle?: string;
   articleType?: string;
@@ -121,6 +123,8 @@ export type ConsolidatedArticle = {
 
 export type NewArticleSuggestion = {
   id?: string;
+  /** Stable, content-derived identifier — see `lib/data/article-keys.ts`. */
+  articleKey?: string;
   index?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
@@ -155,6 +159,8 @@ export type ArticleUpdateSuggestion = NewArticleSuggestion;
 export type ConsolidatedSection = {
   /** PB record id (preserved for the review-pass keying). */
   id?: string;
+  /** Stable, content-derived identifier — see `lib/data/article-keys.ts`. */
+  sectionKey?: string;
   index?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;

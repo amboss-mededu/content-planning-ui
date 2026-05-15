@@ -31,9 +31,14 @@ import { type Column, DataTable } from './data-table';
  * is 2nd-pass-only).
  */
 export type ArticleRow = {
-  /** PB record id of the underlying consolidatedArticles row. Set on
-   *  1st-pass rows; the review pass keys reviews on this. */
+  /** PB record id of the underlying consolidatedArticles row. Use for
+   *  routing only — review/backlog joins go through `articleKey`. */
   id?: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Empty when the row's title /
+   *  articleId aren't enough to compute one (which makes the row
+   *  un-reviewable). */
+  articleKey?: string;
   articleTitle?: string;
   articleType?: string;
   category?: string;

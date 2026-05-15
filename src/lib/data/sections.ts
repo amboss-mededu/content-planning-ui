@@ -3,9 +3,33 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { computeSectionKey } from '@/lib/data/article-keys';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ConsolidatedSectionRecord, SectionReviewRecord } from '@/lib/pb/types';
 import type { ConsolidatedSection } from '@/lib/types';
+
+/**
+ * Inject `sectionKey` into a consolidatedSections row before insert.
+ * Mirrors `withArticleKey` over in `articles.ts` — see that comment for
+ * rationale.
+ */
+function withSectionKey(
+  slug: string,
+  r: Record<string, unknown>,
+): Record<string, unknown> {
+  const articleTitle = typeof r.articleTitle === 'string' ? r.articleTitle : undefined;
+  const articleId = typeof r.articleId === 'string' ? r.articleId : undefined;
+  const sectionName = typeof r.sectionName === 'string' ? r.sectionName : undefined;
+  const sectionId = typeof r.sectionId === 'string' ? r.sectionId : undefined;
+  const key = computeSectionKey({
+    specialtySlug: slug,
+    articleTitle,
+    articleId,
+    sectionName,
+    sectionId,
+  });
+  return key ? { ...r, sectionKey: key } : r;
+}
 
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
@@ -107,6 +131,8 @@ export async function bulkInsertConsolidatedSectionsAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   for (const r of rows) {
-    await pb.collection('consolidatedSections').create({ specialtySlug: slug, ...r });
+    await pb
+      .collection('consolidatedSections')
+      .create({ specialtySlug: slug, ...withSectionKey(slug, r) });
   }
 }

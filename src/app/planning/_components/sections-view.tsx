@@ -27,12 +27,16 @@ import { type Column, DataTable } from './data-table';
  * and a derived `updateType` without re-deriving on every render.
  */
 export type SectionRow = {
-  /** PB record id of the underlying consolidatedSections row. The
-   *  review pass keys reviews on this. */
+  /** PB record id of the underlying consolidatedSections row. Use for
+   *  routing only — review/comment joins go through `sectionKey`. */
   id?: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. */
+  sectionKey?: string;
   articleTitle?: string;
   articleId?: string;
   sectionName?: string;
+  sectionId?: string;
   updateType: 'new' | 'update' | null;
   category?: string;
   codes: EmbeddedCode[];

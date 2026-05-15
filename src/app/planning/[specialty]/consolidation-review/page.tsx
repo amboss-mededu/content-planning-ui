@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
@@ -45,10 +46,17 @@ export default async function ConsolidationReviewPage({
   );
 }
 
-function projectArticle(r: ConsolidatedArticle): ArticleRow {
+function projectArticle(slug: string, r: ConsolidatedArticle): ArticleRow {
   const codes = extractCodes(r.codes);
   return {
     id: r.id,
+    articleKey:
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+      }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     category: r.category,
@@ -62,15 +70,25 @@ function projectArticle(r: ConsolidatedArticle): ArticleRow {
   };
 }
 
-function projectSection(r: ConsolidatedSection): SectionRow {
+function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
   const codes = extractCodes(r.codes);
   const updateType: 'new' | 'update' | null =
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
     id: r.id,
+    sectionKey:
+      r.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        sectionName: r.sectionName,
+        sectionId: r.sectionId,
+      }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
     sectionName: r.sectionName,
+    sectionId: r.sectionId,
     updateType,
     category: r.category,
     codes,
@@ -181,8 +199,8 @@ async function ConsolidationReviewData({
     if (r.status === 'flagged-for-rerun') flaggedCategories.add(cat);
   }
 
-  const articles = articleRecs.map(projectArticle);
-  const sections = sectionRecs.map(projectSection);
+  const articles = articleRecs.map((r) => projectArticle(slug, r));
+  const sections = sectionRecs.map((r) => projectSection(slug, r));
 
   return (
     <ConsolidationReviewView

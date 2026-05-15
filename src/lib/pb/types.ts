@@ -106,8 +106,17 @@ export type ArticleReviewStatus = 'approved' | 'rejected';
 
 export interface ArticleReviewRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the consolidatedArticles row this review covers. */
+  /** PB id of the consolidatedArticles row this review covers.
+   *  @deprecated Use `articleKey` for cross-collection joins —
+   *  `articleRecordId` is unstable across consolidation re-runs. Kept
+   *  for backwards compatibility during the keys migration; will be
+   *  dropped in a follow-up release. */
   articleRecordId: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Empty string for zombie rows
+   *  whose `articleRecordId` no longer resolves (filtered out by the
+   *  UI). */
+  articleKey: string;
   status: ArticleReviewStatus;
   reviewerEmail?: string;
   /** ms since epoch */
@@ -119,8 +128,11 @@ export interface ArticleReviewRecord extends PbRecord {
 
 export interface SectionReviewRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the consolidatedSections row this review covers. */
+  /** PB id of the consolidatedSections row this review covers.
+   *  @deprecated Use `sectionKey` — see ArticleReviewRecord. */
   sectionRecordId: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  sectionKey: string;
   status: ArticleReviewStatus;
   reviewerEmail?: string;
   reviewedAt?: number;
@@ -162,8 +174,11 @@ export interface ArticleBacklogRecord extends PbRecord {
   specialtySlug: string;
   /** PB id of the newArticleSuggestions row this backlog state covers
    *  (type='new'), or the CMS articleId of the parent article being
-   *  updated (type='update'). */
+   *  updated (type='update').
+   *  @deprecated Use `articleKey` — see ArticleReviewRecord. */
   articleRecordId: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey: string;
   status: ArticleBacklogStatus;
   /** Discriminator between new-article backlog rows and update-article
    *  backlog rows. Existing rows without an explicit value default to
@@ -225,8 +240,12 @@ export interface ReviewCommentRecord extends PbRecord {
   specialtySlug: string;
   recordKind: ReviewRecordKind;
   /** PB id of the consolidatedArticles or consolidatedSections row this
-   *  comment is attached to. */
+   *  comment is attached to.
+   *  @deprecated Use `recordKey` — see ArticleReviewRecord. */
   recordId: string;
+  /** Stable, content-derived identifier — interpretation depends on
+   *  `recordKind`: 'article' → articleKey, 'section' → sectionKey. */
+  recordKey: string;
   authorEmail?: string;
   body: string;
 }
@@ -244,6 +263,8 @@ export interface MappingInFlightRecord extends PbRecord {
 
 export interface ArticleSuggestionRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
   newArticle?: boolean;
@@ -273,6 +294,8 @@ export interface ArticleSuggestionRecord extends PbRecord {
 
 export interface ConsolidatedArticleRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey?: string;
   articleTitle?: string;
   articleType?: string;
   specialtyName?: string;
@@ -290,6 +313,8 @@ export interface ConsolidatedArticleRecord extends PbRecord {
 
 export interface ConsolidatedSectionRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  sectionKey?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
   articleTitle?: string;

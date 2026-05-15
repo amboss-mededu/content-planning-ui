@@ -36,49 +36,71 @@ export async function refreshSpecialty(slug: string) {
 
 export async function submitArticleReview(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   status: ArticleReviewStatus,
   notes?: string,
 ): Promise<void> {
   const user = await getCurrentUser();
-  await setArticleReview(slug, articleRecordId, status, user?.email ?? null, notes);
+  await setArticleReview(
+    slug,
+    articleKey,
+    articleRecordId,
+    status,
+    user?.email ?? null,
+    notes,
+  );
   updateTag(`specialty:${slug}`);
 }
 
 export async function resetArticleReview(
   slug: string,
-  articleRecordId: string,
+  articleKey: string,
 ): Promise<void> {
-  await clearArticleReview(slug, articleRecordId);
+  await clearArticleReview(slug, articleKey);
   updateTag(`specialty:${slug}`);
 }
 
 /**
- * Bulk-approve a batch of consolidatedArticles rows. Used by the
- * Consolidation Review screen. Fans out one PB write per id but only
- * revalidates the cache tag once at the end, which is where the cost
- * lives in the single-row path.
+ * Bulk-approve a batch of consolidatedArticles rows. The caller is
+ * responsible for computing each row's `articleKey` (so the action
+ * stays a thin transport — no key-derivation logic in the server
+ * action layer).
  */
 export async function bulkApproveArticleReviews(
   slug: string,
-  articleRecordIds: string[],
+  rows: Array<{ articleKey: string; articleRecordId: string }>,
 ): Promise<void> {
-  if (articleRecordIds.length === 0) return;
+  if (rows.length === 0) return;
   const user = await getCurrentUser();
-  for (const id of articleRecordIds) {
-    await setArticleReview(slug, id, 'approved', user?.email ?? null);
+  for (const r of rows) {
+    await setArticleReview(
+      slug,
+      r.articleKey,
+      r.articleRecordId,
+      'approved',
+      user?.email ?? null,
+    );
   }
   updateTag(`specialty:${slug}`);
 }
 
 export async function submitSectionReview(
   slug: string,
+  sectionKey: string,
   sectionRecordId: string,
   status: ArticleReviewStatus,
   notes?: string,
 ): Promise<void> {
   const user = await getCurrentUser();
-  await setSectionReview(slug, sectionRecordId, status, user?.email ?? null, notes);
+  await setSectionReview(
+    slug,
+    sectionKey,
+    sectionRecordId,
+    status,
+    user?.email ?? null,
+    notes,
+  );
   if (status === 'approved') {
     const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
     if (parentArticleId) {
@@ -91,19 +113,25 @@ export async function submitSectionReview(
 /**
  * Bulk-approve a batch of consolidatedSections rows. Each approval also
  * triggers `ensureUpdateBacklogRow` for the section's parent article,
- * matching the single-row `submitSectionReview` semantics (one update
- * backlog row per parent regardless of how many sections were approved
- * — `ensureUpdateBacklogRow` is idempotent).
+ * matching the single-row `submitSectionReview` semantics.
  */
 export async function bulkApproveSectionReviews(
   slug: string,
-  sectionRecordIds: string[],
+  rows: Array<{ sectionKey: string; sectionRecordId: string }>,
 ): Promise<void> {
-  if (sectionRecordIds.length === 0) return;
+  if (rows.length === 0) return;
   const user = await getCurrentUser();
-  for (const id of sectionRecordIds) {
-    await setSectionReview(slug, id, 'approved', user?.email ?? null);
-    const parentArticleId = await getConsolidatedSectionParentArticleId(id);
+  for (const r of rows) {
+    await setSectionReview(
+      slug,
+      r.sectionKey,
+      r.sectionRecordId,
+      'approved',
+      user?.email ?? null,
+    );
+    const parentArticleId = await getConsolidatedSectionParentArticleId(
+      r.sectionRecordId,
+    );
     if (parentArticleId) {
       await ensureUpdateBacklogRow(slug, parentArticleId, user?.email ?? null);
     }
@@ -113,10 +141,11 @@ export async function bulkApproveSectionReviews(
 
 export async function resetSectionReview(
   slug: string,
+  sectionKey: string,
   sectionRecordId: string,
 ): Promise<void> {
   const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
-  await clearSectionReview(slug, sectionRecordId);
+  await clearSectionReview(slug, sectionKey);
   if (parentArticleId) {
     const stillHasApproved = await hasOtherApprovedSectionsForParent(
       slug,
@@ -133,11 +162,19 @@ export async function resetSectionReview(
 export async function postReviewComment(
   slug: string,
   kind: ReviewRecordKind,
+  recordKey: string,
   recordId: string,
   body: string,
 ): Promise<ReviewCommentRecord> {
   const user = await getCurrentUser();
-  const created = await addReviewComment(slug, kind, recordId, user?.email ?? null, body);
+  const created = await addReviewComment(
+    slug,
+    kind,
+    recordKey,
+    recordId,
+    user?.email ?? null,
+    body,
+  );
   updateTag(`specialty:${slug}`);
   return created;
 }
@@ -155,6 +192,7 @@ export async function deleteOwnReviewComment(
 
 export async function setBacklogStatus(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   status: ArticleBacklogStatus,
   notes?: string,
@@ -162,6 +200,7 @@ export async function setBacklogStatus(
   const user = await getCurrentUser();
   await setArticleBacklogStatus(
     slug,
+    articleKey,
     articleRecordId,
     status,
     user?.email ?? null,
@@ -172,12 +211,14 @@ export async function setBacklogStatus(
 
 export async function setBacklogAssignee(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   assigneeEmail: string | null,
 ): Promise<void> {
   const user = await getCurrentUser();
   await setArticleBacklogAssignee(
     slug,
+    articleKey,
     articleRecordId,
     assigneeEmail,
     user?.email ?? null,
@@ -185,11 +226,8 @@ export async function setBacklogAssignee(
   updateTag(`specialty:${slug}`);
 }
 
-export async function clearBacklogRow(
-  slug: string,
-  articleRecordId: string,
-): Promise<void> {
-  await clearArticleBacklog(slug, articleRecordId);
+export async function clearBacklogRow(slug: string, articleKey: string): Promise<void> {
+  await clearArticleBacklog(slug, articleKey);
   updateTag(`specialty:${slug}`);
 }
 

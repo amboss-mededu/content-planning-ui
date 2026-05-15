@@ -30,9 +30,14 @@ import type {
 } from '@/lib/pb/types';
 
 export type MyBacklogRow = {
-  /** For type='new': PB id of the underlying newArticleSuggestions row.
-   *  For type='update': the parent article's CMS articleId. */
+  /** For type='new': PB id of the current underlying newArticleSuggestions
+   *  row. For type='update': the parent article's CMS articleId. Use for
+   *  click-target routing only — cross-collection joins go through
+   *  `articleKey`. */
   id: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. */
+  articleKey: string;
   type: 'new' | 'update';
   specialtySlug: string;
   specialtyName: string;
@@ -108,12 +113,15 @@ export function MyBacklogView({
     window.history.replaceState(null, '', next);
   }, [statusFilter, specialtyFilter]);
 
+  // State + actions are keyed by articleKey. `id` is kept for routing
+  // (drawer, modal) but never used for cross-collection joins.
+
   const statusOf = useCallback(
-    (id: string): ArticleBacklogStatus => backlog[id]?.status ?? 'waiting-for-sources',
+    (key: string): ArticleBacklogStatus => backlog[key]?.status ?? 'waiting-for-sources',
     [backlog],
   );
   const assigneeOf = useCallback(
-    (id: string): string => backlog[id]?.assigneeEmail ?? '',
+    (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
 
@@ -130,7 +138,7 @@ export function MyBacklogView({
   const filtered = useMemo(() => {
     let out = rows;
     if (statusFilter) {
-      out = out.filter((r) => statusOf(r.id) === statusFilter);
+      out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
     }
     if (specialtyFilter) {
       out = out.filter((r) => r.specialtySlug === specialtyFilter);
@@ -143,7 +151,7 @@ export function MyBacklogView({
     let inProgress = 0;
     let waiting = 0;
     for (const r of rows) {
-      const s = statusOf(r.id);
+      const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
@@ -156,41 +164,42 @@ export function MyBacklogView({
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
-    const prev = backlog[row.id];
+    const prev = backlog[row.articleKey];
     if (next === 'unassigned') {
       setBacklog((curr) => {
         const copy = { ...curr };
-        delete copy[row.id];
+        delete copy[row.articleKey];
         return copy;
       });
       try {
-        await clearBacklogRow(row.specialtySlug, row.id);
+        await clearBacklogRow(row.specialtySlug, row.articleKey);
       } catch (e) {
-        setBacklog((curr) => (prev ? { ...curr, [row.id]: prev } : curr));
+        setBacklog((curr) => (prev ? { ...curr, [row.articleKey]: prev } : curr));
         console.error('clearBacklogRow failed', e);
       }
       return;
     }
     setBacklog((curr) => ({
       ...curr,
-      [row.id]: {
-        ...(curr[row.id] ?? ({} as ArticleBacklogRecord)),
+      [row.articleKey]: {
+        ...(curr[row.articleKey] ?? ({} as ArticleBacklogRecord)),
+        articleKey: row.articleKey,
         articleRecordId: row.id,
         specialtySlug: row.specialtySlug,
         status: next,
-        assigneeEmail: curr[row.id]?.assigneeEmail ?? '',
+        assigneeEmail: curr[row.articleKey]?.assigneeEmail ?? '',
         lastChangedByEmail: viewerEmail,
         lastChangedAt: Date.now(),
         ...(notes !== undefined ? { notes } : {}),
       } as ArticleBacklogRecord,
     }));
     try {
-      await setBacklogStatus(row.specialtySlug, row.id, next, notes);
+      await setBacklogStatus(row.specialtySlug, row.articleKey, row.id, next, notes);
     } catch (e) {
       setBacklog((curr) => {
         const copy = { ...curr };
-        if (prev) copy[row.id] = prev;
-        else delete copy[row.id];
+        if (prev) copy[row.articleKey] = prev;
+        else delete copy[row.articleKey];
         return copy;
       });
       console.error('setBacklogStatus failed', e);
@@ -201,28 +210,29 @@ export function MyBacklogView({
     row: MyBacklogRow,
     nextEmail: string,
   ): Promise<void> {
-    const prev = backlog[row.id];
+    const prev = backlog[row.articleKey];
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
 
     setBacklog((curr) => ({
       ...curr,
-      [row.id]: {
-        ...(curr[row.id] ?? ({} as ArticleBacklogRecord)),
+      [row.articleKey]: {
+        ...(curr[row.articleKey] ?? ({} as ArticleBacklogRecord)),
+        articleKey: row.articleKey,
         articleRecordId: row.id,
         specialtySlug: row.specialtySlug,
-        status: curr[row.id]?.status ?? 'waiting-for-sources',
+        status: curr[row.articleKey]?.status ?? 'waiting-for-sources',
         assigneeEmail: emailOrNull ?? '',
         lastChangedByEmail: viewerEmail,
         lastChangedAt: Date.now(),
       } as ArticleBacklogRecord,
     }));
     try {
-      await setBacklogAssignee(row.specialtySlug, row.id, emailOrNull);
+      await setBacklogAssignee(row.specialtySlug, row.articleKey, row.id, emailOrNull);
     } catch (e) {
       setBacklog((curr) => {
         const copy = { ...curr };
-        if (prev) copy[row.id] = prev;
-        else delete copy[row.id];
+        if (prev) copy[row.articleKey] = prev;
+        else delete copy[row.articleKey];
         return copy;
       });
       console.error('setBacklogAssignee failed', e);
@@ -311,13 +321,13 @@ export function MyBacklogView({
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => STATUS_LABEL[statusOf(r.id)],
+      accessor: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
-      filterValue: (r) => STATUS_LABEL[statusOf(r.id)],
+      filterValue: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
-        const s = statusOf(r.id);
+        const s = statusOf(r.articleKey);
         return (
           <span
             style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
@@ -351,14 +361,14 @@ export function MyBacklogView({
       width: 180,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => NEXT_ACTION[statusOf(r.id)],
+      accessor: (r) => NEXT_ACTION[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: Array.from(
         new Set(Object.values(NEXT_ACTION).filter((v) => v !== '—')),
       ).map((v) => ({ value: v, label: v })),
-      filterValue: (r) => NEXT_ACTION[statusOf(r.id)],
-      render: (r) => <Text>{NEXT_ACTION[statusOf(r.id)]}</Text>,
+      filterValue: (r) => NEXT_ACTION[statusOf(r.articleKey)],
+      render: (r) => <Text>{NEXT_ACTION[statusOf(r.articleKey)]}</Text>,
     },
     {
       key: 'assignee',
@@ -367,7 +377,7 @@ export function MyBacklogView({
       width: 200,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => assigneeOf(r.id) || null,
+      accessor: (r) => assigneeOf(r.articleKey) || null,
       type: 'string',
       filterable: true,
       filterOptions: [
@@ -377,12 +387,12 @@ export function MyBacklogView({
           label: u.name ?? u.email,
         })),
       ],
-      filterValue: (r) => assigneeOf(r.id) || '__unassigned__',
+      filterValue: (r) => assigneeOf(r.articleKey) || '__unassigned__',
       render: (r) => (
         <select
           aria-label="Assignee"
           style={inlineSelectStyle}
-          value={assigneeOf(r.id)}
+          value={assigneeOf(r.articleKey)}
           onChange={(e) => handleAssigneeChange(r, e.target.value)}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
@@ -492,10 +502,10 @@ export function MyBacklogView({
             stage: 'backlog',
             slug: managerRow.specialtySlug,
             article: managerRow,
-            currentStatus: statusOf(managerArticleId),
+            currentStatus: statusOf(managerRow.articleKey),
             sources: initialSourcesByArticle[managerArticleId] ?? [],
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) => handleStatusChange(managerRow, next, notes),
@@ -511,9 +521,9 @@ export function MyBacklogView({
             slug: managerRow.specialtySlug,
             article: managerRow,
             sections: managerRow.sections ?? [],
-            currentStatus: statusOf(managerArticleId),
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            currentStatus: statusOf(managerRow.articleKey),
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) => handleStatusChange(managerRow, next, notes),

@@ -17,9 +17,10 @@ async function userClient(): Promise<PocketBase> {
 }
 
 /**
- * Returns reviews for the specialty as a record keyed by the
- * consolidatedArticles record id, so the view layer can look up status
- * for each row in O(1) without re-querying.
+ * Returns reviews for the specialty keyed by `articleKey` — the
+ * stable, content-derived identifier (see `article-keys.ts`). Rows with
+ * an empty `articleKey` (zombies left behind by an earlier consolidation
+ * run) are filtered out so the UI never has to think about them.
  */
 export async function listArticleReviews(
   slug: string,
@@ -30,28 +31,35 @@ export async function listArticleReviews(
     .collection<ArticleReviewRecord>('articleReviews')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   const out: Record<string, ArticleReviewRecord> = {};
-  for (const r of rows) out[r.articleRecordId] = r;
+  for (const r of rows) {
+    if (!r.articleKey) continue;
+    out[r.articleKey] = r;
+  }
   return out;
 }
 
 /**
- * Upsert a review for the given article record. If a row already exists
- * for this (slug, articleRecordId) pair, update it; otherwise create.
- * The `articleReviews` collection has a unique index on this pair so we
- * could in theory rely on a server-side upsert, but PocketBase's JS SDK
- * doesn't expose one — fetch-then-update / fetch-then-create.
+ * Upsert a review keyed by `articleKey`. The collection still carries
+ * the legacy `articleRecordId` column for backwards compatibility; we
+ * write the current row's PB id into it on upsert so older code paths
+ * that haven't been migrated yet still see something sensible.
  */
 export async function setArticleReview(
   slug: string,
+  articleKey: string,
   articleRecordId: string,
   status: ArticleReviewStatus,
   reviewerEmail: string | null,
   notes?: string,
 ): Promise<void> {
+  if (!articleKey) {
+    throw new Error('setArticleReview: articleKey is required');
+  }
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   const payload: Record<string, unknown> = {
     specialtySlug: slug,
+    articleKey,
     articleRecordId,
     status,
     reviewerEmail: reviewerEmail ?? '',
@@ -75,10 +83,11 @@ export async function setArticleReview(
 
 export async function clearArticleReview(
   slug: string,
-  articleRecordId: string,
+  articleKey: string,
 ): Promise<void> {
+  if (!articleKey) return;
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     const existing = await pb
       .collection<ArticleReviewRecord>('articleReviews')
