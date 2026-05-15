@@ -53,6 +53,7 @@ function projectNewArticle(
       articleTitle: r.articleTitle,
       articleId: r.articleId,
     });
+  const sources = sourcesByKey[articleKey] ?? [];
   return {
     id: r.id ?? '',
     articleKey,
@@ -60,7 +61,8 @@ function projectNewArticle(
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     codes: extractCodes(r.codes),
-    sourcesCount: sourcesByKey[articleKey]?.length ?? 0,
+    sourcesCount: sources.length,
+    uploadedSourcesCount: sources.filter((s) => s.uri).length,
   };
 }
 
@@ -188,6 +190,7 @@ async function BacklogData({ slug }: { slug: string }) {
       articleType: undefined,
       codes,
       sourcesCount: 0,
+      uploadedSourcesCount: 0,
       sections: projected,
     });
   }

@@ -7,22 +7,21 @@
  * `write-article.ts` is responsible for sequencing + persistence.
  *
  * Source PDFs:
- *   The n8n workflow uploaded PDFs to Gemini's Files API up-front and
- *   threaded the resulting URI into the primary + proofreader prompts as
- *   `fileData` parts. That upload step is not yet in-app — see the
- *   "Upload to Cortex" action in `backlog-constants.ts` for the future
- *   trigger. Until then, the primary pass receives source metadata as
- *   text only (degraded output, but the pipeline mechanics are
- *   exercised). When the file-upload step lands, swap the placeholder
- *   text content for AI SDK `FilePart` entries below.
+ *   Editors trigger an upload to Gemini Files API for an article's
+ *   sources via `/api/workflows/upload-article-pdfs`. When a source row
+ *   has a `uri` set, the primary + proofreader passes attach it as a
+ *   FilePart (the AI SDK serializes `data: new URL(uri)` to Gemini's
+ *   `fileData` wire format). Sources without a URI still appear in the
+ *   text-metadata block so the model knows what's referenced.
  *
  * QC files (proofreader):
  *   `references_table.tsv` / `facts_table.tsv` come from a separate n8n
  *   "QC and Hallucination Check" HTTP node that is not yet ported. The
- *   proofreader currently runs with empty QC placeholders.
+ *   orchestrator skips this pass by default (`skipProofreader: true`)
+ *   until QC is wired — see `write-article.ts`.
  */
 
-import { generateText } from 'ai';
+import { generateText, type ModelMessage } from 'ai';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
 import { logEvent } from '../lib/events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from '../lib/llm';
@@ -81,8 +80,9 @@ function buildSourceMetadataJson(sources: ArticleSourceRecord[]): string {
 }
 
 function buildPrimaryUserMessage(input: PassInput): string {
-  // Mirrors the n8n "Create Primary Editor Request" code node, minus the
-  // fileParts (see file-level TODO).
+  // Mirrors the n8n "Create Primary Editor Request" code node. Source
+  // PDFs that have been uploaded to Gemini Files API are attached as
+  // `fileData` parts on the message — see `buildUserMessageParts`.
   return `
 Generate a full, concise, and clinically relevant AMBOSS-style article on the following topic:
 
@@ -100,10 +100,6 @@ Generate a full, concise, and clinically relevant AMBOSS-style article on the fo
 
   **Sources Ordered By Priority**
   ${buildSourceMetadataJson(input.sources)}
-
-  Source PDFs are not currently uploaded into context — work from the source
-  metadata above. (When the in-app Gemini Files upload lands, the PDF
-  bytes will appear here as native file attachments.)
 `.trim();
 }
 
@@ -176,6 +172,37 @@ function buildUserMessage(pass: WritingPass, input: PassInput): string {
   }
 }
 
+/**
+ * Build the AI SDK `messages` array. For passes that benefit from the
+ * source PDFs (primary, proofreader), uploaded sources are attached as
+ * FilePart entries so Gemini sees the document bytes directly. Sources
+ * without a URI are referenced only via the text-metadata block — we
+ * don't fall back to inline base64 (that would balloon prompt size).
+ */
+function buildUserMessageParts(pass: WritingPass, input: PassInput): ModelMessage[] {
+  const text = buildUserMessage(pass, input);
+  const includeFiles = pass === 'primary' || pass === 'proofreader';
+  if (!includeFiles) return [{ role: 'user', content: text }];
+
+  const fileParts = input.sources
+    .filter((s) => s.uri)
+    .map((s) => ({
+      type: 'file' as const,
+      data: new URL(s.uri as string),
+      mediaType: s.mimeType || 'application/pdf',
+      filename: s.originalFilename || `${s.title}.pdf`,
+    }));
+
+  if (fileParts.length === 0) return [{ role: 'user', content: text }];
+
+  return [
+    {
+      role: 'user',
+      content: [{ type: 'text', text }, ...fileParts],
+    },
+  ];
+}
+
 // --- entry point -----------------------------------------------------------
 
 export async function runWritingPass(
@@ -183,8 +210,13 @@ export async function runWritingPass(
   input: PassInput,
 ): Promise<PassResult> {
   const system = WRITING_PASS_PROMPTS[pass];
-  const userMessage = buildUserMessage(pass, input);
+  const messages = buildUserMessageParts(pass, input);
   const resolved = resolveModel(input.model, input.apiKeys);
+  const attachedFiles = (() => {
+    const first = messages[0]?.content;
+    if (typeof first === 'string') return 0;
+    return first.filter((p) => p.type === 'file').length;
+  })();
 
   await logEvent({
     runId: input.runId,
@@ -192,12 +224,13 @@ export async function runWritingPass(
     // specialty-wide pipeline, but the runId differs so they don't mix.
     stage: 'write_article',
     level: 'info',
-    message: `[${pass}] starting`,
+    message: `[${pass}] starting${attachedFiles > 0 ? ` · ${attachedFiles} PDF(s) attached` : ''}`,
     metrics: {
       pass,
       model: resolved.modelId,
       provider: resolved.provider,
       reasoning: input.model.reasoning,
+      attachedFiles,
     },
   });
 
@@ -205,7 +238,7 @@ export async function runWritingPass(
   const result = await generateText({
     model: resolved.sdkModel,
     system,
-    prompt: userMessage,
+    messages,
     providerOptions: resolved.providerOptions,
     temperature: pass === 'proofreader' ? 0 : 1,
   });

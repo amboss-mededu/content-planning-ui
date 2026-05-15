@@ -16,6 +16,7 @@
  */
 
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
+import { computeArticleKey } from '@/lib/data/article-keys';
 import {
   getWritingRunAsAdmin,
   updateWritingRunAsAdmin,
@@ -42,6 +43,12 @@ export type WriteArticleInput = {
   /** Email of the editor who clicked Start — written back to the backlog
    *  row's lastChangedByEmail on the final status flip. */
   requestedByEmail: string | null;
+  /** Skip the proofreader pass. Defaults to `true` because the
+   *  proofreader expects QC tables (references_table / facts_table)
+   *  from an external service that isn't wired yet, and running it with
+   *  empty placeholders just burns tokens for low-quality output. The
+   *  API route plumbs `false` through once QC is available. */
+  skipProofreader?: boolean;
 };
 
 async function isStillRunnable(runId: string): Promise<boolean> {
@@ -77,6 +84,8 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
   let previousOutput = '';
 
   try {
+    const skipProofreader = input.skipProofreader ?? true;
+
     for (const pass of WRITING_PASSES) {
       if (!(await isStillRunnable(input.runId))) {
         await logEvent({
@@ -86,6 +95,23 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
           message: `Cancelled before [${pass}] — leaving prior pass output intact.`,
         }).catch(() => {});
         return;
+      }
+
+      if (pass === 'proofreader' && skipProofreader) {
+        await upsertDraftPassAsAdmin({
+          runId: input.runId,
+          specialtySlug: input.specialtySlug,
+          articleRecordId: input.articleRecordId,
+          pass,
+          status: 'skipped',
+        });
+        await logEvent({
+          runId: input.runId,
+          stage: 'write_article',
+          level: 'info',
+          message: '[proofreader] skipped — QC service not yet wired',
+        });
+        continue;
       }
 
       await updateWritingRunAsAdmin(input.runId, { currentPass: pass });
@@ -151,14 +177,21 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
     // ready for human review. We skip this when the row's current
     // status is already past `ready-for-editing` — e.g. an editor who
     // re-ran the draft mid-editing shouldn't be bounced back.
-    await setArticleBacklogStatusAsAdmin(
-      input.specialtySlug,
-      input.articleRecordId,
-      'ready-for-editing',
-      input.requestedByEmail,
-    ).catch((e) => {
-      console.error('[writing] failed to flip backlog status', e);
+    const articleKey = computeArticleKey({
+      specialtySlug: input.specialtySlug,
+      articleTitle: input.articleTitle,
     });
+    if (articleKey) {
+      await setArticleBacklogStatusAsAdmin(
+        input.specialtySlug,
+        articleKey,
+        input.articleRecordId,
+        'ready-for-editing',
+        input.requestedByEmail,
+      ).catch((e) => {
+        console.error('[writing] failed to flip backlog status', e);
+      });
+    }
 
     await logEvent({
       runId: input.runId,

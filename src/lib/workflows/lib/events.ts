@@ -48,6 +48,8 @@ export type EventMetrics = {
   passes?: number;
   /** Source count for the write-article run header log. */
   sources?: number;
+  /** Number of Gemini Files PDFs attached to a writing-pass request. */
+  attachedFiles?: number;
 };
 
 export async function logEvent(input: {

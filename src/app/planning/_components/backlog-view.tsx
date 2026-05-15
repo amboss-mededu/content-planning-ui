@@ -30,6 +30,7 @@ import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
+import { UploadPdfsButton } from './upload-pdfs-button';
 
 export type BacklogRow = {
   /** For type='new': PB id of the underlying newArticleSuggestions row.
@@ -50,6 +51,11 @@ export type BacklogRow = {
   codes: EmbeddedCode[];
   /** Sources attached to this article (type='new' only — empty for updates). */
   sourcesCount: number;
+  /** Of `sourcesCount`, how many have been uploaded to Gemini Files API
+   *  (i.e. have a non-empty `uri`). Drives the "Upload PDFs" affordance
+   *  on the draft column — drafting works best when all PDFs are
+   *  attached to the prompt as `fileData`. */
+  uploadedSourcesCount: number;
   /** Approved section changes for type='update' rows; undefined otherwise. */
   sections?: SectionRow[];
 };
@@ -461,12 +467,20 @@ export function BacklogView({
             —
           </Text>
         ) : (
-          <StartWritingButton
-            slug={slug}
-            articleRecordId={r.id}
-            hasSources={r.sourcesCount > 0}
-            initialRun={initialWritingRuns?.[r.id] ?? null}
-          />
+          <Inline space="xs" vAlignItems="center">
+            <UploadPdfsButton
+              slug={slug}
+              articleRecordId={r.id}
+              sourcesCount={r.sourcesCount}
+              uploadedSourcesCount={r.uploadedSourcesCount}
+            />
+            <StartWritingButton
+              slug={slug}
+              articleRecordId={r.id}
+              hasSources={r.sourcesCount > 0}
+              initialRun={initialWritingRuns?.[r.id] ?? null}
+            />
+          </Inline>
         ),
     },
   ];

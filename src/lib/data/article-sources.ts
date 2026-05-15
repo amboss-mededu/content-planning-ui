@@ -167,6 +167,20 @@ export async function listArticleSourcesForArticleAsAdmin(
 }
 
 /**
+ * Mark a single articleSources row as uploaded to Gemini Files API.
+ * `uri` becomes the canonical pointer the writing pipeline attaches
+ * as a FilePart on `generateText`; `geminiFilename` is the resource
+ * name (e.g. `files/abc-xyz`) so we can later DELETE on cleanup.
+ */
+export async function markSourceUploadedAsAdmin(
+  sourceId: string,
+  patch: { uri: string; mimeType: string; geminiFilename: string },
+): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, patch);
+}
+
+/**
  * Bulk-insert ranked sources for a single article from the
  * literature-search worker. Admin-side (no cookies in scope). Replaces
  * any existing rows for this article — re-running a search wipes the
