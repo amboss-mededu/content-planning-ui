@@ -409,28 +409,6 @@ export function CodesView({
             : `${unmappedCount.toLocaleString()} unmapped`}
         </Text>
       </Inline>
-      {categories.length > 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--space-xs, 8px)',
-            alignItems: 'center',
-          }}
-        >
-          {categories.map((c) => (
-            <Inline key={c.category} space="xxs" vAlignItems="center">
-              <Badge
-                text={`${c.category} · ${c.mapped}/${c.total}`}
-                color={c.readyForConsolidation ? 'green' : 'gray'}
-              />
-              {c.readyForConsolidation ? (
-                <Badge text="Ready for consolidation" color="green" icon="check" />
-              ) : null}
-            </Inline>
-          ))}
-        </div>
-      ) : null}
       <DataTable
         rows={codes}
         columns={columns}
