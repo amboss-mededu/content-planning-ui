@@ -303,3 +303,108 @@ export async function listCategoryOrchestration(
   });
   return out;
 }
+
+// --- Source-category rollup (backup view) ----------------------------------
+
+/**
+ * Per-row shape for the source-category progress view. Rows are unique
+ * `category` values from the codes collection — i.e. the source ontology
+ * grouping (e.g. "II.E.8.b Maternal Healthcare Disparities"), not the
+ * consolidation-step's bucketing.
+ *
+ * This is the "backup view" — useful for editors who think in the
+ * source ontology rather than the consolidation output. Same mapping
+ * + consolidation signals as `CategoryOrchestration`, just aggregated
+ * one dimension over.
+ */
+export type SourceCategoryProgress = {
+  category: string;
+  /** Set when the row covers codes whose `category` field is empty. */
+  isUncategorized: boolean;
+  numCodes: number;
+  numMappedCodes: number;
+  /** True when at least one newArticleSuggestions row cites a code from
+   *  this source category. Same per-bucket signal as `CategoryOrchestration`. */
+  hasConsolidatedOutput: boolean;
+};
+
+const UNCATEGORIZED_LABEL = '(uncategorized)';
+
+export async function listSourceCategoryProgress(
+  slug: string,
+): Promise<SourceCategoryProgress[]> {
+  await connection();
+  const pb = await userClient();
+
+  const [codes, newSuggestions] = await Promise.all([
+    pb
+      .collection<CodeRecord>('codes')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+  ]);
+
+  const codesWithConsolidatedOutput = new Set<string>();
+  for (const s of newSuggestions) {
+    const arr = s.codes;
+    if (!Array.isArray(arr)) continue;
+    for (const c of arr) {
+      if (
+        c &&
+        typeof c === 'object' &&
+        typeof (c as { code?: unknown }).code === 'string'
+      ) {
+        codesWithConsolidatedOutput.add((c as { code: string }).code);
+      }
+    }
+  }
+
+  type Bucket = {
+    key: string;
+    isUncategorized: boolean;
+    codes: Set<string>;
+    mappedCodes: Set<string>;
+  };
+  const byBucket = new Map<string, Bucket>();
+  for (const r of codes) {
+    const raw = r.category;
+    const isUncategorized = !raw;
+    const key = raw ?? UNCATEGORIZED_LABEL;
+    const entry = byBucket.get(key) ?? {
+      key,
+      isUncategorized,
+      codes: new Set<string>(),
+      mappedCodes: new Set<string>(),
+    };
+    entry.codes.add(r.code);
+    if ((r.mappedAt ?? 0) > 0) entry.mappedCodes.add(r.code);
+    byBucket.set(key, entry);
+  }
+
+  const out: SourceCategoryProgress[] = [];
+  for (const bucket of byBucket.values()) {
+    let hasConsolidatedOutput = false;
+    for (const c of bucket.codes) {
+      if (codesWithConsolidatedOutput.has(c)) {
+        hasConsolidatedOutput = true;
+        break;
+      }
+    }
+    out.push({
+      category: bucket.key,
+      isUncategorized: bucket.isUncategorized,
+      numCodes: bucket.codes.size,
+      numMappedCodes: bucket.mappedCodes.size,
+      hasConsolidatedOutput,
+    });
+  }
+
+  // Push "(uncategorized)" to the bottom; otherwise alphabetical.
+  out.sort((a, b) => {
+    if (a.isUncategorized && !b.isUncategorized) return 1;
+    if (!a.isUncategorized && b.isUncategorized) return -1;
+    return a.category.localeCompare(b.category);
+  });
+  return out;
+}

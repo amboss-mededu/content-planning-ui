@@ -1,5 +1,8 @@
 import { Suspense } from 'react';
-import { listCategoryOrchestration } from '@/lib/data/categories';
+import {
+  listCategoryOrchestration,
+  listSourceCategoryProgress,
+} from '@/lib/data/categories';
 import { getTabOverrides } from '@/lib/data/specialties';
 import { CategoriesView } from '../../_components/categories-view';
 import { MarkStepCompleteButton } from '../../_components/mark-step-complete-button';
@@ -19,13 +22,14 @@ export default async function CategoriesPage({
 }
 
 async function CategoriesData({ slug }: { slug: string }) {
-  const [rows, overrides] = await Promise.all([
+  const [rows, sourceRows, overrides] = await Promise.all([
     listCategoryOrchestration(slug),
+    listSourceCategoryProgress(slug),
     getTabOverrides(slug),
   ]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <CategoriesView rows={rows} slug={slug} />
+      <CategoriesView rows={rows} sourceRows={sourceRows} slug={slug} />
       <div>
         <MarkStepCompleteButton
           slug={slug}
