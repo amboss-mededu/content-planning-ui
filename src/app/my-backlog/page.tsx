@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklogForAssignee } from '@/lib/data/article-backlog';
 import { computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleSourcesForArticleIds } from '@/lib/data/article-sources';
-import { listConsolidatedArticlesForKeys } from '@/lib/data/articles';
+import { listNewArticleSuggestionsForKeys } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
@@ -102,7 +102,7 @@ async function MyBacklogData() {
     sectionsBySlug,
     sectionReviewsBySlug,
   ] = await Promise.all([
-    listConsolidatedArticlesForKeys(newRowKeys),
+    listNewArticleSuggestionsForKeys(newRowKeys),
     listSpecialties(),
     listAssignableUsers(),
     Promise.all(
@@ -160,7 +160,7 @@ async function MyBacklogData() {
   for (const b of backlogRows) {
     const type = b.type ?? 'new';
     if (type === 'new') {
-      // Resolve current consolidatedArticles row through the stable
+      // Resolve current newArticleSuggestions row through the stable
       // articleKey. Zombies (key doesn't resolve) are silently skipped.
       const article = articleByKey[b.articleKey];
       if (!article?.id) continue;

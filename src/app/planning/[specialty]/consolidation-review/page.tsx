@@ -2,13 +2,13 @@ import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listConsolidatedArticles } from '@/lib/data/articles';
+import { listNewArticleSuggestions } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listConsolidationCategoryReviews } from '@/lib/data/consolidation-category-reviews';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
-import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
+import type { ConsolidatedSection, NewArticleSuggestion } from '@/lib/types';
 import type { ReviewerMap, ReviewMap } from '../../_components/article-manager-modal-v2';
 import type { ArticleRow } from '../../_components/articles-view';
 import {
@@ -46,8 +46,37 @@ export default async function ConsolidationReviewPage({
   );
 }
 
-function projectArticle(slug: string, r: ConsolidatedArticle): ArticleRow {
+/**
+ * Pick the most common `category` from the linked codes. The
+ * `newArticleSuggestions` table doesn't carry a `category` column of
+ * its own (it's a deduped roll-up across categories), so we derive
+ * one to drive the consolidation-review rail's per-category grouping.
+ * Ties resolve to the first-seen category.
+ */
+function deriveCategoryFromCodes(
+  codes: Array<{ category?: string | null }>,
+): string | undefined {
+  const counts = new Map<string, number>();
+  for (const c of codes) {
+    const cat = (c.category ?? '').trim();
+    if (!cat) continue;
+    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+  }
+  if (counts.size === 0) return undefined;
+  let best: string | undefined;
+  let bestN = 0;
+  for (const [cat, n] of counts) {
+    if (n > bestN) {
+      best = cat;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+function projectArticle(slug: string, r: NewArticleSuggestion): ArticleRow {
   const codes = extractCodes(r.codes);
+  const category = deriveCategoryFromCodes(codes);
   return {
     id: r.id,
     articleKey:
@@ -56,18 +85,17 @@ function projectArticle(slug: string, r: ConsolidatedArticle): ArticleRow {
         specialtySlug: slug,
         articleTitle: r.articleTitle,
         articleId: r.articleId,
-        category: r.category,
       }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
-    category: r.category,
+    category,
     codes,
-    numCodes: r.numCodes ?? codes.length,
-    overallCoverage: r.overallCoverage,
+    numCodes: codes.length,
+    existingAmbossCoverage: r.existingAmbossCoverage,
     overallImportance: r.overallImportance,
     justification: r.justification,
     previousArticleTitleSuggestions: r.previousArticleTitleSuggestions,
-    pass: 'first',
+    pass: 'second',
   };
 }
 
@@ -120,7 +148,7 @@ async function ConsolidationReviewData({
     commentsBySection,
     user,
   ] = await Promise.all([
-    listConsolidatedArticles(slug),
+    listNewArticleSuggestions(slug),
     listConsolidatedSections(slug),
     listCodes(slug),
     listArticleReviews(slug),
