@@ -1,6 +1,7 @@
 'use client';
 
 import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
+import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
   useCallback,
@@ -107,6 +108,11 @@ export function ConsolidationReviewView({
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalOpener>(null);
   const [_pending, startTransition] = useTransition();
+  // Categories whose consolidation request is in flight. Drives the rail
+  // button's "Starting…" label so consecutive clicks don't fan out runs.
+  const [consolidatingSet, setConsolidatingSet] = useState<Set<string>>(new Set());
+  const [consolidateError, setConsolidateError] = useState<string | null>(null);
+  const router = useRouter();
 
   // Group rows by category. Both 1st-pass collections carry a `category`
   // string; rows missing one bucket under "(uncategorized)" so they're
@@ -132,10 +138,16 @@ export function ConsolidationReviewView({
     return m;
   }, [articles, sections]);
 
-  const categories = useMemo(
-    () => Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)),
-    [grouped],
-  );
+  // Rail categories = union of (categories that already have consolidated
+  // output) ∪ (categories that have mapped codes but haven't been
+  // consolidated yet). The second set is essential — without it, a
+  // freshly-mapped category never appears in the rail and the user has
+  // no way to trigger primary consolidation for it.
+  const categories = useMemo(() => {
+    const set = new Set<string>(grouped.keys());
+    for (const cat of Object.keys(mappingByCategory)) set.add(cat);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [grouped, mappingByCategory]);
 
   const [selectedCategoryRaw, setSelectedCategoryRaw] = useState<string | null>(
     initialCategory,
@@ -168,7 +180,14 @@ export function ConsolidationReviewView({
     setSelectedSectionIds(new Set());
   }, []);
 
-  const selectedBucket = selectedCategory ? grouped.get(selectedCategory) : undefined;
+  // A mapping-ready but never-consolidated category has no entry in
+  // `grouped`. Fall back to an empty bucket so the right pane still
+  // renders (the sub-tables show their empty states) and the user has
+  // a "Start consolidation" target in the rail to click.
+  const selectedBucket = useMemo(() => {
+    if (!selectedCategory) return undefined;
+    return grouped.get(selectedCategory) ?? { articles: [], sections: [] };
+  }, [selectedCategory, grouped]);
 
   // ----- Per-category aggregate counts (drives left-rail badges) -----
   const counts = useMemo(() => {
@@ -274,6 +293,47 @@ export function ConsolidationReviewView({
     [slug],
   );
 
+  // ----- Per-category consolidation trigger -----
+  const startConsolidation = useCallback(
+    async (category: string) => {
+      if (consolidatingSet.has(category)) return;
+      setConsolidateError(null);
+      setConsolidatingSet((prev) => {
+        const next = new Set(prev);
+        next.add(category);
+        return next;
+      });
+      try {
+        const res = await fetch('/api/workflows/consolidate-primary', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            specialtySlug: slug,
+            categories: [category],
+            chainSecondaries: true,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setConsolidateError(
+            body?.error ?? `HTTP ${res.status} starting consolidation for ${category}`,
+          );
+          return;
+        }
+        router.refresh();
+      } catch (e) {
+        setConsolidateError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setConsolidatingSet((prev) => {
+          const next = new Set(prev);
+          next.delete(category);
+          return next;
+        });
+      }
+    },
+    [slug, router, consolidatingSet],
+  );
+
   // ----- Modal close -----
   const closeModal = useCallback(() => setModal(null), []);
 
@@ -301,6 +361,10 @@ export function ConsolidationReviewView({
           mappingByCategory={mappingByCategory}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
+          consolidatingSet={consolidatingSet}
+          onStartConsolidation={startConsolidation}
+          consolidateError={consolidateError}
+          onDismissError={() => setConsolidateError(null)}
         />
         <div style={{ minWidth: 0 }}>
           {selectedCategory && selectedBucket ? (
@@ -399,6 +463,10 @@ function CategoryRail({
   mappingByCategory,
   selectedCategory,
   onSelect,
+  consolidatingSet,
+  onStartConsolidation,
+  consolidateError,
+  onDismissError,
 }: {
   categories: string[];
   counts: Record<
@@ -409,6 +477,10 @@ function CategoryRail({
   mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
+  consolidatingSet: Set<string>;
+  onStartConsolidation: (cat: string) => void;
+  consolidateError: string | null;
+  onDismissError: () => void;
 }) {
   return (
     <div
@@ -420,6 +492,26 @@ function CategoryRail({
       }}
     >
       <Stack space="xs">
+        {consolidateError ? (
+          <button
+            type="button"
+            onClick={onDismissError}
+            style={{
+              textAlign: 'left',
+              padding: '6px 8px',
+              border: '1px solid rgb(220, 38, 38)',
+              borderRadius: 4,
+              background: 'rgb(254, 226, 226)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color: 'rgb(127, 29, 29)',
+              fontSize: 12,
+            }}
+            title="Dismiss"
+          >
+            {consolidateError}
+          </button>
+        ) : null}
         {categories.length === 0 && (
           <Text color="secondary" size="s">
             No categories yet.
@@ -434,7 +526,7 @@ function CategoryRail({
           const itemStyle: CSSProperties = {
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'flex-start',
+            alignItems: 'stretch',
             gap: 4,
             padding: '8px 10px',
             border: '1px solid',
@@ -447,35 +539,66 @@ function CategoryRail({
             width: '100%',
           };
           const mapping = mappingByCategory[cat];
+          const isConsolidating = consolidatingSet.has(cat);
+          const hasOutput = c.total > 0;
+          // Two siblings inside a plain non-interactive container:
+          //   1) the category-select button (label + status badges)
+          //   2) an optional Start-consolidation button
+          // Avoids nested <button> (invalid HTML) and the bubbling-onClick
+          // workaround the linter rejected.
+          const selectStyle: CSSProperties = {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 4,
+            padding: 0,
+            margin: 0,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            font: 'inherit',
+            color: 'inherit',
+            textAlign: 'left',
+            width: '100%',
+          };
           return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => onSelect(cat)}
-              style={itemStyle}
-            >
-              <Text size="s" weight={isActive ? 'bold' : 'normal'}>
-                {cat}
-              </Text>
-              <Inline space="xxs" vAlignItems="center">
-                {isFlagged && <Badge text="re-run" color="red" />}
-                {allApproved && !isFlagged && <Badge text="all approved" color="green" />}
-                {!allApproved && !isFlagged && (
-                  <Text size="xs" color="secondary">
-                    {approved}/{c.total} approved
-                  </Text>
-                )}
-                {mapping ? (
-                  mapping.ready ? (
-                    <Badge text="Mapped" color="green" />
-                  ) : (
+            <div key={cat} style={itemStyle}>
+              <button type="button" onClick={() => onSelect(cat)} style={selectStyle}>
+                <Text size="s" weight={isActive ? 'bold' : 'normal'}>
+                  {cat}
+                </Text>
+                <Inline space="xxs" vAlignItems="center">
+                  {isFlagged && <Badge text="re-run" color="red" />}
+                  {allApproved && !isFlagged && (
+                    <Badge text="all approved" color="green" />
+                  )}
+                  {!allApproved && !isFlagged && hasOutput && (
+                    <Text size="xs" color="secondary">
+                      {approved}/{c.total} approved
+                    </Text>
+                  )}
+                  {mapping && !mapping.ready ? (
                     <Text size="xs" color="secondary">
                       {mapping.mapped}/{mapping.total} mapped
                     </Text>
-                  )
-                ) : null}
-              </Inline>
-            </button>
+                  ) : null}
+                </Inline>
+              </button>
+              {mapping?.ready ? (
+                <Button
+                  variant={hasOutput ? 'tertiary' : 'secondary'}
+                  fullWidth
+                  onClick={() => onStartConsolidation(cat)}
+                  disabled={isConsolidating}
+                >
+                  {isConsolidating
+                    ? 'Consolidating…'
+                    : hasOutput
+                      ? 'Re-run consolidation'
+                      : 'Start consolidation'}
+                </Button>
+              ) : null}
+            </div>
           );
         })}
       </Stack>

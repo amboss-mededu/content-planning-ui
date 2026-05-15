@@ -145,6 +145,24 @@ export async function bulkInsertConsolidatedArticlesAsAdmin(
   }
 }
 
+export async function listNewArticleSuggestionsAsAdmin(
+  slug: string,
+): Promise<Array<ArticleSuggestionRecord>> {
+  const pb = await createAdminClient();
+  return pb
+    .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+}
+
+export async function listArticleUpdateSuggestionsAsAdmin(
+  slug: string,
+): Promise<Array<ArticleSuggestionRecord>> {
+  const pb = await createAdminClient();
+  return pb
+    .collection<ArticleSuggestionRecord>('articleUpdateSuggestions')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+}
+
 export async function bulkInsertNewArticleSuggestionsAsAdmin(
   slug: string,
   rows: Array<Record<string, unknown>>,

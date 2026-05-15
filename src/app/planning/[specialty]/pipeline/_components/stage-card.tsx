@@ -552,9 +552,14 @@ export function StageCard({
   hasOutput,
   manualOverride,
   manualSkipped,
+  children,
 }: {
   title: string;
   description?: string;
+  /** Optional inline start form (or other body content) rendered inside the
+   *  expanded card body, below the action buttons. Used by stages whose
+   *  trigger lives on the dashboard (e.g. the three consolidate stages). */
+  children?: React.ReactNode;
   stage: PipelineStageRow | null;
   specialtySlug: string;
   stageName: StageName;
@@ -802,6 +807,7 @@ export function StageCard({
                   />
                 ) : null}
               </Inline>
+              {children && status !== 'running' ? children : null}
               {expanded && stage ? (
                 <Stack space="xs">
                   {!useMapHistory && formatTs(stage.startedAt) ? (

@@ -184,6 +184,42 @@ export async function listUnmappedCodesAsAdmin(
     }));
 }
 
+/**
+ * Workflow-side reader of mapped codes plus their LLM-emitted suggestion
+ * blobs (`newArticlesNeeded`, `existingArticleUpdates`). The consolidation
+ * runners feed these into the per-category aggregator, then (once the
+ * real LLM dedupe prompt arrives) into the consolidation call itself.
+ */
+export async function listMappedCodesWithSuggestionsAsAdmin(
+  slug: string,
+  categories?: string[] | null,
+): Promise<
+  Array<{
+    code: string;
+    category: string | null;
+    description: string | null;
+    newArticlesNeeded: NewArticle[];
+    existingArticleUpdates: SectionUpdate[];
+  }>
+> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: `specialtySlug = "${slug}" && mappedAt > 0`,
+  });
+  const catSet = categories?.length ? new Set(categories) : null;
+  return rows
+    .filter((r) => (catSet ? r.category != null && catSet.has(r.category) : true))
+    .map((r) => ({
+      code: r.code,
+      category: r.category ?? null,
+      description: r.description ?? null,
+      newArticlesNeeded: Array.isArray(r.newArticlesNeeded) ? r.newArticlesNeeded : [],
+      existingArticleUpdates: Array.isArray(r.existingArticleUpdates)
+        ? r.existingArticleUpdates
+        : [],
+    }));
+}
+
 export async function getCodeAsAdmin(
   slug: string,
   code: string,

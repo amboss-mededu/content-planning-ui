@@ -21,6 +21,7 @@ import { PhaseGroup } from './phase-group';
 import { RunLitSearchButton } from './run-lit-search-button';
 import { SourcesCard } from './sources-card';
 import { StageCard } from './stage-card';
+import { StartConsolidationForm } from './start-consolidation-form';
 import { StartMapCodesForm } from './start-map-codes-form';
 import { StartMilestonesForm } from './start-milestones-form';
 import { StartRunForm } from './start-run-form';
@@ -413,7 +414,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualOverride={stageOverrides.consolidate_primary === true}
             manualSkipped={stageSkipped.consolidate_primary === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_primary"
+            />
+          </StageCard>
           <StageCard
             title="Articles (secondary)"
             description={
@@ -428,7 +434,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_articles ?? true}
             manualOverride={stageOverrides.consolidate_articles === true}
             manualSkipped={stageSkipped.consolidate_articles === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_articles"
+            />
+          </StageCard>
           <StageCard
             title="Sections (secondary)"
             description="Dedupe sections and updates within each consolidated article."
@@ -439,7 +450,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_sections ?? true}
             manualOverride={stageOverrides.consolidate_sections === true}
             manualSkipped={stageSkipped.consolidate_sections === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_sections"
+            />
+          </StageCard>
           <Stack space="s">
             <StageCard
               title="Literature search"
