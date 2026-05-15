@@ -207,8 +207,16 @@ export type PredatoryJournalRisk = 'none' | 'low' | 'medium' | 'high' | 'predato
 
 export interface ArticleSourceRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the newArticleSuggestions row this source is attached to. */
+  /** PB id of the newArticleSuggestions row this source is attached to.
+   *  @deprecated Use `articleKey` — the PB id is orphaned by a
+   *  consolidation re-run, the stable key survives. Kept for one
+   *  release as a backfill safety net. */
   articleRecordId: string;
+  /** Stable, content-derived article identifier (see
+   *  `src/lib/data/article-keys.ts`). Survives consolidation re-runs,
+   *  so the source list reattaches automatically. Optional on the
+   *  type because pre-migration rows may have an empty value. */
+  articleKey?: string;
   ribosomId?: string;
   title: string;
   doi?: string;

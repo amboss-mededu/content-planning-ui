@@ -80,7 +80,7 @@ export function MyBacklogView({
   categoryLookup,
   assignableUsers,
   initialBacklog,
-  initialSourcesByArticle,
+  initialSourcesByArticleKey,
   initialCommentsByArticle,
   viewerEmail,
 }: {
@@ -88,7 +88,7 @@ export function MyBacklogView({
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
-  initialSourcesByArticle: Record<string, ArticleSourceRecord[]>;
+  initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail: string;
 }) {
@@ -447,8 +447,8 @@ export function MyBacklogView({
   ];
 
   const drawerRow = drawerArticleId ? rows.find((r) => r.id === drawerArticleId) : null;
-  const drawerSources = drawerArticleId
-    ? (initialSourcesByArticle[drawerArticleId] ?? [])
+  const drawerSources = drawerRow?.articleKey
+    ? (initialSourcesByArticleKey[drawerRow.articleKey] ?? [])
     : [];
   const managerRow = managerArticleId
     ? (rows.find((r) => r.id === managerArticleId) ?? null)
@@ -503,7 +503,7 @@ export function MyBacklogView({
             slug: managerRow.specialtySlug,
             article: managerRow,
             currentStatus: statusOf(managerRow.articleKey),
-            sources: initialSourcesByArticle[managerArticleId] ?? [],
+            sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,

@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listArticleSourcesByArticle } from '@/lib/data/article-sources';
+import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
 import { listNewArticleSuggestions } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
@@ -43,22 +43,23 @@ export default async function BacklogPage({
 function projectNewArticle(
   slug: string,
   r: NewArticleSuggestion,
-  sourcesByArticle: Record<string, ArticleSourceRecord[]>,
+  sourcesByKey: Record<string, ArticleSourceRecord[]>,
 ): BacklogRow {
+  const articleKey =
+    r.articleKey ||
+    computeArticleKey({
+      specialtySlug: slug,
+      articleTitle: r.articleTitle,
+      articleId: r.articleId,
+    });
   return {
     id: r.id ?? '',
-    articleKey:
-      r.articleKey ||
-      computeArticleKey({
-        specialtySlug: slug,
-        articleTitle: r.articleTitle,
-        articleId: r.articleId,
-      }),
+    articleKey,
     type: 'new',
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     codes: extractCodes(r.codes),
-    sourcesCount: r.id ? (sourcesByArticle[r.id]?.length ?? 0) : 0,
+    sourcesCount: sourcesByKey[articleKey]?.length ?? 0,
   };
 }
 
@@ -112,7 +113,7 @@ async function BacklogData({ slug }: { slug: string }) {
     sectionRecs,
     sectionReviewRecs,
     backlogRecs,
-    sourcesByArticle,
+    sourcesByKey,
     codeRecs,
     users,
     commentsByArticleKind,
@@ -123,7 +124,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listConsolidatedSections(slug),
     listSectionReviews(slug),
     listArticleBacklog(slug),
-    listArticleSourcesByArticle(slug),
+    listArticleSourcesByArticleKey(slug),
     listCodes(slug),
     listAssignableUsers(),
     listReviewComments(slug, 'article'),
@@ -149,7 +150,7 @@ async function BacklogData({ slug }: { slug: string }) {
       });
     if (!key) continue;
     if (reviewRecs[key]?.status !== 'approved') continue;
-    newRows.push(projectNewArticle(slug, r, sourcesByArticle));
+    newRows.push(projectNewArticle(slug, r, sourcesByKey));
   }
 
   // type='update' rows: aggregate approved section reviews by parent
@@ -206,7 +207,7 @@ async function BacklogData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}
-      initialSourcesByArticle={sourcesByArticle}
+      initialSourcesByArticleKey={sourcesByKey}
       initialCommentsByArticle={initialCommentsByArticle}
       viewerEmail={user?.email ?? undefined}
     />

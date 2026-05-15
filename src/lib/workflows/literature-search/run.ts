@@ -87,14 +87,19 @@ export async function runLiteratureSearch(input: LiteratureSearchInput): Promise
           apiKeys: input.apiKeys,
         });
 
-        if (ranked.length > 0) {
-          await bulkInsertArticleSourcesAsAdmin(input.specialtySlug, article.id, ranked);
-          totalSources += ranked.length;
-        }
         const articleKey = computeArticleKey({
           specialtySlug: input.specialtySlug,
           articleTitle: article.articleTitle,
         });
+        if (ranked.length > 0) {
+          await bulkInsertArticleSourcesAsAdmin(
+            input.specialtySlug,
+            article.id,
+            articleKey,
+            ranked,
+          );
+          totalSources += ranked.length;
+        }
         if (articleKey) {
           await setArticleBacklogStatusAsAdmin(
             input.specialtySlug,

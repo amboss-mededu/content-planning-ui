@@ -25,10 +25,22 @@ export async function listArticleSourceCount(slug: string): Promise<number> {
   return list.totalItems;
 }
 
+function sortSources(list: ArticleSourceRecord[]): void {
+  list.sort((a, b) => {
+    const ar = a.rank ?? Number.POSITIVE_INFINITY;
+    const br = b.rank ?? Number.POSITIVE_INFINITY;
+    if (ar !== br) return ar - br;
+    return (a.title ?? '').localeCompare(b.title ?? '');
+  });
+}
+
 /**
  * Returns all sources for the specialty grouped by `articleRecordId`,
  * so the backlog view can render per-article source counts and a
  * drawer's row list without a second fetch.
+ *
+ * @deprecated Prefer `listArticleSourcesByArticleKey` — the PB id keying
+ * is orphaned by a consolidation re-run, the stable key survives.
  */
 export async function listArticleSourcesByArticle(
   slug: string,
@@ -44,15 +56,31 @@ export async function listArticleSourcesByArticle(
     bucket.push(r);
     out[r.articleRecordId] = bucket;
   }
-  // Stable order per article: rank ascending (nulls last), then title.
-  for (const key of Object.keys(out)) {
-    out[key].sort((a, b) => {
-      const ar = a.rank ?? Number.POSITIVE_INFINITY;
-      const br = b.rank ?? Number.POSITIVE_INFINITY;
-      if (ar !== br) return ar - br;
-      return (a.title ?? '').localeCompare(b.title ?? '');
-    });
+  for (const key of Object.keys(out)) sortSources(out[key]);
+  return out;
+}
+
+/**
+ * Returns all sources for the specialty grouped by stable `articleKey`.
+ * Used by the per-specialty backlog view; survives a consolidation
+ * re-run because the producer's articleKey is content-derived.
+ */
+export async function listArticleSourcesByArticleKey(
+  slug: string,
+): Promise<Record<string, ArticleSourceRecord[]>> {
+  await connection();
+  const pb = await userClient();
+  const rows = await pb
+    .collection<ArticleSourceRecord>('articleSources')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  const out: Record<string, ArticleSourceRecord[]> = {};
+  for (const r of rows) {
+    if (!r.articleKey) continue;
+    const bucket = out[r.articleKey] ?? [];
+    bucket.push(r);
+    out[r.articleKey] = bucket;
   }
+  for (const key of Object.keys(out)) sortSources(out[key]);
   return out;
 }
 
@@ -61,6 +89,8 @@ export async function listArticleSourcesByArticle(
  * "My Backlog" view so each row's source count + drawer have data
  * without paying one round-trip per article. Grouped by id so the
  * drawer keeps its O(1) lookup.
+ *
+ * @deprecated Prefer `listArticleSourcesForArticleKeys`.
  */
 export async function listArticleSourcesForArticleIds(
   ids: string[],
@@ -83,14 +113,41 @@ export async function listArticleSourcesForArticleIds(
       out[r.articleRecordId] = bucket;
     }
   }
-  for (const key of Object.keys(out)) {
-    out[key].sort((a, b) => {
-      const ar = a.rank ?? Number.POSITIVE_INFINITY;
-      const br = b.rank ?? Number.POSITIVE_INFINITY;
-      if (ar !== br) return ar - br;
-      return (a.title ?? '').localeCompare(b.title ?? '');
-    });
+  for (const key of Object.keys(out)) sortSources(out[key]);
+  return out;
+}
+
+/**
+ * Cross-specialty bulk fetch by stable `articleKey`. Used by the
+ * global "My Backlog" view. Survives consolidation re-runs because
+ * the key is content-derived; new sources inserted after a re-run
+ * resolve back to the same key.
+ */
+export async function listArticleSourcesForArticleKeys(
+  keys: string[],
+): Promise<Record<string, ArticleSourceRecord[]>> {
+  const out: Record<string, ArticleSourceRecord[]> = {};
+  const unique = Array.from(new Set(keys.filter((s) => s.length > 0)));
+  if (unique.length === 0) return out;
+  await connection();
+  const pb = await userClient();
+  const CHUNK = 30;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    // PB filter strings need each key escaped; articleKey is content-
+    // derived and ASCII so a simple equality match is safe.
+    const filter = chunk.map((k) => `articleKey = "${k}"`).join(' || ');
+    const rows = await pb
+      .collection<ArticleSourceRecord>('articleSources')
+      .getFullList({ filter });
+    for (const r of rows) {
+      if (!r.articleKey) continue;
+      const bucket = out[r.articleKey] ?? [];
+      bucket.push(r);
+      out[r.articleKey] = bucket;
+    }
   }
+  for (const key of Object.keys(out)) sortSources(out[key]);
   return out;
 }
 
@@ -99,10 +156,15 @@ export async function listArticleSourcesForArticleIds(
  * literature-search worker. Admin-side (no cookies in scope). Replaces
  * any existing rows for this article — re-running a search wipes the
  * prior set rather than accumulating duplicates.
+ *
+ * Identifies the target by `articleKey` (preferred — survives a
+ * consolidation re-run) and writes `articleRecordId` alongside it so
+ * the legacy id-keyed path keeps working for one overlap release.
  */
 export async function bulkInsertArticleSourcesAsAdmin(
   slug: string,
   articleRecordId: string,
+  articleKey: string,
   rows: Array<
     Omit<
       ArticleSourceRecord,
@@ -113,11 +175,19 @@ export async function bulkInsertArticleSourcesAsAdmin(
       | 'collectionName'
       | 'specialtySlug'
       | 'articleRecordId'
+      | 'articleKey'
     >
   >,
 ): Promise<void> {
   const pb = await createAdminClient();
-  const filter = `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`;
+  // Delete any prior rows that match either the stable key or the
+  // (legacy) PB id — handles the case where a partial backfill left
+  // some rows key-less; we still want re-runs to replace them.
+  const filterParts: string[] = [];
+  if (articleKey) filterParts.push(`articleKey = "${articleKey}"`);
+  if (articleRecordId) filterParts.push(`articleRecordId = "${articleRecordId}"`);
+  if (filterParts.length === 0) return;
+  const filter = `specialtySlug = "${slug}" && (${filterParts.join(' || ')})`;
   const existing = await pb
     .collection<ArticleSourceRecord>('articleSources')
     .getFullList({ filter });
@@ -126,6 +196,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
     await pb.collection('articleSources').create({
       specialtySlug: slug,
       articleRecordId,
+      articleKey,
       ...row,
     });
   }
