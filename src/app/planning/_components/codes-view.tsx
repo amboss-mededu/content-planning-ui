@@ -1,10 +1,12 @@
 'use client';
 
-import { Badge, Stack, Text } from '@amboss/design-system';
+import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { COVERAGE_LEVELS, type Code } from '@/lib/types';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable } from './data-table';
+import { RemapModal } from './remap-modal';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
 
 function countCoveredSections(items: unknown): number {
@@ -46,13 +48,20 @@ export function CodesView({
   canEdit,
   lockStatus,
   inFlightCodes,
+  categories,
+  unmappedCodes,
+  unmappedCount,
 }: {
   codes: Code[];
   specialtySlug: string;
   canEdit: boolean;
   lockStatus: string | null;
   inFlightCodes: string[];
+  categories: CodeCategorySummary[];
+  unmappedCodes: UnmappedCodePickerRow[];
+  unmappedCount: number;
 }) {
+  const [remapOpen, setRemapOpen] = useState(false);
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
 
   // Polling for in-flight mappings now lives in `CodesViewClient` via
@@ -273,7 +282,11 @@ export function CodesView({
           'Numeric depth-of-coverage score for this code (higher = better covered)',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
-          if (r.depthOfCoverage === undefined || r.depthOfCoverage === null) {
+          // depthOfCoverage is `NUMERIC DEFAULT 0 NOT NULL` — unmapped rows
+          // come back as 0, not null. Gate on `mappedAt` for the same reason
+          // as the In AMBOSS column above.
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped || r.depthOfCoverage === undefined || r.depthOfCoverage === null) {
             return <EmptyChip />;
           }
           return (
@@ -284,9 +297,13 @@ export function CodesView({
         },
         width: 90,
         align: 'center',
-        accessor: (r) => r.depthOfCoverage ?? null,
+        accessor: (r) => ((r.mappedAt ?? 0) > 0 ? (r.depthOfCoverage ?? null) : null),
         type: 'number',
         filterable: true,
+        filterValue: (r) =>
+          (r.mappedAt ?? 0) > 0 && typeof r.depthOfCoverage === 'number'
+            ? String(r.depthOfCoverage)
+            : undefined,
         group: 'coverage',
       },
       {
@@ -367,6 +384,7 @@ export function CodesView({
     ];
   }, [onOpenDetail, inFlightSet]);
 
+  const canRemap = canEdit && unmappedCount > 0;
   return (
     <Stack space="m">
       {!canEdit ? (
@@ -375,6 +393,43 @@ export function CodesView({
           re-mapping of already-mapped codes are disabled. Reset the consolidation stage
           on the pipeline page to re-enable. Unmapped codes can still be mapped from here.
         </Text>
+      ) : null}
+      <Inline space="s" vAlignItems="center">
+        <Button
+          variant="secondary"
+          size="m"
+          onClick={() => setRemapOpen(true)}
+          disabled={!canRemap}
+        >
+          Map by category…
+        </Button>
+        <Text color="secondary">
+          {unmappedCount === 0
+            ? 'All codes mapped.'
+            : `${unmappedCount.toLocaleString()} unmapped`}
+        </Text>
+      </Inline>
+      {categories.length > 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-xs, 8px)',
+            alignItems: 'center',
+          }}
+        >
+          {categories.map((c) => (
+            <Inline key={c.category} space="xxs" vAlignItems="center">
+              <Badge
+                text={`${c.category} · ${c.mapped}/${c.total}`}
+                color={c.readyForConsolidation ? 'green' : 'gray'}
+              />
+              {c.readyForConsolidation ? (
+                <Badge text="Ready for consolidation" color="green" icon="check" />
+              ) : null}
+            </Inline>
+          ))}
+        </div>
       ) : null}
       <DataTable
         rows={codes}
@@ -401,6 +456,14 @@ export function CodesView({
         lockStatus={lockStatus}
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
         onClose={() => setSelected(null)}
+      />
+      <RemapModal
+        open={remapOpen}
+        onClose={() => setRemapOpen(false)}
+        specialtySlug={specialtySlug}
+        categories={categories}
+        unmappedCodes={unmappedCodes}
+        unmappedCount={unmappedCount}
       />
     </Stack>
   );

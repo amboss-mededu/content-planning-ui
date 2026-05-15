@@ -8,10 +8,11 @@
  * rather than React context — keeps the two render trees independent and
  * the selection survives page reloads.
  *
- * No defaults: a fresh entry returns `null`. The mapping backup has its
- * own dedicated key + the only default in the system (Claude Opus 4.7 at
- * adaptive thinking) since that's what every map-codes run needs as a
- * fallback when the primary still produces invalid IDs.
+ * Defaults: every stage has a hard-coded default in `DEFAULT_MODELS` so the
+ * editor never has to pick one before running. `useModelSelection` still
+ * returns `null` for "no override stored" so the UI can show the user
+ * whether they're on a default or an override; `readSpecForStage` is the
+ * submit-time resolver that falls back to the default.
  */
 
 import { useEffect, useState } from 'react';
@@ -65,6 +66,50 @@ export const DEFAULT_BACKUP_MODEL: ModelSpec = {
   model: 'claude-opus-4-7',
   reasoning: 'auto',
 };
+
+export const DEFAULT_MODELS: Record<string, ModelSpec> = {
+  extract_codes: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'auto',
+  },
+  extract_milestones: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'auto',
+  },
+  map_codes: {
+    provider: 'google',
+    model: 'gemini-3-flash-preview',
+    reasoning: 'auto',
+  },
+  consolidate_primary: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'auto',
+  },
+  consolidate_articles: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'auto',
+  },
+  consolidate_sections: {
+    provider: 'google',
+    model: 'gemini-3.1-pro-preview',
+    reasoning: 'auto',
+  },
+};
+
+/**
+ * Submit-time model resolver: returns the stored override if present, else
+ * the hard-coded default for this stage. The start forms call this instead
+ * of `readSpec` so editors don't have to pick a model before every run.
+ * `useModelSelection` still returns `null` when nothing's stored so the UI
+ * can render a "(default — …)" hint without conflating the two states.
+ */
+export function readSpecForStage(slug: string, stage: string): ModelSpec | null {
+  return readSpec(modelKey(slug, stage)) ?? DEFAULT_MODELS[stage] ?? null;
+}
 
 export function readSpec(key: string): ModelSpec | null {
   if (typeof window === 'undefined') return null;

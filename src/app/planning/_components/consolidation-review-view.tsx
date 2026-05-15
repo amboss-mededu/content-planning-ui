@@ -48,6 +48,7 @@ export function ConsolidationReviewView({
   articles,
   sections,
   flaggedCategories,
+  mappingByCategory,
   categoryLookup,
   titleOriginLookup,
   initialArticleReviews,
@@ -72,6 +73,12 @@ export function ConsolidationReviewView({
   articles: ArticleRow[];
   sections: SectionRow[];
   flaggedCategories: string[];
+  /** Per-category mapping snapshot, computed once on the server from the
+   *  `codes` collection. Drives the readiness chip next to each rail item.
+   *  `ready` flips true once every code in the category has `mappedAt`
+   *  set, which is the precondition for the (still-to-be-built) per-
+   *  category consolidation trigger. */
+  mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialArticleReviews: ReviewMap;
@@ -291,6 +298,7 @@ export function ConsolidationReviewView({
           categories={categories}
           counts={counts}
           flaggedSet={flaggedSet}
+          mappingByCategory={mappingByCategory}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
         />
@@ -388,6 +396,7 @@ function CategoryRail({
   categories,
   counts,
   flaggedSet,
+  mappingByCategory,
   selectedCategory,
   onSelect,
 }: {
@@ -397,6 +406,7 @@ function CategoryRail({
     { articleApproved: number; sectionApproved: number; total: number }
   >;
   flaggedSet: Set<string>;
+  mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
 }) {
@@ -436,6 +446,7 @@ function CategoryRail({
             textAlign: 'left',
             width: '100%',
           };
+          const mapping = mappingByCategory[cat];
           return (
             <button
               key={cat}
@@ -454,6 +465,15 @@ function CategoryRail({
                     {approved}/{c.total} approved
                   </Text>
                 )}
+                {mapping ? (
+                  mapping.ready ? (
+                    <Badge text="Mapped" color="green" />
+                  ) : (
+                    <Text size="xs" color="secondary">
+                      {mapping.mapped}/{mapping.total} mapped
+                    </Text>
+                  )
+                ) : null}
               </Inline>
             </button>
           );

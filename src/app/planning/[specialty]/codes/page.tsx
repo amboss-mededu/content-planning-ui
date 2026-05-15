@@ -1,4 +1,10 @@
-import { listCodes, listInFlightCodes } from '@/lib/data/codes';
+import {
+  listCodeCategories,
+  listCodes,
+  listInFlightCodes,
+  listUnmappedCodeCount,
+  listUnmappedCodesForPicker,
+} from '@/lib/data/codes';
 import { getConsolidationLockState } from '@/lib/data/pipeline';
 import { CodesViewClient } from './codes-view-client';
 
@@ -10,11 +16,15 @@ export default async function CodesPage({
   const { specialty: slug } = await params;
 
   // RSC fetches the snapshot; the client hook subscribes to PB live updates.
-  const [lock, codes, inFlight] = await Promise.all([
-    getConsolidationLockState(slug),
-    listCodes(slug),
-    listInFlightCodes(slug),
-  ]);
+  const [lock, codes, inFlight, categories, unmappedPicker, unmappedCount] =
+    await Promise.all([
+      getConsolidationLockState(slug),
+      listCodes(slug),
+      listInFlightCodes(slug),
+      listCodeCategories(slug),
+      listUnmappedCodesForPicker(slug),
+      listUnmappedCodeCount(slug),
+    ]);
 
   return (
     <CodesViewClient
@@ -23,6 +33,9 @@ export default async function CodesPage({
       lockStatus={lock.status}
       initialCodes={codes}
       initialInFlight={inFlight}
+      categories={categories}
+      unmappedCodes={unmappedPicker}
+      unmappedCount={unmappedCount}
     />
   );
 }

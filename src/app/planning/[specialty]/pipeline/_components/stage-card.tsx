@@ -28,7 +28,7 @@ import {
 import { ApproveButton } from './approve-button';
 import { CancelButton } from './cancel-button';
 import { MarkStageCompleteButton } from './mark-stage-complete-button';
-import { MappingModelSelector, ModelSelector } from './model-selector';
+import { ModelSettingsPopover } from './model-settings-popover';
 import { ResetButton } from './reset-button';
 import { SkipStageButton } from './skip-stage-button';
 
@@ -634,9 +634,23 @@ export function StageCard({
   const isTerminal =
     status === 'completed' || status === 'failed' || status === 'skipped';
   const isCancellable = status === 'running' || status === 'awaiting_approval';
+  // Manual override wins over treatAsInProgress: once the editor explicitly
+  // marks the stage complete, partial-progress signals stop overriding the
+  // badge back to "In progress".
   const inProgressOverride =
-    treatAsInProgress === true && (status === 'completed' || status === 'approved');
-  const badgeLabel = inProgressOverride ? 'In progress' : STATUS_LABEL[status];
+    treatAsInProgress === true &&
+    manualOverride !== true &&
+    (status === 'completed' || status === 'approved');
+  // Distinguish "Marked complete" (editor override on a non-completed PB
+  // status) from "Completed" (workflow actually finished) so the source of
+  // the green badge is obvious to anyone reading the pipeline.
+  const isManualMark =
+    manualOverride === true && rawStatus !== 'completed' && rawStatus !== 'approved';
+  const badgeLabel = inProgressOverride
+    ? 'In progress'
+    : isManualMark
+      ? 'Marked complete'
+      : STATUS_LABEL[status];
   const badgeColor = inProgressOverride ? 'blue' : STATUS_COLOR[status];
   const showReset = stage !== null && (isTerminal || alwaysShowReset === true);
   // Continue is only useful when nothing is mid-flight. While running or
@@ -671,6 +685,11 @@ export function StageCard({
   const isPending = status === 'pending';
   const collapsible = !isPending;
   const showBody = !collapsible || !bodyCollapsed;
+  // The model-settings popover lives outside the collapsible header button so
+  // its click target isn't swallowed by the card's expand/collapse handler.
+  // For stages without a default model (none today — DEFAULT_MODELS covers all
+  // catalog stages), the popover would render an empty body; we still mount
+  // it so the surface is consistent across cards.
   const headerInner = (
     <Inline space="s" vAlignItems="center">
       <H5 as="h4">{title}</H5>
@@ -682,39 +701,39 @@ export function StageCard({
     <div className="card-fill">
       <Card outlined>
         <Box vSpace="m" lSpace="l" rSpace="l">
-          {collapsible ? (
-            <button
-              type="button"
-              onClick={() => setBodyCollapsed(!bodyCollapsed)}
-              aria-expanded={!bodyCollapsed}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                margin: 0,
-                cursor: 'pointer',
-                textAlign: 'left',
-                width: '100%',
-                font: 'inherit',
-                color: 'inherit',
-              }}
-            >
-              {headerInner}
-            </button>
-          ) : (
-            headerInner
-          )}
+          <Inline space="s" vAlignItems="center">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {collapsible ? (
+                <button
+                  type="button"
+                  onClick={() => setBodyCollapsed(!bodyCollapsed)}
+                  aria-expanded={!bodyCollapsed}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  {headerInner}
+                </button>
+              ) : (
+                headerInner
+              )}
+            </div>
+            <ModelSettingsPopover specialtySlug={specialtySlug} stage={stageName} />
+          </Inline>
         </Box>
         {showBody && <Divider />}
         {showBody && (
           <CardBox>
             <Stack space="s">
               {description ? <Text color="secondary">{description}</Text> : null}
-              {stageName === 'map_codes' ? (
-                <MappingModelSelector specialtySlug={specialtySlug} />
-              ) : (
-                <ModelSelector specialtySlug={specialtySlug} stage={stageName} />
-              )}
               {summary ? <Text>{summary}</Text> : null}
               {metrics ? <Text color="secondary">{metrics}</Text> : null}
               {status === 'failed' && stage?.errorMessage ? (

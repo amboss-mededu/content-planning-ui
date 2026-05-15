@@ -13,7 +13,7 @@ import { AddSourceModal } from './add-source-modal';
 import { DefaultPromptModal } from './default-prompt-modal';
 import { InputRow, type InputRowState, newInputRow } from './input-row';
 import { MissingKeyModal } from './missing-key-modal';
-import { modelKey, readSpec } from './model-selection-storage';
+import { readSpecForStage } from './model-selection-storage';
 import { PromptSection } from './prompt-section';
 
 type Row = InputRowState;
@@ -79,9 +79,12 @@ export function StartRunForm({
       }
     }
 
-    const model = readSpec(modelKey(specialtySlug, 'extract_codes'));
+    const model = readSpecForStage(specialtySlug, 'extract_codes');
     if (!model) {
-      setError('Pick a model on the Extract codes card before starting.');
+      // Defaults are hard-coded for every stage in DEFAULT_MODELS, so this
+      // only fires if the user's override resolved to an invalid catalog
+      // entry and the default lookup also missed.
+      setError('No model configured for Extract codes. Open the gear icon to pick one.');
       return;
     }
 

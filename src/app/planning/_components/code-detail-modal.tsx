@@ -10,8 +10,8 @@ import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key
 import {
   backupModelKey,
   DEFAULT_BACKUP_MODEL,
-  modelKey,
   readSpec,
+  readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
 
@@ -198,9 +198,11 @@ export function CodeDetailModal({
       );
       if (!ok) return;
     }
-    const primaryModel = readSpec(modelKey(specialtySlug, 'map_codes'));
+    const primaryModel = readSpecForStage(specialtySlug, 'map_codes');
     if (!primaryModel) {
-      setError('Pick a primary model on the Map codes pipeline card before remapping.');
+      setError(
+        'No primary model configured for Map codes. Open the gear icon on the Map codes card to pick one.',
+      );
       return;
     }
     const backupModel = readSpec(backupModelKey(specialtySlug)) ?? DEFAULT_BACKUP_MODEL;

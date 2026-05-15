@@ -114,6 +114,26 @@ async function ConsolidationReviewData({
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
+  // Per-category mapping readiness. Computed from the same `codeRecs` we
+  // already fetched — no extra query. Drives the "ready for consolidation"
+  // chip in the rail and (in a follow-up branch) the per-category
+  // consolidation trigger button.
+  const mappingByCategory: Record<
+    string,
+    { mapped: number; total: number; ready: boolean }
+  > = {};
+  for (const c of codeRecs) {
+    const cat = c.category ?? '(uncategorized)';
+    const entry = mappingByCategory[cat] ?? { mapped: 0, total: 0, ready: false };
+    entry.total += 1;
+    if ((c.mappedAt ?? 0) > 0) entry.mapped += 1;
+    mappingByCategory[cat] = entry;
+  }
+  for (const cat of Object.keys(mappingByCategory)) {
+    const e = mappingByCategory[cat];
+    e.ready = e.total > 0 && e.mapped === e.total;
+  }
+
   // Modal drill-in needs the same lineage map the New Articles tab uses
   // so previous-title chips annotate correctly. Built from the 1st-pass
   // collections that exist on this screen.
@@ -171,6 +191,7 @@ async function ConsolidationReviewData({
       articles={articles}
       sections={sections}
       flaggedCategories={Array.from(flaggedCategories)}
+      mappingByCategory={mappingByCategory}
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialArticleReviews={initialArticleReviews}

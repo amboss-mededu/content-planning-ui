@@ -96,11 +96,22 @@ export async function resetStageCascade(input: {
   stage: StageName;
 }): Promise<StageName[]> {
   const toReset = stagesToReset(input.stage);
+  // Cancel non-terminal runs *first* so any fire-and-forget workflow sees
+  // `cancelled` on its next status poll and stops writing mappedAt over
+  // rows we're about to clear.
+  await cancelStaleRunsForSpecialty(input.specialtySlug);
   for (const s of toReset) {
     await clearEditorDataForStage(s, input.specialtySlug);
     await resetStagePb({ runId: input.runId, stage: s });
   }
-  await cancelStaleRunsForSpecialty(input.specialtySlug);
+  // Belt-and-suspenders: for map_codes, a code that finished its agent call
+  // before cancellation propagated could still have stamped mappedAt
+  // between cancelStaleRuns and the per-code status re-check. Sweep once
+  // more — clearAllMappingsForSpecialtyAsAdmin is idempotent on already-
+  // unmapped rows.
+  if (toReset.includes('map_codes')) {
+    await clearAllMappingsForSpecialtyAsAdmin(input.specialtySlug);
+  }
   return toReset;
 }
 
