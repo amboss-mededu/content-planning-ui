@@ -414,10 +414,11 @@ export function SectionsView({
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
-  // Whether the table renders one row per section (default) or one row
-  // per parent article aggregating its sections.
+  // Whether the table renders one row per parent article (default — the
+  // editor-friendly view) or one row per section. The `?grouping=section`
+  // URL flips back to the per-section layout.
   const [grouping, setGrouping] = useState<'section' | 'article'>(() =>
-    params.get('grouping') === 'article' ? 'article' : 'section',
+    params.get('grouping') === 'section' ? 'section' : 'article',
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
@@ -443,7 +444,7 @@ export function SectionsView({
     const p = new URLSearchParams();
     if (kind) p.set('kind', kind);
     if (article) p.set('article', article);
-    if (grouping === 'article') p.set('grouping', 'article');
+    if (grouping === 'section') p.set('grouping', 'section');
     const qs = p.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
@@ -517,8 +518,8 @@ export function SectionsView({
           value={grouping}
           onChange={(v) => setGrouping(v === 'article' ? 'article' : 'section')}
           options={[
-            { name: 'grouping', value: 'section', label: 'By section' },
             { name: 'grouping', value: 'article', label: 'By article' },
+            { name: 'grouping', value: 'section', label: 'By section' },
           ]}
         />
         <div className="filter-cell">

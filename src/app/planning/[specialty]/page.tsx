@@ -41,13 +41,13 @@ async function OverviewData({ slug }: { slug: string }) {
       label: 'New articles',
       value: counts.newArticles,
       hint: `${counts.newArticlesApproved} approved`,
-      href: `${base}/articles`,
+      href: `${base}/articles?pass=second`,
     },
     {
       label: 'Article updates',
       value: counts.articlesWithUpdates,
       hint: `${counts.sectionsApproved} sections approved across ${counts.articlesWithApprovedSections} articles`,
-      href: `${base}/sections`,
+      href: `${base}/sections?grouping=article`,
     },
   ];
 
