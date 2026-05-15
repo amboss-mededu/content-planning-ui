@@ -4,7 +4,11 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
-import type { CodeCategoryRecord, CodeRecord } from '@/lib/pb/types';
+import type {
+  ArticleSuggestionRecord,
+  CodeCategoryRecord,
+  CodeRecord,
+} from '@/lib/pb/types';
 import type { CodeCategory } from '@/lib/types';
 
 async function userClient(): Promise<PocketBase> {
@@ -126,6 +130,14 @@ export type CategoryOrchestration = {
    *  consolidation columns are 0 across the board and the bucket is wholly
    *  orphan from the consolidation-records perspective. */
   hasAnyStatusInfo: boolean;
+  /** Codes in this bucket whose `mappedAt > 0` — the mapping pipeline has
+   *  reached a yes/no verdict on AMBOSS coverage for them. Drives the
+   *  mapping-progress + status columns. */
+  numMappedCodes: number;
+  /** True when at least one `newArticleSuggestions` row references a code
+   *  that belongs to this bucket — the strongest available per-bucket
+   *  signal that consolidation has actually produced output here. */
+  hasConsolidatedOutput: boolean;
 };
 
 const UNBUCKETED_LABEL = '(unbucketed)';
@@ -155,14 +167,37 @@ export async function listCategoryOrchestration(
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows] = await Promise.all([
+  const [codes, categoryRows, newSuggestions] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
+
+  // Set of every code-string that appears in any newArticleSuggestions
+  // row's embedded `codes` JSON. Used below to flag each bucket as
+  // "has consolidated output" iff at least one of its codes is cited
+  // by an output article — the strongest per-bucket signal that
+  // consolidation has actually run for this category.
+  const codesWithConsolidatedOutput = new Set<string>();
+  for (const s of newSuggestions) {
+    const arr = s.codes;
+    if (!Array.isArray(arr)) continue;
+    for (const c of arr) {
+      if (
+        c &&
+        typeof c === 'object' &&
+        typeof (c as { code?: unknown }).code === 'string'
+      ) {
+        codesWithConsolidatedOutput.add((c as { code: string }).code);
+      }
+    }
+  }
 
   // Build a per-code status lookup from the source-category records.
   // Priority: included > excluded > ignored. A code that appears in
@@ -193,6 +228,7 @@ export async function listCategoryOrchestration(
     key: string;
     isUnbucketed: boolean;
     codes: Set<string>;
+    mappedCodes: Set<string>;
     sources: string[];
   };
   const byBucket = new Map<string, Bucket>();
@@ -204,9 +240,11 @@ export async function listCategoryOrchestration(
       key,
       isUnbucketed,
       codes: new Set<string>(),
+      mappedCodes: new Set<string>(),
       sources: [],
     };
     entry.codes.add(r.code);
+    if ((r.mappedAt ?? 0) > 0) entry.mappedCodes.add(r.code);
     if (r.source) entry.sources.push(r.source);
     byBucket.set(key, entry);
   }
@@ -234,6 +272,14 @@ export async function listCategoryOrchestration(
       }
     }
 
+    let hasConsolidatedOutput = false;
+    for (const c of bucket.codes) {
+      if (codesWithConsolidatedOutput.has(c)) {
+        hasConsolidatedOutput = true;
+        break;
+      }
+    }
+
     out.push({
       consolidationCategory: bucket.key,
       isUnbucketed: bucket.isUnbucketed,
@@ -244,6 +290,8 @@ export async function listCategoryOrchestration(
       numTotallyIgnoredCodes: ignored,
       numOrphanCodes: orphan,
       hasAnyStatusInfo: anyStatus,
+      numMappedCodes: bucket.mappedCodes.size,
+      hasConsolidatedOutput,
     });
   }
 

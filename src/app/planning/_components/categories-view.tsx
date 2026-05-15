@@ -1,11 +1,42 @@
 'use client';
 
-import { Link, Stack, Text, Tooltip } from '@amboss/design-system';
+import { Badge, Link, Stack, Text, Tooltip } from '@amboss/design-system';
 import type { ReactNode } from 'react';
 import type { CategoryOrchestration } from '@/lib/data/categories';
 import { type Column, DataTable } from './data-table';
 
 type ChipTone = 'amber' | 'red' | 'none';
+
+type CategoryStatus = 'not-ready' | 'ready' | 'consolidated';
+
+/**
+ * Status progression per bucket:
+ *
+ *   not-ready    → some "included" codes still unmapped
+ *   ready        → every included code mapped, no consolidated output yet
+ *   consolidated → every included code mapped AND at least one
+ *                  newArticleSuggestions row cites a code from this bucket
+ *
+ * The (unbucketed) row is always "not-ready" — by definition its codes
+ * weren't picked up by the bucketing step and consolidation can't run
+ * on it. Buckets with zero included codes (only excluded/ignored) are
+ * treated as "done" once consolidation has produced any output, so the
+ * status doesn't get stuck on "ready" for buckets the editor has
+ * already curated out.
+ */
+function deriveStatus(r: {
+  isUnbucketed: boolean;
+  numMappedCodes: number;
+  numIncludedCodes: number;
+  numCodes: number;
+  hasConsolidatedOutput: boolean;
+}): CategoryStatus {
+  if (r.isUnbucketed) return 'not-ready';
+  const target = r.numIncludedCodes > 0 ? r.numIncludedCodes : r.numCodes;
+  const mapped = r.numMappedCodes >= target;
+  if (!mapped) return 'not-ready';
+  return r.hasConsolidatedOutput ? 'consolidated' : 'ready';
+}
 
 function QcChip({ value, tone }: { value: ReactNode; tone: ChipTone }) {
   // `tone === 'none'` renders an unstyled span so the cell still takes part
@@ -50,7 +81,7 @@ export function CategoriesView({
           <span style={{ color: 'inherit' }}>{label}</span>
         ) : (
           <Link
-            href={`/planning/${encodeURIComponent(slug)}/codes?consolidationCategory=${encodeURIComponent(r.consolidationCategory)}`}
+            href={`/planning/${encodeURIComponent(slug)}/mapping?consolidationCategory=${encodeURIComponent(r.consolidationCategory)}`}
           >
             {label}
           </Link>
@@ -101,6 +132,53 @@ export function CategoriesView({
       accessor: (r) => r.numCodes,
       type: 'number',
       filterable: true,
+      group: 'metadata',
+    },
+    {
+      key: 'numMappedCodes',
+      label: 'Mapped',
+      description:
+        'Codes in this bucket the mapping pipeline has stamped (mappedAt > 0). Shown as mapped/total — total is # Included when available, else # Codes.',
+      render: (r) => {
+        const target = r.numIncludedCodes > 0 ? r.numIncludedCodes : r.numCodes;
+        const tone: ChipTone = r.numMappedCodes < target ? 'amber' : 'none';
+        return <QcChip value={`${r.numMappedCodes}/${target}`} tone={tone} />;
+      },
+      width: 110,
+      align: 'center',
+      accessor: (r) => r.numMappedCodes,
+      type: 'number',
+      filterable: true,
+      group: 'metadata',
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      description:
+        'Not ready → some codes still unmapped. Ready for consolidation → all included codes mapped, awaiting consolidation. Consolidated → at least one consolidated output article cites a code from this bucket.',
+      render: (r) => {
+        const status = deriveStatus(r);
+        if (status === 'consolidated') {
+          return <Badge text="Consolidated" color="green" icon="check" />;
+        }
+        if (status === 'ready') {
+          return <Badge text="Ready for consolidation" color="brand" />;
+        }
+        return <Badge text="Not ready" color="gray" />;
+      },
+      width: 220,
+      align: 'left',
+      accessor: (r) => {
+        const status = deriveStatus(r);
+        return status === 'consolidated' ? 2 : status === 'ready' ? 1 : 0;
+      },
+      type: 'number',
+      filterable: true,
+      filterOptions: [
+        { value: '0', label: 'Not ready' },
+        { value: '1', label: 'Ready for consolidation' },
+        { value: '2', label: 'Consolidated' },
+      ],
       group: 'metadata',
     },
     {
