@@ -17,6 +17,7 @@ import type {
 } from '@/lib/pb/types';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
+import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
 import {
   IN_PROGRESS_STATUSES,
   NEXT_ACTION,
@@ -29,6 +30,7 @@ import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
 import { RegisterCortexButton } from './register-cortex-button';
+import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
 
@@ -123,6 +125,11 @@ export function BacklogView({
     useState<Record<string, ArticleBacklogRecord>>(initialBacklog);
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
+  // Multi-select for the bulk-action toolbar. Keyed by row.id (the
+  // newArticleSuggestions PB id for type='new', the parent CMS articleId
+  // for type='update'). Updates clear automatically when the row leaves
+  // the table (e.g. status filter excludes it).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -256,7 +263,34 @@ export function BacklogView({
     }
   }
 
+  const toggleRow = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const columns: Column<BacklogRow>[] = [
+    {
+      key: 'select',
+      label: '',
+      description: 'Select rows to enable bulk-action toolbar.',
+      width: 36,
+      verticalAlign: 'middle',
+      align: 'center',
+      render: (r) =>
+        r.type === 'update' ? null : (
+          <input
+            type="checkbox"
+            aria-label="Select row"
+            checked={selectedIds.has(r.id)}
+            onChange={() => toggleRow(r.id)}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ),
+    },
     {
       key: 'kind',
       label: 'Kind',
@@ -430,16 +464,25 @@ export function BacklogView({
     {
       key: 'sourcesAction',
       label: 'Sources',
-      description: 'Open the per-article sources drawer (new articles only).',
-      width: 120,
+      description:
+        'Per-row literature search (when waiting) or open the sources drawer (after sources land). New articles only.',
+      width: 200,
       verticalAlign: 'middle',
       align: 'center',
-      render: (r) =>
-        r.type === 'update' ? (
-          <Text size="xs" color="secondary">
-            —
-          </Text>
-        ) : (
+      render: (r) => {
+        if (r.type === 'update') {
+          return (
+            <Text size="xs" color="secondary">
+              —
+            </Text>
+          );
+        }
+        const s = statusOf(r.articleKey);
+        const isWaiting = s === 'waiting-for-sources' || s === 'unassigned';
+        if (isWaiting && r.sourcesCount === 0) {
+          return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
+        }
+        return (
           <Button
             variant="tertiary"
             size="s"
@@ -450,7 +493,8 @@ export function BacklogView({
           >
             View
           </Button>
-        ),
+        );
+      },
     },
     {
       key: 'draft',
@@ -483,6 +527,17 @@ export function BacklogView({
         ),
     },
   ];
+
+  // Mapping selected row id → effective backlog status, so the bulk
+  // toolbar can show per-stage eligibility counts. Rows that no longer
+  // appear in `rows` (e.g. filtered out) get pruned silently.
+  const statusByRowId = useMemo(() => {
+    const out: Record<string, ArticleBacklogStatus | undefined> = {};
+    for (const r of rows) out[r.id] = statusOf(r.articleKey);
+    return out;
+  }, [rows, statusOf]);
+
+  const selectedIdsArr = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
   const drawerRow = drawerArticleId ? rows.find((r) => r.id === drawerArticleId) : null;
   const drawerSources = drawerRow?.articleKey
@@ -524,6 +579,14 @@ export function BacklogView({
           />
         </div>
       </Inline>
+      {selectedIds.size > 0 && (
+        <BacklogBulkToolbar
+          slug={slug}
+          selectedIds={selectedIdsArr}
+          statusById={statusByRowId}
+          onClear={() => setSelectedIds(new Set())}
+        />
+      )}
       <DataTable
         rows={filtered}
         columns={columns}
