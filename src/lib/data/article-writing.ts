@@ -27,6 +27,7 @@ export async function createWritingRunAsAdmin(input: {
   specialtySlug: string;
   articleRecordId: string;
   requestedByEmail?: string | null;
+  requestedByUserId?: string | null;
   language?: string;
   articleLength?: string;
   useTextBubbles?: boolean;
@@ -41,6 +42,7 @@ export async function createWritingRunAsAdmin(input: {
     status: 'queued',
     startedAt: Date.now(),
     requestedByEmail: input.requestedByEmail ?? '',
+    requestedByUserId: input.requestedByUserId ?? '',
     language: input.language ?? '',
     articleLength: input.articleLength ?? '',
     useTextBubbles: input.useTextBubbles ?? true,
@@ -48,6 +50,68 @@ export async function createWritingRunAsAdmin(input: {
     modelId: input.modelId ?? '',
     modelReasoning: input.modelReasoning ?? '',
   });
+}
+
+/**
+ * List up to `limit` queued runs ordered by creation time. Used by the
+ * dispatcher to find the next work to claim. Admin-side because the
+ * dispatcher has no user cookies.
+ */
+export async function listQueuedWritingRunsAsAdmin(
+  limit = 20,
+): Promise<ArticleWritingRunRecord[]> {
+  const pb = await createAdminClient();
+  return await pb.collection<ArticleWritingRunRecord>('articleWritingRuns').getFullList({
+    filter: 'status = "queued"',
+    sort: 'created',
+    batch: limit,
+  });
+}
+
+/**
+ * Reset any rows the previous process left in `running` to `failed`.
+ * Called once at dispatcher boot — there is no resume; the editor
+ * retries via the row's "Re-run" button.
+ */
+export async function reapStuckWritingRunsAsAdmin(): Promise<number> {
+  const pb = await createAdminClient();
+  const stuck = await pb
+    .collection<ArticleWritingRunRecord>('articleWritingRuns')
+    .getFullList({ filter: 'status = "running"' });
+  await Promise.all(
+    stuck.map((r) =>
+      pb.collection('articleWritingRuns').update(r.id, {
+        status: 'failed',
+        finishedAt: Date.now(),
+        errorMessage: 'process_restart',
+      }),
+    ),
+  );
+  return stuck.length;
+}
+
+/**
+ * Optimistic claim — flip a row from `queued` to `running` only if it
+ * is still `queued` when we look at it. Returns the post-update row on
+ * success, null when someone else claimed it first (or the editor
+ * cancelled before we got to it).
+ */
+export async function claimQueuedWritingRunAsAdmin(
+  runId: string,
+): Promise<ArticleWritingRunRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    const row = await pb
+      .collection<ArticleWritingRunRecord>('articleWritingRuns')
+      .getOne(runId);
+    if (row.status !== 'queued') return null;
+    const updated = await pb
+      .collection<ArticleWritingRunRecord>('articleWritingRuns')
+      .update(runId, { status: 'running', startedAt: Date.now() });
+    return updated;
+  } catch {
+    return null;
+  }
 }
 
 export async function updateWritingRunAsAdmin(
