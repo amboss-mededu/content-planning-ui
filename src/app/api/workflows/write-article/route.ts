@@ -1,24 +1,27 @@
 /**
- * Trigger endpoint for the article-writing pipeline.
+ * Enqueue article-writing run(s).
  *
  * POST /api/workflows/write-article
- *   body: {
- *     specialtySlug: string;
- *     articleRecordId: string;             // newArticleSuggestions PB id
- *     language?: string;                   // default: specialty.language || 'en'
- *     articleLength?: string;              // default 'medium' — passed through to LLM
- *     useTextBubbles?: boolean;            // default true
- *     model: ModelSpec;
- *   }
+ *   body: one of
+ *     {
+ *       specialtySlug, articleRecordId,                // single enqueue
+ *       language?, articleLength?, useTextBubbles?,
+ *       model: ModelSpec,
+ *     }
+ *     {
+ *       specialtySlug, articleRecordIds: string[],     // bulk enqueue
+ *       ...same options...
+ *     }
  *
- * Validates that:
+ * Per-article validation:
  *   - the article exists in newArticleSuggestions
  *   - at least one source row is attached
- *   - the chosen model's provider has an API key resolvable
+ * The chosen model's provider is checked once at the request level.
  *
- * Then creates an `articleWritingRuns` row in status='queued' and fires
- * the workflow off (fire-and-forget — the route returns the runId
- * immediately so the UI can subscribe to live updates).
+ * Creates one `articleWritingRuns` row per article with status='queued'.
+ * The in-process dispatcher picks queued rows up and runs them under a
+ * bounded semaphore (`MAX_CONCURRENT` in dispatcher.ts). Bulk callers
+ * receive an array of runIds + a per-article outcome list.
  */
 
 import { revalidateTag } from 'next/cache';
@@ -30,16 +33,24 @@ import { getNewArticleSuggestionByIdAsAdmin } from '@/lib/data/articles';
 import { getSpecialty } from '@/lib/data/specialties';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
-import { writeArticleWorkflow } from '@/lib/workflows/writing/write-article';
 
 type Body = {
   specialtySlug?: string;
   articleRecordId?: string;
+  articleRecordIds?: string[];
   language?: string;
   articleLength?: string;
   useTextBubbles?: boolean;
   model?: unknown;
 };
+
+type EnqueueOutcome =
+  | { articleRecordId: string; status: 'enqueued'; runId: string }
+  | {
+      articleRecordId: string;
+      status: 'skipped';
+      reason: 'NOT_FOUND' | 'NO_TITLE' | 'NO_SOURCES';
+    };
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
@@ -47,13 +58,18 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as Body;
   const slug = body.specialtySlug?.trim();
-  const articleRecordId = body.articleRecordId?.trim();
-
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
   }
-  if (!articleRecordId) {
-    return NextResponse.json({ error: 'articleRecordId required' }, { status: 400 });
+
+  const ids =
+    body.articleRecordIds?.filter((s) => typeof s === 'string' && s.length > 0) ??
+    (body.articleRecordId ? [body.articleRecordId.trim()] : []);
+  if (ids.length === 0) {
+    return NextResponse.json(
+      { error: 'articleRecordId or articleRecordIds required' },
+      { status: 400 },
+    );
   }
 
   const modelParse = parseModelSpec(body.model);
@@ -67,33 +83,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }
 
-  const article = await getNewArticleSuggestionByIdAsAdmin(articleRecordId);
-  if (!article || article.specialtySlug !== slug) {
-    return NextResponse.json(
-      { error: `article not found in specialty ${slug}: ${articleRecordId}` },
-      { status: 404 },
-    );
-  }
-  const articleTitle = article.articleTitle?.trim();
-  if (!articleTitle) {
-    return NextResponse.json(
-      { error: 'article has no articleTitle — cannot draft' },
-      { status: 409 },
-    );
-  }
-
-  const sources = await listArticleSourcesForArticleAsAdmin(slug, articleRecordId);
-  if (sources.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          'No sources attached. Run literature search and approve sources before drafting.',
-        code: 'NO_SOURCES',
-      },
-      { status: 409 },
-    );
-  }
-
+  // API-key gate: at enqueue time the provider key must be resolvable
+  // for the current user, otherwise the dispatcher would just fail
+  // every run with MISSING_API_KEY. Fail fast so the UI can route the
+  // user to Settings.
   const apiKeys = await resolveApiKeysForRun([model.provider]);
   if (!apiKeys[model.provider]) {
     return NextResponse.json(
@@ -108,47 +101,53 @@ export async function POST(req: NextRequest) {
 
   const viewer = await getCurrentUser();
   const requestedByEmail = viewer?.email ?? null;
+  const requestedByUserId = viewer?._id ?? null;
 
   const language = body.language?.trim() || 'en';
   const articleLength = body.articleLength?.trim() || 'medium';
   const useTextBubbles = body.useTextBubbles !== false;
 
-  const run = await createWritingRunAsAdmin({
-    specialtySlug: slug,
-    articleRecordId,
-    requestedByEmail,
-    language,
-    articleLength,
-    useTextBubbles,
-    modelProvider: model.provider,
-    modelId: model.model,
-    modelReasoning: model.reasoning,
-  });
-
-  // Fire-and-forget — the writing run continues past the response on
-  // this long-lived Node server.
-  void writeArticleWorkflow({
-    runId: run.id,
-    specialtySlug: slug,
-    articleRecordId,
-    articleTitle,
-    language,
-    articleLength,
-    useTextBubbles,
-    sources,
-    model,
-    apiKeys,
-    requestedByEmail,
-  }).catch((e) => {
-    console.error('[write-article] workflow unhandled rejection', e);
-  });
+  const outcomes: EnqueueOutcome[] = [];
+  for (const articleRecordId of ids) {
+    const article = await getNewArticleSuggestionByIdAsAdmin(articleRecordId);
+    if (!article || article.specialtySlug !== slug) {
+      outcomes.push({ articleRecordId, status: 'skipped', reason: 'NOT_FOUND' });
+      continue;
+    }
+    if (!article.articleTitle?.trim()) {
+      outcomes.push({ articleRecordId, status: 'skipped', reason: 'NO_TITLE' });
+      continue;
+    }
+    const sources = await listArticleSourcesForArticleAsAdmin(slug, articleRecordId);
+    if (sources.length === 0) {
+      outcomes.push({ articleRecordId, status: 'skipped', reason: 'NO_SOURCES' });
+      continue;
+    }
+    const run = await createWritingRunAsAdmin({
+      specialtySlug: slug,
+      articleRecordId,
+      requestedByEmail,
+      requestedByUserId,
+      language,
+      articleLength,
+      useTextBubbles,
+      modelProvider: model.provider,
+      modelId: model.model,
+      modelReasoning: model.reasoning,
+    });
+    outcomes.push({ articleRecordId, status: 'enqueued', runId: run.id });
+  }
 
   revalidateTag(`specialty:${slug}`, 'max');
 
+  const enqueued = outcomes.filter((o) => o.status === 'enqueued').length;
+  const skipped = outcomes.length - enqueued;
+
   return NextResponse.json({
-    runId: run.id,
     specialty: slug,
-    articleRecordId,
+    enqueued,
+    skipped,
+    outcomes,
     passes: 6,
   });
 }

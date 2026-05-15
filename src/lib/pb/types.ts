@@ -474,6 +474,11 @@ export interface ArticleWritingRunRecord extends PbRecord {
   finishedAt?: number;
   errorMessage?: string;
   requestedByEmail?: string;
+  /** PB id of the user who clicked Start. Used by the dispatcher to
+   *  resolve the per-user API key at dispatch time — the request-time
+   *  cookie isn't available later. Empty for legacy rows + falls back
+   *  to env-level keys at dispatch. */
+  requestedByUserId?: string;
   language?: string;
   articleLength?: string;
   useTextBubbles?: boolean;
