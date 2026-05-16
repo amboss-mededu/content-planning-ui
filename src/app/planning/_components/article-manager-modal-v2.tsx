@@ -26,6 +26,7 @@ import type {
   SourceReviewStatus,
 } from '@/lib/pb/types';
 import {
+  getLatestDraftForArticle,
   resetArticleReview,
   resetSectionReview,
   submitArticleReview,
@@ -36,16 +37,24 @@ import {
 } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import {
+  type ArticleManagerPhase,
+  PHASE_LABEL,
+  PHASE_TO_STATUS,
   STATUS_COLOR,
   STATUS_LABEL,
-  STATUS_OPTIONS,
-  statusToStepValue,
 } from './backlog-constants';
 import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
-import { canDraft, canRunLitSearch } from './pipeline-stage-gates';
+import {
+  canApproveSources,
+  canDraft,
+  canRunLitSearch,
+  canStartDraft,
+  missingCortexIdCount,
+  phaseFromStatus,
+} from './pipeline-stage-gates';
 import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
@@ -665,18 +674,13 @@ function BacklogManagerView({
           )}
 
           <Stepper current={currentStatus} onPick={pickStatus} />
-          <StepBody
+          <PhaseBody
             status={currentStatus}
             sources={sources}
             slug={slug}
-            viewerEmail={viewerEmail}
-          />
-
-          <PipelineActionsSection
-            slug={slug}
             articleRecordId={article.id}
-            currentStatus={currentStatus}
-            sources={sources}
+            viewerEmail={viewerEmail}
+            onAdvance={pickStatus}
           />
 
           <DecisionNoteField
@@ -819,25 +823,6 @@ const RISK_COLOR: Record<PredatoryJournalRisk, BadgeColor> = {
   medium: 'yellow',
   high: 'red',
   predatory: 'purple',
-};
-
-const STEP_COPY: Record<ArticleBacklogStatus, string> = {
-  unassigned: 'This article is waiting for the first literature search.',
-  'waiting-for-sources':
-    'No sources fetched yet. Run the Literature search card on the Pipeline tab to fetch and rank PubMed candidates for every article in this state.',
-  'sources-searched':
-    'PubMed ranked these sources for this article. Review the list and move to "Sources approved" once you\'re satisfied.',
-  'sources-approved':
-    'The source list is locked in. Next: upload the source PDFs to Cortex CMS, then mark this article as ready for the LLM draft.',
-  'ready-for-llm-draft':
-    'Sources are in Cortex. Trigger article-draft generation when ready (coming in a follow-up). Once the draft is back, move this article to "Ready for editing".',
-  'ready-for-editing':
-    'The LLM draft is in Cortex CMS. Open it there to start editing. When you begin, move this article to "Editing in progress".',
-  'editing-in-progress':
-    'Editing is happening in Cortex CMS. When the article is ready for a final pass, move it to "Ready to publish".',
-  'ready-to-publish':
-    'Final review checklist (coming in a follow-up). When done, mark this article as "Published".',
-  published: 'This article has been published.',
 };
 
 const tableStyle: CSSProperties = {
@@ -1343,14 +1328,6 @@ function SourceDecisionCell({
   );
 }
 
-type StepState = 'completed' | 'current' | 'upcoming';
-
-function stepStateFor(stepIndex: number, currentIndex: number): StepState {
-  if (stepIndex < currentIndex) return 'completed';
-  if (stepIndex === currentIndex) return 'current';
-  return 'upcoming';
-}
-
 const stepButtonBase: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
@@ -1378,6 +1355,97 @@ const circleBase: CSSProperties = {
   fontWeight: 600,
 };
 
+const PHASES: ArticleManagerPhase[] = [1, 2, 3, 4, 5, 6, 7];
+
+function DraftPreview({
+  slug,
+  articleRecordId,
+}: {
+  slug: string;
+  articleRecordId: string;
+}) {
+  type State =
+    | { kind: 'loading' }
+    | { kind: 'empty' }
+    | { kind: 'ready'; pass: string; output: string; finishedAt?: number }
+    | { kind: 'error'; message: string };
+  const [state, setState] = useState<State>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: 'loading' });
+    getLatestDraftForArticle(slug, articleRecordId)
+      .then((d) => {
+        if (cancelled) return;
+        if (!d) {
+          setState({ kind: 'empty' });
+          return;
+        }
+        setState({
+          kind: 'ready',
+          pass: d.pass,
+          output: d.output,
+          finishedAt: d.finishedAt,
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setState({ kind: 'error', message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, articleRecordId]);
+
+  if (state.kind === 'loading') {
+    return (
+      <Text size="s" color="secondary">
+        Loading draft…
+      </Text>
+    );
+  }
+  if (state.kind === 'error') {
+    return (
+      <Text size="s" color="error">
+        Failed to load draft: {state.message}
+      </Text>
+    );
+  }
+  if (state.kind === 'empty') {
+    return (
+      <Text size="s" color="secondary">
+        No completed draft yet.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="xs">
+      <Text size="xs" color="secondary">
+        Pass: {state.pass}
+        {state.finishedAt ? ` · ${new Date(state.finishedAt).toLocaleString()}` : ''}
+      </Text>
+      <div
+        style={{
+          maxHeight: '50vh',
+          overflow: 'auto',
+          border: '1px solid rgba(0, 0, 0, 0.12)',
+          borderRadius: 6,
+          padding: 16,
+          background: 'white',
+          fontSize: 14,
+          lineHeight: 1.5,
+        }}
+        // Output is HTML from our own LLM pipeline; not user input. v1
+        // skips sanitization. If risk concerns surface later, wrap with
+        // DOMPurify.
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted internal LLM output
+        dangerouslySetInnerHTML={{ __html: state.output }}
+      />
+    </Stack>
+  );
+}
+
 function Stepper({
   current,
   onPick,
@@ -1385,8 +1453,7 @@ function Stepper({
   current: ArticleBacklogStatus;
   onPick: (next: ArticleBacklogStatus) => void;
 }) {
-  const stepValue = statusToStepValue(current);
-  const currentIndex = STATUS_OPTIONS.findIndex((s) => s.value === stepValue);
+  const currentPhase = phaseFromStatus(current);
 
   return (
     <div
@@ -1398,10 +1465,10 @@ function Stepper({
         alignItems: 'center',
       }}
     >
-      {STATUS_OPTIONS.map((step, i) => {
-        const state = stepStateFor(i, currentIndex < 0 ? 0 : currentIndex);
-        const isCurrent = state === 'current';
-        const isCompleted = state === 'completed';
+      {PHASES.map((phase) => {
+        const isCurrent = phase === currentPhase;
+        const isCompleted = phase < currentPhase;
+        const isFuture = phase > currentPhase;
         const buttonStyle: CSSProperties = {
           ...stepButtonBase,
           background: isCurrent ? 'rgb(255, 248, 230)' : 'white',
@@ -1414,8 +1481,10 @@ function Stepper({
             ? 'rgb(120, 70, 0)'
             : isCompleted
               ? 'rgb(15, 95, 50)'
-              : 'rgb(90, 90, 100)',
+              : 'rgb(140, 140, 150)',
           fontWeight: isCurrent ? 600 : 400,
+          cursor: isFuture ? 'not-allowed' : 'pointer',
+          opacity: isFuture ? 0.6 : 1,
         };
         const circleStyle: CSSProperties = {
           ...circleBase,
@@ -1424,19 +1493,23 @@ function Stepper({
             : isCurrent
               ? 'rgb(217, 119, 6)'
               : 'rgb(230, 230, 235)',
-          color: isCompleted || isCurrent ? 'white' : 'rgb(90, 90, 100)',
+          color: isCompleted || isCurrent ? 'white' : 'rgb(140, 140, 150)',
         };
         return (
           <button
-            key={step.value}
+            key={phase}
             type="button"
-            onClick={() => onPick(step.value)}
+            onClick={() => {
+              if (isFuture) return;
+              onPick(PHASE_TO_STATUS[phase]);
+            }}
             style={buttonStyle}
             aria-current={isCurrent ? 'step' : undefined}
-            title={step.label}
+            aria-disabled={isFuture}
+            title={PHASE_LABEL[phase]}
           >
-            <span style={circleStyle}>{isCompleted ? '✓' : i + 1}</span>
-            <span>{step.label}</span>
+            <span style={circleStyle}>{isCompleted ? '✓' : phase}</span>
+            <span>{PHASE_LABEL[phase]}</span>
           </button>
         );
       })}
@@ -1444,91 +1517,159 @@ function Stepper({
   );
 }
 
-function PipelineActionsSection({
-  slug,
-  articleRecordId,
-  currentStatus,
-  sources,
-}: {
-  slug: string;
-  articleRecordId: string;
-  currentStatus: ArticleBacklogStatus;
-  sources: ArticleSourceRecord[];
-}) {
-  const sourcesCount = sources.length;
-  const showLit = canRunLitSearch(currentStatus, sourcesCount);
-  const showDraft = canDraft(currentStatus);
-  if (!showLit && !showDraft) return null;
-  return (
-    <Stack space="xs">
-      <Text size="s" weight="bold">
-        Pipeline
-      </Text>
-      <Inline space="s" vAlignItems="center">
-        {showLit && (
-          <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
-        )}
-        {showDraft && (
-          <StartWritingButton
-            slug={slug}
-            articleRecordId={articleRecordId}
-            hasSources={sourcesCount > 0}
-            initialRun={null}
-          />
-        )}
-      </Inline>
-    </Stack>
-  );
-}
+const PHASE_COPY: Record<ArticleManagerPhase, string> = {
+  1: 'No sources fetched yet. Run a literature search to fetch and rank PubMed candidates for this article.',
+  2: 'PubMed ranked these sources. Approve the ones to keep and reject the rest — then advance to prioritize.',
+  3: 'Drag to reorder by priority. Paste the Cortex Source ID for every approved source — the draft step needs all of them.',
+  4: 'Article draft is being generated. The dispatcher runs up to 3 articles concurrently.',
+  5: "Preview the latest draft. When you've finished editing in Cortex, mark the article ready to publish.",
+  6: 'Final QC check before publishing. Mark as published when the article is live.',
+  7: 'Article is published.',
+};
 
-function StepBody({
+function PhaseBody({
   status,
   sources,
   slug,
+  articleRecordId,
   viewerEmail,
+  onAdvance,
 }: {
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
   slug: string;
+  articleRecordId: string;
   viewerEmail?: string;
+  onAdvance: (next: ArticleBacklogStatus) => void;
 }) {
-  const copy = STEP_COPY[status];
-  if (status === 'sources-searched' || status === 'sources-approved') {
-    const isPriorityMode = status === 'sources-approved';
-    const visible = isPriorityMode
-      ? sources
-          .filter((s) => s.reviewStatus === 'approved')
-          .slice()
-          .sort(
-            (a, b) =>
-              (a.priority ?? Number.POSITIVE_INFINITY) -
-              (b.priority ?? Number.POSITIVE_INFINITY),
-          )
-      : sources;
+  const phase = phaseFromStatus(status);
+  const copy = PHASE_COPY[phase];
+
+  if (phase === 1) {
     return (
       <Stack space="m">
         <Text color="secondary">{copy}</Text>
-        {isPriorityMode ? (
+        {canRunLitSearch(status, sources.length) ? (
           <Inline space="s" vAlignItems="center">
-            <Badge text="Sources approved" color="green" />
-            <Text size="s" color="secondary">
-              {visible.length} source{visible.length === 1 ? '' : 's'} locked in · drag to
-              reorder
-            </Text>
+            <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
           </Inline>
         ) : null}
+      </Stack>
+    );
+  }
+
+  if (phase === 2) {
+    const approveEnabled = canApproveSources(sources);
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
+        <SourcesTable
+          sources={sources}
+          slug={slug}
+          viewerEmail={viewerEmail}
+          mode="curation"
+        />
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            disabled={!approveEnabled}
+            onClick={() => onAdvance('sources-approved')}
+          >
+            Approve sources
+          </Button>
+          {!approveEnabled ? (
+            <Text size="xs" color="secondary">
+              Approve at least one source to continue.
+            </Text>
+          ) : null}
+        </Inline>
+      </Stack>
+    );
+  }
+
+  if (phase === 3) {
+    const visible = sources
+      .filter((s) => s.reviewStatus === 'approved')
+      .slice()
+      .sort(
+        (a, b) =>
+          (a.priority ?? Number.POSITIVE_INFINITY) -
+          (b.priority ?? Number.POSITIVE_INFINITY),
+      );
+    const draftReady = canStartDraft(sources);
+    const missingIds = missingCortexIdCount(sources);
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
         <SourcesTable
           sources={visible}
           slug={slug}
           viewerEmail={viewerEmail}
-          mode={isPriorityMode ? 'priority' : 'curation'}
+          mode="priority"
         />
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            disabled={!draftReady}
+            onClick={() => onAdvance('ready-for-llm-draft')}
+          >
+            Ready to draft
+          </Button>
+          {!draftReady ? (
+            <Text size="xs" color="secondary">
+              {missingIds > 0
+                ? `Paste Source IDs for ${missingIds} more source${missingIds === 1 ? '' : 's'} to continue.`
+                : 'Approve at least one source to continue.'}
+            </Text>
+          ) : null}
+        </Inline>
       </Stack>
     );
   }
+
+  if (phase === 4) {
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
+        {canDraft(status) ? (
+          <Inline space="s" vAlignItems="center">
+            <StartWritingButton
+              slug={slug}
+              articleRecordId={articleRecordId}
+              hasSources={sources.length > 0}
+              initialRun={null}
+            />
+          </Inline>
+        ) : null}
+      </Stack>
+    );
+  }
+
+  // Phases 5, 6, 7 — preview the latest draft + advance buttons.
   return (
-    <Stack space="s">
-      <Text>{copy}</Text>
+    <Stack space="m">
+      <Text color="secondary">{copy}</Text>
+      <DraftPreview slug={slug} articleRecordId={articleRecordId} />
+      {phase === 5 ? (
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            onClick={() => onAdvance('ready-to-publish')}
+          >
+            Mark ready to publish
+          </Button>
+        </Inline>
+      ) : null}
+      {phase === 6 ? (
+        <Inline space="s" vAlignItems="center">
+          <Button variant="primary" size="s" onClick={() => onAdvance('published')}>
+            Mark published
+          </Button>
+        </Inline>
+      ) : null}
     </Stack>
   );
 }

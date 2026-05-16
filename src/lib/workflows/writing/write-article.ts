@@ -159,6 +159,18 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
         status: 'running',
       });
 
+      // Writer ingests only sources the editor has approved AND that
+      // carry a Cortex source ID. The phase-3 UI gate enforces this
+      // before enqueue; this filter makes it load-bearing at the
+      // workflow boundary so a queued run from an older code path can't
+      // smuggle rejected/un-IDed sources into the LLM context.
+      const draftableSources = liveSources.filter(
+        (s) =>
+          s.reviewStatus === 'approved' &&
+          typeof s.cortexSourceId === 'string' &&
+          s.cortexSourceId.length > 0,
+      );
+
       try {
         const result = await runWritingPass(pass as WritingPass, {
           runId: input.runId,
@@ -168,7 +180,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
           language: input.language,
           articleLength: input.articleLength,
           useTextBubbles: input.useTextBubbles,
-          sources: liveSources,
+          sources: draftableSources,
           model: input.model,
           apiKeys: input.apiKeys,
           previousOutput,

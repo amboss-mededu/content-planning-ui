@@ -15,6 +15,7 @@ import {
   setArticleSourceReviewAsAdmin,
   setSourcesPriorityAsAdmin,
 } from '@/lib/data/article-sources';
+import { listDraftsForArticle } from '@/lib/data/article-writing';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
@@ -105,6 +106,39 @@ export async function submitSourceCortexId(
 ): Promise<void> {
   await markSourceCortexRegisteredAsAdmin(sourceId, value);
   updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Return the most recent completed `copy` (final) pass output for an
+ * article, or null if no completed run exists yet. Used by the modal's
+ * draft-preview panel (phases 5-7). Cheap — one PB filter query.
+ */
+export async function getLatestDraftForArticle(
+  slug: string,
+  articleRecordId: string,
+): Promise<{ pass: string; output: string; finishedAt?: number } | null> {
+  const drafts = await listDraftsForArticle(slug, articleRecordId);
+  // listDraftsForArticle returns rows sorted by -startedAt; pick the most
+  // recent completed run's final pass.
+  const copyPass = drafts.find((d) => d.pass === 'copy' && d.status === 'completed');
+  if (copyPass?.output) {
+    return {
+      pass: copyPass.pass,
+      output: copyPass.output,
+      finishedAt: copyPass.finishedAt,
+    };
+  }
+  // Fallback: any completed pass with output (the writer may have stopped
+  // before the copy pass if earlier passes failed).
+  const anyCompleted = drafts.find((d) => d.status === 'completed' && d.output);
+  if (anyCompleted?.output) {
+    return {
+      pass: anyCompleted.pass,
+      output: anyCompleted.output,
+      finishedAt: anyCompleted.finishedAt,
+    };
+  }
+  return null;
 }
 
 /**

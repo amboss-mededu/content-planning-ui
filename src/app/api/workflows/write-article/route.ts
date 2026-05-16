@@ -49,7 +49,7 @@ type EnqueueOutcome =
   | {
       articleRecordId: string;
       status: 'skipped';
-      reason: 'NOT_FOUND' | 'NO_TITLE' | 'NO_SOURCES';
+      reason: 'NOT_FOUND' | 'NO_TITLE' | 'NO_SOURCES' | 'NO_DRAFTABLE_SOURCES';
     };
 
 export async function POST(req: NextRequest) {
@@ -121,6 +121,24 @@ export async function POST(req: NextRequest) {
     const sources = await listArticleSourcesForArticleAsAdmin(slug, articleRecordId);
     if (sources.length === 0) {
       outcomes.push({ articleRecordId, status: 'skipped', reason: 'NO_SOURCES' });
+      continue;
+    }
+    // Hard gate: the writer ingests only approved sources that carry a
+    // Cortex source ID. If none qualify, the run would just produce a
+    // draft with no citations — refuse upfront so the editor goes back
+    // and fills the IDs.
+    const draftable = sources.filter(
+      (s) =>
+        s.reviewStatus === 'approved' &&
+        typeof s.cortexSourceId === 'string' &&
+        s.cortexSourceId.length > 0,
+    );
+    if (draftable.length === 0) {
+      outcomes.push({
+        articleRecordId,
+        status: 'skipped',
+        reason: 'NO_DRAFTABLE_SOURCES',
+      });
       continue;
     }
     const run = await createWritingRunAsAdmin({
