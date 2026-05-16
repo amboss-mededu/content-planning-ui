@@ -43,10 +43,7 @@ Pick the top sources (no more than 15) that an editor should read
 when writing this article. Skip duplicates and superseded earlier
 versions.
 
-For each kept source, set "useFlag": true if the source should make
-it into the final article, false if it's relevant context but does
-not need to be cited. Set "superseded": true when a newer source in
-the list replaces it.
+Set "superseded": true when a newer source in the list replaces it.
 
 Output strictly JSON matching the requested schema. Do not produce
 any other text.

@@ -6,14 +6,39 @@
  *   2. `esummary.fcgi` — fleshes out each PMID with title / authors /
  *      journal / DOI metadata.
  *
- * No API key required for low-volume usage (NCBI allows ~3 req/sec
- * unkeyed). Calls are batched per query and deduplicated by PMID across
- * the queries for a single article so the ranker doesn't see the same
- * paper twice.
+ * NCBI rate limits: 3 req/sec anonymous, 10 req/sec with `NCBI_API_KEY`.
+ * The client paces sequential requests to the appropriate floor; when
+ * an article generates several queries this prevents bursts from
+ * tripping NCBI's per-IP limit. Calls are deduplicated by PMID across
+ * an article's queries so the ranker doesn't see the same paper twice.
  */
+
+import { env } from '@/env';
 
 const ESEARCH = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi';
 const ESUMMARY = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi';
+
+// NCBI publishes 3/s (anon) and 10/s (keyed) but enforces with a rolling
+// window that bites when bursts straddle the second boundary. We pace
+// well under the cap to leave headroom.
+const MIN_GAP_KEYED_MS = 150;
+const MIN_GAP_ANON_MS = 500;
+const RETRY_429_BACKOFF_MS = [1000, 2500, 5000];
+
+let lastRequestAt = 0;
+async function pace(): Promise<void> {
+  const gap = env.NCBI_API_KEY ? MIN_GAP_KEYED_MS : MIN_GAP_ANON_MS;
+  const now = Date.now();
+  const wait = lastRequestAt + gap - now;
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastRequestAt = Date.now();
+}
+
+function appendApiKey(url: string): string {
+  if (!env.NCBI_API_KEY) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}api_key=${encodeURIComponent(env.NCBI_API_KEY)}`;
+}
 
 export type PubmedCandidate = {
   pmid: string;
@@ -47,15 +72,23 @@ type EsummaryResponse = {
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    // NCBI sometimes responds slowly; default fetch timeout is fine here
-    // because the worker tolerates per-article failure.
-  });
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    await pace();
+    const res = await fetch(appendApiKey(url), {
+      headers: { Accept: 'application/json' },
+      // NCBI sometimes responds slowly; default fetch timeout is fine here
+      // because the worker tolerates per-article failure.
+    });
+    if (res.ok) return (await res.json()) as T;
+    if (res.status === 429 && attempt < RETRY_429_BACKOFF_MS.length) {
+      // Drain the body so the connection can be reused, then back off
+      // before the next pace()-gated retry.
+      await res.text().catch(() => '');
+      await new Promise((r) => setTimeout(r, RETRY_429_BACKOFF_MS[attempt]));
+      continue;
+    }
     throw new Error(`NCBI eutils ${res.status}: ${await res.text()}`);
   }
-  return (await res.json()) as T;
 }
 
 async function esearch(query: string, retmax: number): Promise<string[]> {

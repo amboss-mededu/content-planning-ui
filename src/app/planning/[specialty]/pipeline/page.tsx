@@ -153,17 +153,17 @@ async function PipelineData({ slug }: { slug: string }) {
   let searched = 0;
   let laterStages = 0;
   let approvedNew = 0;
-  // Per-stage eligibility lists for the bulk-trigger cards. We collect
-  // the underlying newArticleSuggestions PB ids so the cards can POST
-  // them straight to the bulk endpoints.
-  const cortexEligibleIds: string[] = [];
+  // Eligibility list for the bulk-draft card. We collect the underlying
+  // newArticleSuggestions PB ids so the card can POST them straight to
+  // the bulk endpoint.
   const draftEligibleIds: string[] = [];
   for (const r of newArticleSuggestionRecs) {
     const id = r.id;
-    if (!id) continue;
-    if (articleReviewRecs[id]?.status !== 'approved') continue;
+    const key = r.articleKey;
+    if (!id || !key) continue;
+    if (articleReviewRecs[key]?.status !== 'approved') continue;
     approvedNew++;
-    const status = articleBacklogRecs[id]?.status;
+    const status = articleBacklogRecs[key]?.status;
     if (
       status === undefined ||
       status === 'unassigned' ||
@@ -175,7 +175,6 @@ async function PipelineData({ slug }: { slug: string }) {
     } else {
       laterStages++;
     }
-    if (status === 'sources-approved') cortexEligibleIds.push(id);
     if (status === 'ready-for-llm-draft') draftEligibleIds.push(id);
   }
   const litSearchStats = {
@@ -228,7 +227,6 @@ async function PipelineData({ slug }: { slug: string }) {
       mapCodesHistory={mapCodesHistory}
       articleApprovalStats={articleApprovalStats}
       litSearchStats={litSearchStats}
-      cortexEligibleIds={cortexEligibleIds}
       draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}
       stageOverrides={stageOverrides}

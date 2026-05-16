@@ -10,6 +10,11 @@ import {
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
 import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
+import {
+  markSourceCortexRegisteredAsAdmin,
+  setArticleSourceReviewAsAdmin,
+  setSourcesPriorityAsAdmin,
+} from '@/lib/data/article-sources';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
@@ -58,6 +63,47 @@ export async function resetArticleReview(
   articleKey: string,
 ): Promise<void> {
   await clearArticleReview(slug, articleKey);
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Per-source editor decision. Pass `status: null` to clear the
+ * decision. Reviewer email is taken from the current session.
+ */
+export async function submitSourceReview(
+  slug: string,
+  sourceId: string,
+  status: 'approved' | 'rejected' | null,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await setArticleSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Persist editor-chosen ordering for the approved sources of an
+ * article. Array order maps to `priority` 1..N.
+ */
+export async function submitSourcesOrder(
+  slug: string,
+  sourceIds: string[],
+): Promise<void> {
+  if (sourceIds.length === 0) return;
+  await setSourcesPriorityAsAdmin(sourceIds);
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Manually set the Cortex source ID on a single source row. Used as a
+ * temporary editor escape hatch until automated Cortex registration
+ * lands. Pass an empty string to clear.
+ */
+export async function submitSourceCortexId(
+  slug: string,
+  sourceId: string,
+  value: string,
+): Promise<void> {
+  await markSourceCortexRegisteredAsAdmin(sourceId, value);
   updateTag(`specialty:${slug}`);
 }
 

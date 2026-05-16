@@ -231,7 +231,6 @@ export interface ArticleSourceRecord extends PbRecord {
   subtopics?: string;
   llmSummary?: string;
   justification?: string;
-  useFlag?: boolean;
   superseded?: boolean;
   priority?: number;
   originalFilename?: string;
@@ -243,7 +242,15 @@ export interface ArticleSourceRecord extends PbRecord {
    *  empty until then. PDFs themselves are NOT uploaded to Cortex —
    *  only the source metadata. */
   cortexSourceId?: string;
+  /** Editor decision on whether to keep this source. Empty / undefined
+   *  means not yet reviewed. */
+  reviewStatus?: SourceReviewStatus;
+  reviewerEmail?: string;
+  /** ms since epoch */
+  reviewedAt?: number;
 }
+
+export type SourceReviewStatus = 'approved' | 'rejected';
 
 // --- Collection: reviewComments --------------------------------------------
 

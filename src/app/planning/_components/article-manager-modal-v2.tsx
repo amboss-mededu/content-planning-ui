@@ -9,18 +9,30 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type {
   ArticleBacklogStatus,
   ArticleSourceRecord,
   PredatoryJournalRisk,
   ReviewCommentRecord,
+  SourceReviewStatus,
 } from '@/lib/pb/types';
 import {
   resetArticleReview,
   resetSectionReview,
   submitArticleReview,
   submitSectionReview,
+  submitSourceCortexId,
+  submitSourceReview,
+  submitSourcesOrder,
 } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import {
@@ -33,7 +45,10 @@ import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import { canDraft, canRunLitSearch } from './pipeline-stage-gates';
+import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
+import { StartWritingButton } from './start-writing-button';
 
 // ---------------------------------------------------------------------------
 // Shared types — used by both review-stage variants. Kept here so the v2
@@ -591,7 +606,7 @@ function BacklogManagerView({
     <Modal
       header={article.articleTitle ?? 'Manage article'}
       subHeader={`Currently: ${STATUS_LABEL[currentStatus]}`}
-      size="l"
+      isFullScreen
       isDismissible
       onAction={() => onClose()}
       privateProps={{ height: '90vh' }}
@@ -650,7 +665,19 @@ function BacklogManagerView({
           )}
 
           <Stepper current={currentStatus} onPick={pickStatus} />
-          <StepBody status={currentStatus} sources={sources} />
+          <StepBody
+            status={currentStatus}
+            sources={sources}
+            slug={slug}
+            viewerEmail={viewerEmail}
+          />
+
+          <PipelineActionsSection
+            slug={slug}
+            articleRecordId={article.id}
+            currentStatus={currentStatus}
+            sources={sources}
+          />
 
           <DecisionNoteField
             value={pendingNotes}
@@ -817,21 +844,29 @@ const tableStyle: CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
   fontSize: '0.9em',
+  tableLayout: 'fixed',
 };
 const thStyle: CSSProperties = {
   textAlign: 'left',
   borderBottom: '1px solid rgb(220, 220, 225)',
+  borderRight: '1px solid var(--ads-c-divider, rgba(0, 0, 0, 0.08))',
   padding: '8px 6px',
   fontWeight: 600,
   color: 'rgb(70, 70, 80)',
   background: 'rgb(248, 248, 250)',
   position: 'sticky',
   top: 0,
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
 };
 const tdStyle: CSSProperties = {
   borderBottom: '1px solid rgb(238, 238, 242)',
+  borderRight: '1px solid var(--ads-c-divider, rgba(0, 0, 0, 0.08))',
   padding: '8px 6px',
   verticalAlign: 'top',
+  overflow: 'hidden',
+  wordBreak: 'break-word',
 };
 
 const footerStyle: CSSProperties = {
@@ -843,111 +878,468 @@ const footerStyle: CSSProperties = {
   gap: 8,
 };
 
-function SourcesTable({ sources }: { sources: ArticleSourceRecord[] }) {
+type SourceColumn = {
+  key: string;
+  label: string;
+  initialWidth: number;
+  /** Defaults to true. The trailing decision column and the leading drag
+   *  handle don't get a resize grip. */
+  resizable?: boolean;
+};
+
+const MIN_COL_WIDTH = 32;
+
+function ResizableHeader({
+  column,
+  onResize,
+}: {
+  column: SourceColumn;
+  onResize: (width: number) => void;
+}) {
+  const thRef = useRef<HTMLTableCellElement | null>(null);
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startWidth = thRef.current?.getBoundingClientRect().width ?? MIN_COL_WIDTH;
+      const move = (ev: MouseEvent) => {
+        onResize(startWidth + (ev.clientX - startX));
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+    [onResize],
+  );
+  const resizable = column.resizable !== false;
+  return (
+    <th ref={thRef} style={{ ...thStyle, position: 'sticky', top: 0 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 4,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {column.label}
+        </span>
+        {resizable ? (
+          <span
+            onMouseDown={onMouseDown}
+            style={{
+              width: 6,
+              flex: 'none',
+              cursor: 'col-resize',
+              alignSelf: 'stretch',
+              marginRight: -6,
+            }}
+            aria-hidden="true"
+          />
+        ) : null}
+      </div>
+    </th>
+  );
+}
+
+function SourcesTable({
+  sources,
+  slug,
+  viewerEmail,
+  mode,
+}: {
+  sources: ArticleSourceRecord[];
+  slug: string;
+  viewerEmail?: string;
+  mode: 'curation' | 'priority';
+}) {
+  const router = useRouter();
+  // Local order is the source of truth for the priority view so DnD
+  // feels immediate; reconciled with props on parent refresh.
+  const [order, setOrder] = useState<string[]>(() => sources.map((s) => s.id));
+  useEffect(() => {
+    setOrder(sources.map((s) => s.id));
+  }, [sources]);
+
+  const byId = useMemo(() => {
+    const m: Record<string, ArticleSourceRecord> = {};
+    for (const s of sources) m[s.id] = s;
+    return m;
+  }, [sources]);
+
+  const ordered =
+    mode === 'priority' ? order.map((id) => byId[id]).filter(Boolean) : sources;
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropId, setDropId] = useState<string | null>(null);
+  // Column widths are persisted per mode (curation vs priority) so the
+  // two views remember their own layouts independently.
+  const widthsStorageKey = `sources-table:widths:${mode}`;
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(widthsStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const cleaned: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v >= MIN_COL_WIDTH) {
+            cleaned[k] = v;
+          }
+        }
+        setWidths(cleaned);
+      }
+    } catch {
+      /* corrupt blob — ignore */
+    }
+  }, [widthsStorageKey]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (Object.keys(widths).length === 0) return;
+    try {
+      window.localStorage.setItem(widthsStorageKey, JSON.stringify(widths));
+    } catch {
+      /* quota or disabled — silent */
+    }
+  }, [widths, widthsStorageKey]);
+
+  const onDrop = useCallback(async () => {
+    if (!dragId || !dropId || dragId === dropId) {
+      setDragId(null);
+      setDropId(null);
+      return;
+    }
+    const from = order.indexOf(dragId);
+    const to = order.indexOf(dropId);
+    if (from === -1 || to === -1) return;
+    const next = order.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, dragId);
+    setOrder(next);
+    setDragId(null);
+    setDropId(null);
+    try {
+      await submitSourcesOrder(slug, next);
+      router.refresh();
+    } catch (e) {
+      console.error('[sources-order] submit failed', e);
+    }
+  }, [dragId, dropId, order, slug, router]);
+
   if (sources.length === 0) {
     return (
       <Stack space="s">
-        <Text>No sources attached yet.</Text>
-        <Text size="s" color="secondary">
-          Run the Literature search card on the Pipeline tab to fetch PubMed candidates
-          for every article still waiting for sources.
+        <Text>
+          {mode === 'priority'
+            ? 'No approved sources yet — approve sources in the previous step.'
+            : 'No sources attached yet.'}
         </Text>
+        {mode === 'curation' ? (
+          <Text size="s" color="secondary">
+            Run the Literature search card on the Pipeline tab to fetch PubMed candidates
+            for every article still waiting for sources.
+          </Text>
+        ) : null}
       </Stack>
     );
   }
+
+  const columnList: SourceColumn[] =
+    mode === 'priority'
+      ? [
+          { key: 'drag', label: '', initialWidth: 28, resizable: false },
+          { key: 'idx', label: '#', initialWidth: 44 },
+          { key: 'sourceId', label: 'Source ID', initialWidth: 160 },
+          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
+          { key: 'title', label: 'Title', initialWidth: 320 },
+          { key: 'type', label: 'Type', initialWidth: 140 },
+          { key: 'journal', label: 'Journal', initialWidth: 220 },
+          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'doi', label: 'DOI', initialWidth: 180 },
+          { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
+        ]
+      : [
+          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
+          { key: 'title', label: 'Title', initialWidth: 360 },
+          { key: 'type', label: 'Type', initialWidth: 140 },
+          { key: 'journal', label: 'Journal', initialWidth: 240 },
+          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'doi', label: 'DOI', initialWidth: 200 },
+          { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
+        ];
+
   return (
     <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
       <table style={tableStyle}>
+        <colgroup>
+          {columnList.map((c) => (
+            <col key={c.key} style={{ width: widths[c.key] ?? c.initialWidth }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ ...thStyle, width: 50 }}>Use</th>
-            <th style={{ ...thStyle, width: 60 }}>Rank</th>
-            <th style={thStyle}>Title</th>
-            <th style={{ ...thStyle, width: 130 }}>Type</th>
-            <th style={thStyle}>Journal</th>
-            <th style={{ ...thStyle, width: 110 }}>Risk</th>
-            <th style={{ ...thStyle, width: 160 }}>DOI</th>
+            {columnList.map((c) => (
+              <ResizableHeader
+                key={c.key}
+                column={c}
+                onResize={(next) =>
+                  setWidths((w) => ({ ...w, [c.key]: Math.max(MIN_COL_WIDTH, next) }))
+                }
+              />
+            ))}
           </tr>
         </thead>
         <tbody>
-          {sources.map((s) => (
-            <tr key={s.id}>
-              <td style={{ ...tdStyle, textAlign: 'center' }}>
-                {s.useFlag ? (
-                  <Text as="span" size="s" weight="bold">
-                    ✓
-                  </Text>
-                ) : (
-                  <Text as="span" size="s" color="secondary">
-                    ✗
-                  </Text>
-                )}
-              </td>
-              <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
-              <td style={tdStyle}>
-                <Text weight="bold">{s.title}</Text>
-                {s.llmSummary ? (
-                  <Text size="xs" color="secondary">
-                    {s.llmSummary}
-                  </Text>
+          {ordered.map((s, idx) => {
+            const isDragging = dragId === s.id;
+            const isDropTarget = dropId === s.id && dragId !== s.id;
+            return (
+              <tr
+                key={s.id}
+                onDragOver={(e) => {
+                  if (mode !== 'priority' || !dragId) return;
+                  e.preventDefault();
+                  if (dropId !== s.id) setDropId(s.id);
+                }}
+                onDrop={(e) => {
+                  if (mode !== 'priority') return;
+                  e.preventDefault();
+                  void onDrop();
+                }}
+                style={{
+                  opacity: isDragging ? 0.4 : 1,
+                  boxShadow: isDropTarget ? 'inset 0 2px 0 rgb(59, 130, 246)' : undefined,
+                }}
+              >
+                {mode === 'priority' ? (
+                  <>
+                    <td
+                      style={{ ...tdStyle, textAlign: 'center', cursor: 'grab' }}
+                      draggable
+                      onDragStart={() => setDragId(s.id)}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setDropId(null);
+                      }}
+                      title="Drag to reorder"
+                      aria-label="Drag to reorder"
+                    >
+                      ≡
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>{idx + 1}</td>
+                    <td style={tdStyle}>
+                      <SourceIdCell source={s} slug={slug} />
+                    </td>
+                  </>
                 ) : null}
-              </td>
-              <td style={tdStyle}>
-                {s.sourceType ? (
-                  <Badge
-                    text={SOURCE_TYPE_LABEL[s.sourceType] ?? s.sourceType}
-                    color="blue"
-                  />
-                ) : (
-                  '—'
-                )}
-              </td>
-              <td style={tdStyle}>
-                {s.journal ?? '—'}
-                {s.journalNlm ? (
-                  <Text size="xs" color="secondary">
-                    {s.journalNlm}
-                  </Text>
-                ) : null}
-              </td>
-              <td style={tdStyle}>
-                {s.predatoryJournalRisk ? (
-                  <Badge
-                    text={s.predatoryJournalRisk}
-                    color={RISK_COLOR[s.predatoryJournalRisk]}
-                  />
-                ) : (
-                  '—'
-                )}
-              </td>
-              <td style={tdStyle}>
-                {s.doi ? (
-                  <a
-                    href={`https://doi.org/${s.doi}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ wordBreak: 'break-all' }}
-                  >
-                    {s.doi}
-                  </a>
-                ) : s.url ? (
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ wordBreak: 'break-all' }}
-                  >
-                    {s.url}
-                  </a>
-                ) : (
-                  '—'
-                )}
-              </td>
-            </tr>
-          ))}
+                <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
+                <td style={tdStyle}>
+                  <Text weight="bold">{s.title}</Text>
+                  {s.llmSummary ? (
+                    <Text size="xs" color="secondary">
+                      {s.llmSummary}
+                    </Text>
+                  ) : null}
+                </td>
+                <td style={tdStyle}>
+                  {s.sourceType ? (
+                    <Badge
+                      text={SOURCE_TYPE_LABEL[s.sourceType] ?? s.sourceType}
+                      color="blue"
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={tdStyle}>
+                  {s.journal ?? '—'}
+                  {s.journalNlm ? (
+                    <Text size="xs" color="secondary">
+                      {s.journalNlm}
+                    </Text>
+                  ) : null}
+                </td>
+                <td style={tdStyle}>
+                  {s.predatoryJournalRisk ? (
+                    <Badge
+                      text={s.predatoryJournalRisk}
+                      color={RISK_COLOR[s.predatoryJournalRisk]}
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={tdStyle}>
+                  {s.doi ? (
+                    <a
+                      href={`https://doi.org/${s.doi}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {s.doi}
+                    </a>
+                  ) : s.url ? (
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {s.url}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'center' }}>
+                  <SourceDecisionCell source={s} slug={slug} viewerEmail={viewerEmail} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: string }) {
+  const [value, setValue] = useState<string>(source.cortexSourceId ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    setValue(source.cortexSourceId ?? '');
+  }, [source.cortexSourceId]);
+
+  const persist = useCallback(async () => {
+    const trimmed = value.trim();
+    const current = source.cortexSourceId ?? '';
+    if (trimmed === current) return;
+    setSubmitting(true);
+    try {
+      await submitSourceCortexId(slug, source.id, trimmed);
+    } catch (e) {
+      console.error('[source-id] submit failed', e);
+      setValue(current);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [value, source.id, source.cortexSourceId, slug]);
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void persist()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      disabled={submitting}
+      placeholder="Paste source ID"
+      style={{
+        width: '100%',
+        padding: '4px 6px',
+        fontSize: 12,
+        border: '1px solid rgba(0, 0, 0, 0.15)',
+        borderRadius: 4,
+        background: '#fff',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      }}
+    />
+  );
+}
+
+function SourceDecisionCell({
+  source,
+  slug,
+  viewerEmail,
+}: {
+  source: ArticleSourceRecord;
+  slug: string;
+  viewerEmail?: string;
+}) {
+  const router = useRouter();
+  const [status, setStatus] = useState<SourceReviewStatus | null>(
+    source.reviewStatus ?? null,
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reconcile with props when the parent refreshes (router.refresh
+  // re-renders this component with fresh server state).
+  useEffect(() => {
+    setStatus(source.reviewStatus ?? null);
+  }, [source.reviewStatus]);
+
+  const toggle = useCallback(
+    async (target: SourceReviewStatus) => {
+      if (submitting) return;
+      const next = status === target ? null : target;
+      setSubmitting(true);
+      setStatus(next);
+      try {
+        await submitSourceReview(slug, source.id, next);
+        router.refresh();
+      } catch (e) {
+        // Revert optimistic state on failure.
+        setStatus(source.reviewStatus ?? null);
+        console.error('[source-review] submit failed', e);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [submitting, status, slug, source.id, source.reviewStatus, router],
+  );
+
+  const reviewerHandle = source.reviewerEmail ? source.reviewerEmail.split('@')[0] : '';
+  const stamp = source.reviewedAt ? new Date(source.reviewedAt).toLocaleString() : '';
+  const approveTitle =
+    status === 'approved' && reviewerHandle
+      ? `Approved by ${reviewerHandle}${stamp ? ` · ${stamp}` : ''}`
+      : 'Approve source';
+  const rejectTitle =
+    status === 'rejected' && reviewerHandle
+      ? `Rejected by ${reviewerHandle}${stamp ? ` · ${stamp}` : ''}`
+      : 'Reject source';
+
+  return (
+    <Inline space="xxs" vAlignItems="center">
+      <button
+        type="button"
+        style={decideButton(status === 'approved', 'approve')}
+        title={approveTitle}
+        disabled={submitting}
+        onClick={() => toggle('approved')}
+        aria-label={approveTitle}
+      >
+        ✓
+      </button>
+      <button
+        type="button"
+        style={decideButton(status === 'rejected', 'reject')}
+        title={rejectTitle}
+        disabled={submitting}
+        onClick={() => toggle('rejected')}
+        aria-label={rejectTitle}
+      >
+        ✗
+      </button>
+      {viewerEmail ? null : null}
+    </Inline>
   );
 }
 
@@ -1052,27 +1444,85 @@ function Stepper({
   );
 }
 
+function PipelineActionsSection({
+  slug,
+  articleRecordId,
+  currentStatus,
+  sources,
+}: {
+  slug: string;
+  articleRecordId: string;
+  currentStatus: ArticleBacklogStatus;
+  sources: ArticleSourceRecord[];
+}) {
+  const sourcesCount = sources.length;
+  const showLit = canRunLitSearch(currentStatus, sourcesCount);
+  const showDraft = canDraft(currentStatus);
+  if (!showLit && !showDraft) return null;
+  return (
+    <Stack space="xs">
+      <Text size="s" weight="bold">
+        Pipeline
+      </Text>
+      <Inline space="s" vAlignItems="center">
+        {showLit && (
+          <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
+        )}
+        {showDraft && (
+          <StartWritingButton
+            slug={slug}
+            articleRecordId={articleRecordId}
+            hasSources={sourcesCount > 0}
+            initialRun={null}
+          />
+        )}
+      </Inline>
+    </Stack>
+  );
+}
+
 function StepBody({
   status,
   sources,
+  slug,
+  viewerEmail,
 }: {
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
+  slug: string;
+  viewerEmail?: string;
 }) {
   const copy = STEP_COPY[status];
   if (status === 'sources-searched' || status === 'sources-approved') {
+    const isPriorityMode = status === 'sources-approved';
+    const visible = isPriorityMode
+      ? sources
+          .filter((s) => s.reviewStatus === 'approved')
+          .slice()
+          .sort(
+            (a, b) =>
+              (a.priority ?? Number.POSITIVE_INFINITY) -
+              (b.priority ?? Number.POSITIVE_INFINITY),
+          )
+      : sources;
     return (
       <Stack space="m">
         <Text color="secondary">{copy}</Text>
-        {status === 'sources-approved' ? (
+        {isPriorityMode ? (
           <Inline space="s" vAlignItems="center">
             <Badge text="Sources approved" color="green" />
             <Text size="s" color="secondary">
-              {sources.length} source{sources.length === 1 ? '' : 's'} locked in
+              {visible.length} source{visible.length === 1 ? '' : 's'} locked in · drag to
+              reorder
             </Text>
           </Inline>
         ) : null}
-        <SourcesTable sources={sources} />
+        <SourcesTable
+          sources={visible}
+          slug={slug}
+          viewerEmail={viewerEmail}
+          mode={isPriorityMode ? 'priority' : 'curation'}
+        />
       </Stack>
     );
   }

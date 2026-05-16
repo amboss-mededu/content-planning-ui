@@ -65,6 +65,10 @@ export const env = createEnv({
     // unblocks the orchestration UX before the API contract is final.
     CORTEX_API_URL: z.string().url().optional(),
     CORTEX_API_KEY: optionalString,
+    // Optional NCBI E-utilities API key. With a key NCBI permits ~10
+    // req/sec; without one the limit is ~3 req/sec and IP-rate-limited.
+    // The PubMed client paces accordingly.
+    NCBI_API_KEY: optionalString,
   },
   client: {
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
@@ -88,6 +92,7 @@ export const env = createEnv({
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
+    NCBI_API_KEY: process.env.NCBI_API_KEY,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
   },
   emptyStringAsUndefined: true,

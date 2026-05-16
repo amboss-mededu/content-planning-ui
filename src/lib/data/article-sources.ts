@@ -197,6 +197,44 @@ export async function markSourceCortexRegisteredAsAdmin(
 }
 
 /**
+ * Renumber `priority` on the given source IDs in array order (1..N).
+ * Editor-controlled ordering for the sources-approved priority list.
+ */
+export async function setSourcesPriorityAsAdmin(sourceIds: string[]): Promise<void> {
+  const pb = await createAdminClient();
+  for (let i = 0; i < sourceIds.length; i++) {
+    await pb.collection('articleSources').update(sourceIds[i], { priority: i + 1 });
+  }
+}
+
+/**
+ * Persist an editor decision on a single source. Pass `status: null` to
+ * clear the decision back to "not yet reviewed". Reviewer email +
+ * timestamp are stamped whenever the status is set; cleared together
+ * with the status.
+ */
+export async function setArticleSourceReviewAsAdmin(
+  sourceId: string,
+  status: 'approved' | 'rejected' | null,
+  reviewerEmail: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  if (status === null) {
+    await pb.collection('articleSources').update(sourceId, {
+      reviewStatus: '',
+      reviewerEmail: '',
+      reviewedAt: null,
+    });
+    return;
+  }
+  await pb.collection('articleSources').update(sourceId, {
+    reviewStatus: status,
+    reviewerEmail,
+    reviewedAt: Date.now(),
+  });
+}
+
+/**
  * Bulk-insert ranked sources for a single article from the
  * literature-search worker. Admin-side (no cookies in scope). Replaces
  * any existing rows for this article — re-running a search wipes the

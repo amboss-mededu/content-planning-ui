@@ -17,7 +17,6 @@ import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/code
 import type { MapCodesHistory, PipelineRunRow, StageContext } from '@/lib/data/pipeline';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
-import { BulkCortexRegisterButton } from './bulk-cortex-card';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
 import { PhaseGroup } from './phase-group';
 import { RunLitSearchButton } from './run-lit-search-button';
@@ -51,7 +50,6 @@ export function PipelineDashboard({
   mapCodesHistory,
   articleApprovalStats,
   litSearchStats,
-  cortexEligibleIds,
   draftEligibleIds,
   stageHasOutput,
   stageOverrides,
@@ -75,10 +73,6 @@ export function PipelineDashboard({
     searched: number;
     laterStages: number;
   };
-  /** newArticleSuggestions PB ids whose backlog status is
-   *  `sources-approved` — eligible for the "Register sources in Cortex"
-   *  bulk trigger. */
-  cortexEligibleIds: string[];
   /** newArticleSuggestions PB ids whose backlog status is
    *  `ready-for-llm-draft` — eligible to enqueue for article writing. */
   draftEligibleIds: string[];
@@ -489,22 +483,6 @@ export function PipelineDashboard({
               running={stages.literature_search?.stage.status === 'running'}
             />
           </Stack>
-          <Card outlined>
-            <CardBox>
-              <Stack space="s">
-                <H2>Register sources in Cortex</H2>
-                <Text size="s" color="secondary">
-                  {cortexEligibleIds.length === 0
-                    ? 'POSTs each approved source’s metadata to Cortex CMS and persists the returned source IDs. Articles move from Sources approved to Ready for LLM draft once every source is registered. No articles are currently in Sources approved.'
-                    : `POSTs each approved source's metadata to Cortex CMS and persists the returned source IDs. Articles move from Sources approved to Ready for LLM draft once every source is registered. ${cortexEligibleIds.length} article${cortexEligibleIds.length === 1 ? '' : 's'} ready.`}
-                </Text>
-                <BulkCortexRegisterButton
-                  specialtySlug={specialtySlug}
-                  articleRecordIds={cortexEligibleIds}
-                />
-              </Stack>
-            </CardBox>
-          </Card>
           <Card outlined>
             <CardBox>
               <Stack space="s">

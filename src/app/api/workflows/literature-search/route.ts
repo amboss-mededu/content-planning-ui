@@ -68,22 +68,21 @@ export async function POST(req: NextRequest) {
 
   // Eligible articles: approved 2nd-pass + effective status is
   // waiting-for-sources (no row, unassigned, or explicit waiting).
+  // Reviews and backlog are keyed by stable `articleKey` (survives
+  // consolidation re-runs); `filterIds` keeps using PB id because the
+  // frontend sends `articleRecordId` from the suggestion row.
   const filterIds = Array.isArray(body.articleRecordIds)
     ? new Set(body.articleRecordIds.filter((s) => typeof s === 'string' && s.length > 0))
     : null;
-  const eligible = suggestions
-    .filter((r) => r.id && reviews[r.id]?.status === 'approved')
-    .filter((r) => !filterIds || (r.id ? filterIds.has(r.id) : false))
-    .filter((r) => {
-      const id = r.id;
-      if (!id) return false;
-      const status = backlog[id]?.status;
-      return (
-        status === undefined ||
-        status === 'unassigned' ||
-        status === 'waiting-for-sources'
-      );
-    });
+  const eligible = suggestions.filter((r) => {
+    if (!r.id || !r.articleKey) return false;
+    if (reviews[r.articleKey]?.status !== 'approved') return false;
+    if (filterIds && !filterIds.has(r.id)) return false;
+    const status = backlog[r.articleKey]?.status;
+    return (
+      status === undefined || status === 'unassigned' || status === 'waiting-for-sources'
+    );
+  });
 
   if (eligible.length === 0) {
     return NextResponse.json({ skipped: true, articles: 0 });

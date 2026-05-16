@@ -62,7 +62,6 @@ const RankedSourceSchema = z.object({
   subtopics: z.string().optional(),
   llmSummary: z.string().optional(),
   justification: z.string().optional(),
-  useFlag: z.boolean().optional(),
   superseded: z.boolean().optional(),
 });
 

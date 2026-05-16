@@ -50,6 +50,10 @@ export function RunLitSearchRowButton({ slug, articleRecordId }: Props) {
         setError(body.error ?? `HTTP ${res.status}`);
         return;
       }
+      if (body.skipped) {
+        setError('Already searched or not eligible');
+        return;
+      }
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

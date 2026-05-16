@@ -29,6 +29,7 @@ import {
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { canRunLitSearch } from './pipeline-stage-gates';
 import { RegisterCortexButton } from './register-cortex-button';
 import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
@@ -477,9 +478,7 @@ export function BacklogView({
             </Text>
           );
         }
-        const s = statusOf(r.articleKey);
-        const isWaiting = s === 'waiting-for-sources' || s === 'unassigned';
-        if (isWaiting && r.sourcesCount === 0) {
+        if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
           return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
         }
         return (
