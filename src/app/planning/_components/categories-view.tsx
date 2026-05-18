@@ -1,7 +1,14 @@
 'use client';
 
-import { Badge, Inline, Link, Stack, Text, Tooltip } from '@amboss/design-system';
-import { type CSSProperties, type ReactNode, useState } from 'react';
+import {
+  Badge,
+  Link,
+  SegmentedControl,
+  Stack,
+  Text,
+  Tooltip,
+} from '@amboss/design-system';
+import { type ReactNode, useState } from 'react';
 import type {
   CategoryOrchestration,
   SourceCategoryProgress,
@@ -88,7 +95,7 @@ export function CategoriesView({
       description:
         'Bucket the consolidation pipeline assigned codes to. Rows are derived from extracted codes — one row per unique consolidationCategory present in the codes table. The "(unbucketed)" row groups codes the pipeline never assigned a bucket to.',
       render: (r) => {
-        const label = r.isUnbucketed ? r.consolidationCategory : r.consolidationCategory;
+        const label = r.consolidationCategory;
         const link = r.isUnbucketed ? (
           <span style={{ color: 'inherit' }}>{label}</span>
         ) : (
@@ -257,21 +264,24 @@ export function CategoriesView({
 
   return (
     <Stack space="m">
-      <ViewModeToggle mode={mode} onChange={setMode} />
+      <SegmentedControl
+        label="Categories view"
+        isLabelHidden
+        value={mode}
+        onChange={(v) => setMode(v === 'source' ? 'source' : 'consolidation')}
+        options={[
+          { name: 'mode', value: 'consolidation', label: 'Consolidation buckets' },
+          { name: 'mode', value: 'source', label: 'Source categories' },
+        ]}
+      />
       {mode === 'consolidation' ? (
-        <>
-          <Text color="secondary">
-            {rows.length} consolidation buckets derived from extracted codes. Click a
-            bucket name to drill into its codes.
-          </Text>
-          <DataTable
-            rows={rows}
-            columns={columns}
-            getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
-            emptyText="No consolidation buckets found."
-            storageKey={`categories-table:${slug}`}
-          />
-        </>
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
+          emptyText="No consolidation buckets found."
+          storageKey={`categories-table:${slug}`}
+        />
       ) : (
         <SourceCategoriesTable rows={sourceRows} slug={slug} />
       )}
@@ -280,51 +290,8 @@ export function CategoriesView({
 }
 
 // ---------------------------------------------------------------------------
-// View-mode toggle + source-category table (backup view)
+// Source-category table (backup view)
 // ---------------------------------------------------------------------------
-
-function ViewModeToggle({
-  mode,
-  onChange,
-}: {
-  mode: ViewMode;
-  onChange: (m: ViewMode) => void;
-}) {
-  const buttonStyle = (active: boolean): CSSProperties => ({
-    padding: '6px 12px',
-    fontSize: 13,
-    borderRadius: 4,
-    border: `1px solid ${active ? 'rgb(217, 119, 6)' : 'rgb(210, 210, 215)'}`,
-    background: active ? 'rgb(255, 247, 235)' : 'white',
-    color: active ? 'rgb(30, 30, 40)' : 'rgb(80, 80, 90)',
-    fontWeight: active ? 600 : 400,
-    cursor: 'pointer',
-    font: 'inherit',
-  });
-  return (
-    <Inline space="xs" vAlignItems="center">
-      <Text size="s" color="secondary">
-        View:
-      </Text>
-      <button
-        type="button"
-        style={buttonStyle(mode === 'consolidation')}
-        onClick={() => onChange('consolidation')}
-        aria-pressed={mode === 'consolidation'}
-      >
-        Consolidation buckets
-      </button>
-      <button
-        type="button"
-        style={buttonStyle(mode === 'source')}
-        onClick={() => onChange('source')}
-        aria-pressed={mode === 'source'}
-      >
-        Source categories
-      </button>
-    </Inline>
-  );
-}
 
 function SourceCategoriesTable({
   rows,
