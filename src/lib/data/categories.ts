@@ -112,6 +112,16 @@ export async function deleteCategoriesForSpecialtyAsAdmin(slug: string): Promise
  *
  * # Orphan = codes in the bucket whose code-string is in none of the four
  * arrays of any source codeCategories record — pipeline never saw them.
+ *
+ * "Consolidated" signal: a bucket counts as consolidated iff at least one
+ * of its codes has a status entry (included / excluded / ignored) in any
+ * `codeCategories` record — i.e. `hasAnyStatusInfo`. Consolidation writes
+ * these decision arrays alongside the suggestion/output rows, but the
+ * decision arrays are the more reliable signal: xlsx fixtures often ship
+ * `codeCategories` populated for every source category while the
+ * `newArticleSuggestions` / `consolidatedArticles` output rows only cover
+ * a subset. Earlier output-row checks produced false negatives for
+ * imported specialties.
  */
 export type CategoryOrchestration = {
   consolidationCategory: string;
@@ -134,9 +144,12 @@ export type CategoryOrchestration = {
    *  reached a yes/no verdict on AMBOSS coverage for them. Drives the
    *  mapping-progress + status columns. */
   numMappedCodes: number;
-  /** True when at least one `newArticleSuggestions` row references a code
-   *  that belongs to this bucket — the strongest available per-bucket
-   *  signal that consolidation has actually produced output here. */
+  /** True when at least one code in this bucket has a status entry in some
+   *  `codeCategories` record (included / excluded / ignored arrays).
+   *  Equivalent to `hasAnyStatusInfo`. Output rows
+   *  (newArticleSuggestions / consolidatedArticles) aren't a reliable
+   *  signal — xlsx fixtures can ship decision arrays without the
+   *  corresponding output rows. */
   hasConsolidatedOutput: boolean;
 };
 
@@ -167,37 +180,14 @@ export async function listCategoryOrchestration(
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows, newSuggestions] = await Promise.all([
+  const [codes, categoryRows] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
-    pb
-      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
-
-  // Set of every code-string that appears in any newArticleSuggestions
-  // row's embedded `codes` JSON. Used below to flag each bucket as
-  // "has consolidated output" iff at least one of its codes is cited
-  // by an output article — the strongest per-bucket signal that
-  // consolidation has actually run for this category.
-  const codesWithConsolidatedOutput = new Set<string>();
-  for (const s of newSuggestions) {
-    const arr = s.codes;
-    if (!Array.isArray(arr)) continue;
-    for (const c of arr) {
-      if (
-        c &&
-        typeof c === 'object' &&
-        typeof (c as { code?: unknown }).code === 'string'
-      ) {
-        codesWithConsolidatedOutput.add((c as { code: string }).code);
-      }
-    }
-  }
 
   // Build a per-code status lookup from the source-category records.
   // Priority: included > excluded > ignored. A code that appears in
@@ -272,13 +262,15 @@ export async function listCategoryOrchestration(
       }
     }
 
-    let hasConsolidatedOutput = false;
-    for (const c of bucket.codes) {
-      if (codesWithConsolidatedOutput.has(c)) {
-        hasConsolidatedOutput = true;
-        break;
-      }
-    }
+    // "Consolidated" iff any code in this bucket has a status entry in a
+    // `codeCategories` record (included / excluded / ignored) — i.e.
+    // anyStatus is true. That's the same signal as `hasAnyStatusInfo`
+    // and it's the most reliable across both live-pipeline output and
+    // xlsx-imported fixtures, where output rows
+    // (newArticleSuggestions / consolidatedArticles) can be partial or
+    // entirely absent for some source categories even when consolidation
+    // decisions were recorded.
+    const hasConsolidatedOutput = anyStatus;
 
     out.push({
       consolidationCategory: bucket.key,

@@ -335,35 +335,6 @@ function SourceCategoriesTable({
       type: 'number',
       filterable: true,
     },
-    {
-      key: 'status',
-      label: 'Status',
-      description:
-        'Not ready → some codes still unmapped. Ready for consolidation → all codes mapped, awaiting consolidation. Consolidated → at least one consolidated output article cites a code from this category.',
-      render: (r) => {
-        const status = deriveSourceStatus(r);
-        if (status === 'consolidated') {
-          return <Badge text="Consolidated" color="green" icon="check" />;
-        }
-        if (status === 'ready') {
-          return <Badge text="Ready for consolidation" color="brand" />;
-        }
-        return <Badge text="Not ready" color="gray" />;
-      },
-      width: 220,
-      align: 'left',
-      accessor: (r) => {
-        const status = deriveSourceStatus(r);
-        return status === 'consolidated' ? 2 : status === 'ready' ? 1 : 0;
-      },
-      type: 'number',
-      filterable: true,
-      filterOptions: [
-        { value: '0', label: 'Not ready' },
-        { value: '1', label: 'Ready for consolidation' },
-        { value: '2', label: 'Consolidated' },
-      ],
-    },
   ];
   return (
     <Stack space="m">
@@ -380,16 +351,4 @@ function SourceCategoriesTable({
       />
     </Stack>
   );
-}
-
-function deriveSourceStatus(r: {
-  isUncategorized: boolean;
-  numMappedCodes: number;
-  numCodes: number;
-  hasConsolidatedOutput: boolean;
-}): CategoryStatus {
-  if (r.isUncategorized) return 'not-ready';
-  const mapped = r.numMappedCodes >= r.numCodes;
-  if (!mapped) return 'not-ready';
-  return r.hasConsolidatedOutput ? 'consolidated' : 'ready';
 }
