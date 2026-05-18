@@ -1,19 +1,17 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listArticleSourcesByArticle } from '@/lib/data/article-sources';
+import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
+import { listLatestWritingRunsForArticles } from '@/lib/data/article-writing';
 import { listNewArticleSuggestions } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import { listAssignableUsers } from '@/lib/data/users';
-import type {
-  ArticleBacklogRecord,
-  ArticleSourceRecord,
-  ReviewCommentRecord,
-} from '@/lib/pb/types';
+import type { ArticleBacklogRecord, ArticleSourceRecord } from '@/lib/pb/types';
 import type { ConsolidatedSection, NewArticleSuggestion } from '@/lib/types';
 import { type BacklogRow, BacklogView } from '../../_components/backlog-view';
 import {
@@ -37,29 +35,57 @@ export default async function BacklogPage({
   );
 }
 
-function projectNewSuggestion(
+/**
+ * Project a `newArticleSuggestions` row (the 2nd-pass deduped output —
+ * what the consolidation-review surface approves) into a backlog row.
+ * Both surfaces read this same collection so the review→backlog flow
+ * lives in one ID space, joined by `articleKey`.
+ */
+function projectNewArticle(
+  slug: string,
   r: NewArticleSuggestion,
-  sourcesByArticle: Record<string, ArticleSourceRecord[]>,
+  sourcesByKey: Record<string, ArticleSourceRecord[]>,
 ): BacklogRow {
+  const articleKey =
+    r.articleKey ||
+    computeArticleKey({
+      specialtySlug: slug,
+      articleTitle: r.articleTitle,
+      articleId: r.articleId,
+    });
+  const sources = sourcesByKey[articleKey] ?? [];
   return {
     id: r.id ?? '',
+    articleKey,
     type: 'new',
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     codes: extractCodes(r.codes),
-    sourcesCount: r.id ? (sourcesByArticle[r.id]?.length ?? 0) : 0,
+    sourcesCount: sources.length,
+    registeredSourcesCount: sources.filter((s) => s.cortexSourceId).length,
   };
 }
 
-function projectSection(r: ConsolidatedSection): SectionRow {
+function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
   const codes = extractCodes(r.codes);
   const updateType: 'new' | 'update' | null =
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
     id: r.id,
+    sectionKey:
+      r.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        sectionName: r.sectionName,
+        sectionId: r.sectionId,
+        category: r.category,
+      }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
     sectionName: r.sectionName,
+    sectionId: r.sectionId,
     updateType,
     category: r.category,
     codes,
@@ -85,45 +111,67 @@ function unionCodes(codes: EmbeddedCode[]): EmbeddedCode[] {
 
 async function BacklogData({ slug }: { slug: string }) {
   const [
-    newRecs,
+    articleRecs,
     reviewRecs,
     sectionRecs,
     sectionReviewRecs,
     backlogRecs,
-    sourcesByArticle,
+    sourcesByKey,
     codeRecs,
     users,
     commentsByArticleKind,
     user,
+    writingRunsByArticle,
   ] = await Promise.all([
     listNewArticleSuggestions(slug),
     listArticleReviews(slug),
     listConsolidatedSections(slug),
     listSectionReviews(slug),
     listArticleBacklog(slug),
-    listArticleSourcesByArticle(slug),
+    listArticleSourcesByArticleKey(slug),
     listCodes(slug),
     listAssignableUsers(),
     listReviewComments(slug, 'article'),
     getCurrentUser(),
+    listLatestWritingRunsForArticles(slug),
   ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
-  // type='new' rows: approved 2nd-pass new article suggestions.
-  const approvedNew = newRecs.filter(
-    (r) => r.id && reviewRecs[r.id]?.status === 'approved',
-  );
-  const newRows = approvedNew.map((r) => projectNewSuggestion(r, sourcesByArticle));
+  // type='new' rows: every newArticleSuggestions (2nd-pass deduped
+  // output) whose review is approved. Both the review-pass and the
+  // backlog read this collection — articleReviews.articleKey resolves
+  // directly against newArticleSuggestions.articleKey, no cross-
+  // collection join needed.
+  const newRows: BacklogRow[] = [];
+  for (const r of articleRecs) {
+    const key =
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+      });
+    if (!key) continue;
+    if (reviewRecs[key]?.status !== 'approved') continue;
+    newRows.push(projectNewArticle(slug, r, sourcesByKey));
+  }
 
   // type='update' rows: aggregate approved section reviews by parent
-  // article id. The articleBacklog row (when present) carries workflow
-  // state; absence means default 'waiting-for-sources'.
+  // CMS articleId. We join on the section's `sectionKey`.
   const sectionsByParent = new Map<string, ConsolidatedSection[]>();
   for (const s of sectionRecs) {
     if (!s.id) continue;
-    if (sectionReviewRecs[s.id]?.status !== 'approved') continue;
+    // The section's review state is looked up by its sectionKey, which
+    // the data layer already provides on the record. Fall back to the
+    // PB id keyed reviewMap entry only if sectionKey is empty (zombie
+    // safety). The new lookup is the load-bearing path.
+    const reviewKeyCandidates = [s.sectionKey].filter((k): k is string => !!k);
+    const approved = reviewKeyCandidates.some(
+      (k) => sectionReviewRecs[k]?.status === 'approved',
+    );
+    if (!approved) continue;
     const parentId = s.articleId;
     if (!parentId) continue;
     const list = sectionsByParent.get(parentId) ?? [];
@@ -132,30 +180,27 @@ async function BacklogData({ slug }: { slug: string }) {
   }
   const updateRows: BacklogRow[] = [];
   for (const [parentId, sections] of sectionsByParent) {
-    const projected = sections.map(projectSection);
+    const projected = sections.map((s) => projectSection(slug, s));
     const codes = unionCodes(projected.flatMap((s) => s.codes));
     updateRows.push({
       id: parentId,
+      articleKey: `upd::${parentId}`,
       type: 'update',
       articleTitle: projected[0]?.articleTitle,
       articleType: undefined,
       codes,
       sourcesCount: 0,
+      registeredSourcesCount: 0,
       sections: projected,
     });
   }
 
-  // Split comments by recordId prefix: `pa:` = per-parent-article (used by
-  // type='update' rows + the update-review article view), bare = per-PB-id
-  // (used by type='new' rows + the new-article review modal).
-  const initialCommentsByArticle: Record<string, ReviewCommentRecord[]> = {};
-  for (const [recordId, list] of Object.entries(commentsByArticleKind)) {
-    if (recordId.startsWith('pa:')) {
-      initialCommentsByArticle[recordId.slice(3)] = list;
-    } else {
-      initialCommentsByArticle[recordId] = list;
-    }
-  }
+  // `listReviewComments` now returns comments grouped by recordKey
+  // (article-key or section-key depending on kind), so the map is
+  // already in the namespace the UI consumes. No `pa:` prefix
+  // unpacking — that was a workaround for the now-deprecated
+  // recordId-based join.
+  const initialCommentsByArticle = commentsByArticleKind;
 
   const rows = [...newRows, ...updateRows];
 
@@ -168,8 +213,9 @@ async function BacklogData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}
-      initialSourcesByArticle={sourcesByArticle}
+      initialSourcesByArticleKey={sourcesByKey}
       initialCommentsByArticle={initialCommentsByArticle}
+      initialWritingRuns={writingRunsByArticle}
       viewerEmail={user?.email ?? undefined}
     />
   );

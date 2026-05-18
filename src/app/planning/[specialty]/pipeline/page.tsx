@@ -153,12 +153,17 @@ async function PipelineData({ slug }: { slug: string }) {
   let searched = 0;
   let laterStages = 0;
   let approvedNew = 0;
+  // Eligibility list for the bulk-draft card. We collect the underlying
+  // newArticleSuggestions PB ids so the card can POST them straight to
+  // the bulk endpoint.
+  const draftEligibleIds: string[] = [];
   for (const r of newArticleSuggestionRecs) {
     const id = r.id;
-    if (!id) continue;
-    if (articleReviewRecs[id]?.status !== 'approved') continue;
+    const key = r.articleKey;
+    if (!id || !key) continue;
+    if (articleReviewRecs[key]?.status !== 'approved') continue;
     approvedNew++;
-    const status = articleBacklogRecs[id]?.status;
+    const status = articleBacklogRecs[key]?.status;
     if (
       status === undefined ||
       status === 'unassigned' ||
@@ -170,6 +175,7 @@ async function PipelineData({ slug }: { slug: string }) {
     } else {
       laterStages++;
     }
+    if (status === 'ready-for-llm-draft') draftEligibleIds.push(id);
   }
   const litSearchStats = {
     approvedTotal: approvedNew,
@@ -221,6 +227,7 @@ async function PipelineData({ slug }: { slug: string }) {
       mapCodesHistory={mapCodesHistory}
       articleApprovalStats={articleApprovalStats}
       litSearchStats={litSearchStats}
+      draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}
       stageOverrides={stageOverrides}
       stageSkipped={stageSkipped}

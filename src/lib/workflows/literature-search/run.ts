@@ -18,6 +18,7 @@
  */
 
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
+import { computeArticleKey } from '@/lib/data/article-keys';
 import { bulkInsertArticleSourcesAsAdmin } from '@/lib/data/article-sources';
 import { markStageCompleted, markStageFailed, markStageRunning } from '../lib/db-writes';
 import { aggregateStageMetrics, logEvent } from '../lib/events';
@@ -86,16 +87,28 @@ export async function runLiteratureSearch(input: LiteratureSearchInput): Promise
           apiKeys: input.apiKeys,
         });
 
+        const articleKey = computeArticleKey({
+          specialtySlug: input.specialtySlug,
+          articleTitle: article.articleTitle,
+        });
         if (ranked.length > 0) {
-          await bulkInsertArticleSourcesAsAdmin(input.specialtySlug, article.id, ranked);
+          await bulkInsertArticleSourcesAsAdmin(
+            input.specialtySlug,
+            article.id,
+            articleKey,
+            ranked,
+          );
           totalSources += ranked.length;
         }
-        await setArticleBacklogStatusAsAdmin(
-          input.specialtySlug,
-          article.id,
-          'sources-searched',
-          null,
-        );
+        if (articleKey) {
+          await setArticleBacklogStatusAsAdmin(
+            input.specialtySlug,
+            articleKey,
+            article.id,
+            'sources-searched',
+            null,
+          );
+        }
         succeeded++;
         await logEvent({
           runId: input.runId,

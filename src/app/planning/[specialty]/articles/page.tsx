@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
+import { computeArticleKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import {
   listArticleUpdateSuggestions,
@@ -37,10 +38,18 @@ export default async function ArticlesPage({
   );
 }
 
-function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
+function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
   const codes = extractCodes(r.codes);
   return {
     id: r.id,
+    articleKey:
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        category: r.category,
+      }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     category: r.category,
@@ -55,11 +64,22 @@ function projectConsolidated(r: ConsolidatedArticle): ArticleRow {
 }
 
 function projectSuggestion(
+  slug: string,
   r: NewArticleSuggestion | ArticleUpdateSuggestion,
 ): ArticleRow {
   const codes = extractCodes(r.codes);
   return {
     id: r.id,
+    articleKey:
+      r.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        // 2nd-pass suggestion rows don't carry `category` in the
+        // schema — the field is on consolidatedArticles only — so the
+        // fallback formula kicks in (slug + title).
+      }),
     articleTitle: r.articleTitle,
     articleType: r.articleType,
     // category + numCodes are not on the 2nd-pass schema; fall back where we can.
@@ -106,21 +126,29 @@ async function ArticlesData({ slug }: { slug: string }) {
     sectionRecs,
   );
 
+  const consolidated = consolidatedRecs.map((r) => projectConsolidated(slug, r));
+  const newOnes = newRecs.map((r) => projectSuggestion(slug, r));
+  const updates = updateRecs.map((r) => projectSuggestion(slug, r));
+
+  // `reviewRecs` is keyed by articleKey (the stable id). The modal
+  // displays review state by PB id (`current.id`) so it can survive
+  // local row reordering. Translate at the boundary: for each row that
+  // has both a key and a current PB id, copy the review's status into
+  // the id-keyed map.
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
   const initialNotesByArticle: Record<string, string> = {};
-  for (const [id, r] of Object.entries(reviewRecs)) {
-    initialReviews[id] = r.status;
-    initialReviewers[id] = {
-      reviewerEmail: r.reviewerEmail,
-      reviewedAt: r.reviewedAt,
+  for (const row of [...consolidated, ...newOnes, ...updates]) {
+    if (!row.id || !row.articleKey) continue;
+    const review = reviewRecs[row.articleKey];
+    if (!review) continue;
+    initialReviews[row.id] = review.status;
+    initialReviewers[row.id] = {
+      reviewerEmail: review.reviewerEmail,
+      reviewedAt: review.reviewedAt,
     };
-    if (r.notes) initialNotesByArticle[id] = r.notes;
+    if (review.notes) initialNotesByArticle[row.id] = review.notes;
   }
-
-  const consolidated = consolidatedRecs.map(projectConsolidated);
-  const newOnes = newRecs.map(projectSuggestion);
-  const updates = updateRecs.map(projectSuggestion);
 
   return (
     <ArticlesView

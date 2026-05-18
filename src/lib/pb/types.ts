@@ -106,8 +106,17 @@ export type ArticleReviewStatus = 'approved' | 'rejected';
 
 export interface ArticleReviewRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the consolidatedArticles row this review covers. */
+  /** PB id of the consolidatedArticles row this review covers.
+   *  @deprecated Use `articleKey` for cross-collection joins —
+   *  `articleRecordId` is unstable across consolidation re-runs. Kept
+   *  for backwards compatibility during the keys migration; will be
+   *  dropped in a follow-up release. */
   articleRecordId: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Empty string for zombie rows
+   *  whose `articleRecordId` no longer resolves (filtered out by the
+   *  UI). */
+  articleKey: string;
   status: ArticleReviewStatus;
   reviewerEmail?: string;
   /** ms since epoch */
@@ -119,8 +128,11 @@ export interface ArticleReviewRecord extends PbRecord {
 
 export interface SectionReviewRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the consolidatedSections row this review covers. */
+  /** PB id of the consolidatedSections row this review covers.
+   *  @deprecated Use `sectionKey` — see ArticleReviewRecord. */
   sectionRecordId: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  sectionKey: string;
   status: ArticleReviewStatus;
   reviewerEmail?: string;
   reviewedAt?: number;
@@ -162,8 +174,11 @@ export interface ArticleBacklogRecord extends PbRecord {
   specialtySlug: string;
   /** PB id of the newArticleSuggestions row this backlog state covers
    *  (type='new'), or the CMS articleId of the parent article being
-   *  updated (type='update'). */
+   *  updated (type='update').
+   *  @deprecated Use `articleKey` — see ArticleReviewRecord. */
   articleRecordId: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey: string;
   status: ArticleBacklogStatus;
   /** Discriminator between new-article backlog rows and update-article
    *  backlog rows. Existing rows without an explicit value default to
@@ -192,8 +207,16 @@ export type PredatoryJournalRisk = 'none' | 'low' | 'medium' | 'high' | 'predato
 
 export interface ArticleSourceRecord extends PbRecord {
   specialtySlug: string;
-  /** PB id of the newArticleSuggestions row this source is attached to. */
+  /** PB id of the newArticleSuggestions row this source is attached to.
+   *  @deprecated Use `articleKey` — the PB id is orphaned by a
+   *  consolidation re-run, the stable key survives. Kept for one
+   *  release as a backfill safety net. */
   articleRecordId: string;
+  /** Stable, content-derived article identifier (see
+   *  `src/lib/data/article-keys.ts`). Survives consolidation re-runs,
+   *  so the source list reattaches automatically. Optional on the
+   *  type because pre-migration rows may have an empty value. */
+  articleKey?: string;
   ribosomId?: string;
   title: string;
   doi?: string;
@@ -208,14 +231,26 @@ export interface ArticleSourceRecord extends PbRecord {
   subtopics?: string;
   llmSummary?: string;
   justification?: string;
-  useFlag?: boolean;
   superseded?: boolean;
   priority?: number;
   originalFilename?: string;
   geminiFilename?: string;
   uri?: string;
   mimeType?: string;
+  /** ID returned by Cortex CMS after registering the source metadata
+   *  (title, URL, authors, etc.). Populated by the Stage 2 trigger;
+   *  empty until then. PDFs themselves are NOT uploaded to Cortex —
+   *  only the source metadata. */
+  cortexSourceId?: string;
+  /** Editor decision on whether to keep this source. Empty / undefined
+   *  means not yet reviewed. */
+  reviewStatus?: SourceReviewStatus;
+  reviewerEmail?: string;
+  /** ms since epoch */
+  reviewedAt?: number;
 }
+
+export type SourceReviewStatus = 'approved' | 'rejected';
 
 // --- Collection: reviewComments --------------------------------------------
 
@@ -225,8 +260,12 @@ export interface ReviewCommentRecord extends PbRecord {
   specialtySlug: string;
   recordKind: ReviewRecordKind;
   /** PB id of the consolidatedArticles or consolidatedSections row this
-   *  comment is attached to. */
+   *  comment is attached to.
+   *  @deprecated Use `recordKey` — see ArticleReviewRecord. */
   recordId: string;
+  /** Stable, content-derived identifier — interpretation depends on
+   *  `recordKind`: 'article' → articleKey, 'section' → sectionKey. */
+  recordKey: string;
   authorEmail?: string;
   body: string;
 }
@@ -244,6 +283,8 @@ export interface MappingInFlightRecord extends PbRecord {
 
 export interface ArticleSuggestionRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
   newArticle?: boolean;
@@ -273,6 +314,8 @@ export interface ArticleSuggestionRecord extends PbRecord {
 
 export interface ConsolidatedArticleRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  articleKey?: string;
   articleTitle?: string;
   articleType?: string;
   specialtyName?: string;
@@ -290,6 +333,8 @@ export interface ConsolidatedArticleRecord extends PbRecord {
 
 export interface ConsolidatedSectionRecord extends PbRecord {
   specialtySlug: string;
+  /** Stable, content-derived identifier — see `article-keys.ts`. */
+  sectionKey?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
   articleTitle?: string;
@@ -406,6 +451,64 @@ export interface ExtractedCodeRecord extends PbRecord {
   source?: string;
   metadata?: unknown;
   createdAt: number;
+}
+
+// --- Collection: articleWritingRuns + articleDrafts ------------------------
+
+export type ArticleWritingRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type WritingPassName =
+  | 'primary'
+  | 'secondary'
+  | 'proofreader'
+  | 'style'
+  | 'html'
+  | 'copy';
+
+export type ArticleDraftStatus = 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface ArticleWritingRunRecord extends PbRecord {
+  specialtySlug: string;
+  articleRecordId: string;
+  status: ArticleWritingRunStatus;
+  currentPass?: WritingPassName;
+  startedAt?: number;
+  finishedAt?: number;
+  errorMessage?: string;
+  requestedByEmail?: string;
+  /** PB id of the user who clicked Start. Used by the dispatcher to
+   *  resolve the per-user API key at dispatch time — the request-time
+   *  cookie isn't available later. Empty for legacy rows + falls back
+   *  to env-level keys at dispatch. */
+  requestedByUserId?: string;
+  language?: string;
+  articleLength?: string;
+  useTextBubbles?: boolean;
+  modelProvider?: string;
+  modelId?: string;
+  modelReasoning?: string;
+}
+
+export interface ArticleDraftRecord extends PbRecord {
+  runId: string;
+  specialtySlug: string;
+  articleRecordId: string;
+  pass: WritingPassName;
+  status: ArticleDraftStatus;
+  output?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  errorMessage?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  costUsd?: number;
+  modelId?: string;
 }
 
 // --- Collection: userApiKeys -----------------------------------------------

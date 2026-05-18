@@ -10,7 +10,7 @@ import { AddSourceModal } from './add-source-modal';
 import { DefaultPromptModal } from './default-prompt-modal';
 import { InputRow, type InputRowState, newInputRow } from './input-row';
 import { MissingKeyModal } from './missing-key-modal';
-import { modelKey, readSpec } from './model-selection-storage';
+import { readSpecForStage } from './model-selection-storage';
 import { PromptSection } from './prompt-section';
 
 export function StartMilestonesForm({
@@ -68,9 +68,11 @@ export function StartMilestonesForm({
       }
     }
 
-    const model = readSpec(modelKey(specialtySlug, 'extract_milestones'));
+    const model = readSpecForStage(specialtySlug, 'extract_milestones');
     if (!model) {
-      setError('Pick a model on the Extract milestones card before starting.');
+      setError(
+        'No model configured for Extract milestones. Open the gear icon to pick one.',
+      );
       return;
     }
 

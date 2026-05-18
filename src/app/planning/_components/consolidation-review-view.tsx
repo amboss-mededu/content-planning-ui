@@ -1,6 +1,7 @@
 'use client';
 
 import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
+import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
   useCallback,
@@ -48,6 +49,7 @@ export function ConsolidationReviewView({
   articles,
   sections,
   flaggedCategories,
+  mappingByCategory,
   categoryLookup,
   titleOriginLookup,
   initialArticleReviews,
@@ -72,6 +74,12 @@ export function ConsolidationReviewView({
   articles: ArticleRow[];
   sections: SectionRow[];
   flaggedCategories: string[];
+  /** Per-category mapping snapshot, computed once on the server from the
+   *  `codes` collection. Drives the readiness chip next to each rail item.
+   *  `ready` flips true once every code in the category has `mappedAt`
+   *  set, which is the precondition for the (still-to-be-built) per-
+   *  category consolidation trigger. */
+  mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialArticleReviews: ReviewMap;
@@ -100,6 +108,12 @@ export function ConsolidationReviewView({
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalOpener>(null);
   const [_pending, startTransition] = useTransition();
+  // Categories whose consolidation request is in flight. Drives the rail
+  // button's "Starting…" label so consecutive clicks don't fan out runs.
+  const [consolidatingSet, setConsolidatingSet] = useState<Set<string>>(new Set());
+  const [isRunningAll, setIsRunningAll] = useState(false);
+  const [consolidateError, setConsolidateError] = useState<string | null>(null);
+  const router = useRouter();
 
   // Group rows by category. Both 1st-pass collections carry a `category`
   // string; rows missing one bucket under "(uncategorized)" so they're
@@ -125,9 +139,24 @@ export function ConsolidationReviewView({
     return m;
   }, [articles, sections]);
 
+  // Rail categories = only those that have produced consolidated output
+  // (articles or sections in `grouped`). Codes-table categories that
+  // contributed nothing don't appear — once consolidation has run, an
+  // empty category means "produced nothing", not "still pending". The
+  // specialty-level "Run consolidation for all categories" button at
+  // the top of the rail covers the bootstrap case where `grouped` is
+  // empty and there's no entry point yet.
   const categories = useMemo(
     () => Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)),
     [grouped],
+  );
+
+  // Specialty-level "any mapping at all?" — controls whether the
+  // run-all button at the top of the rail is shown. If no codes are
+  // mapped yet, the user belongs back on the codes screen first.
+  const hasAnyMapping = useMemo(
+    () => Object.values(mappingByCategory).some((m) => m.mapped > 0),
+    [mappingByCategory],
   );
 
   const [selectedCategoryRaw, setSelectedCategoryRaw] = useState<string | null>(
@@ -161,7 +190,14 @@ export function ConsolidationReviewView({
     setSelectedSectionIds(new Set());
   }, []);
 
-  const selectedBucket = selectedCategory ? grouped.get(selectedCategory) : undefined;
+  // A mapping-ready but never-consolidated category has no entry in
+  // `grouped`. Fall back to an empty bucket so the right pane still
+  // renders (the sub-tables show their empty states) and the user has
+  // a "Start consolidation" target in the rail to click.
+  const selectedBucket = useMemo(() => {
+    if (!selectedCategory) return undefined;
+    return grouped.get(selectedCategory) ?? { articles: [], sections: [] };
+  }, [selectedCategory, grouped]);
 
   // ----- Per-category aggregate counts (drives left-rail badges) -----
   const counts = useMemo(() => {
@@ -188,46 +224,54 @@ export function ConsolidationReviewView({
   }, [grouped, articleReviews, sectionReviews]);
 
   // ----- Bulk approvals -----
+  // Optimistic state is keyed by articleKey/sectionKey (the stable id);
+  // the server action takes the pair (key, current PB id) so the
+  // legacy `articleRecordId` column on the PB row keeps tracking the
+  // freshest underlying row.
+
   const approveArticles = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
+    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
+      if (pairs.length === 0) return;
       const now = Date.now();
-      // Optimistic mirror — the server action also persists via the
-      // updateTag round-trip but we don't want to wait on it to keep
-      // the rail counts responsive.
+      // Optimistic mirror — the local maps are keyed by the row's PB
+      // id (`articleRecordId`), so the inline table can do an O(1)
+      // status lookup without crossing into the key space. The server
+      // action persists with the stable key alongside the id.
       setArticleReviews((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = 'approved';
+        for (const p of pairs) next[p.articleRecordId] = 'approved';
         return next;
       });
       setArticleReviewers((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        for (const p of pairs)
+          next[p.articleRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
-        await bulkApproveArticleReviews(slug, ids);
+        await bulkApproveArticleReviews(slug, pairs);
       });
     },
     [slug, viewerEmail],
   );
 
   const approveSections = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
+    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
+      if (pairs.length === 0) return;
       const now = Date.now();
       setSectionReviews((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = 'approved';
+        for (const p of pairs) next[p.sectionRecordId] = 'approved';
         return next;
       });
       setSectionReviewers((prev) => {
         const next = { ...prev };
-        for (const id of ids) next[id] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        for (const p of pairs)
+          next[p.sectionRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
         return next;
       });
       startTransition(async () => {
-        await bulkApproveSectionReviews(slug, ids);
+        await bulkApproveSectionReviews(slug, pairs);
       });
     },
     [slug, viewerEmail],
@@ -235,14 +279,20 @@ export function ConsolidationReviewView({
 
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
-    const articleIds = selectedBucket.articles
-      .filter((a) => a.id && articleReviews[a.id] !== 'approved')
-      .map((a) => a.id as string);
-    const sectionIds = selectedBucket.sections
-      .filter((s) => s.id && sectionReviews[s.id] !== 'approved')
-      .map((s) => s.id as string);
-    approveArticles(articleIds);
-    approveSections(sectionIds);
+    const articlePairs = selectedBucket.articles
+      .filter((a) => a.articleKey && a.id && articleReviews[a.id] !== 'approved')
+      .map((a) => ({
+        articleKey: a.articleKey as string,
+        articleRecordId: a.id as string,
+      }));
+    const sectionPairs = selectedBucket.sections
+      .filter((s) => s.sectionKey && s.id && sectionReviews[s.id] !== 'approved')
+      .map((s) => ({
+        sectionKey: s.sectionKey as string,
+        sectionRecordId: s.id as string,
+      }));
+    approveArticles(articlePairs);
+    approveSections(sectionPairs);
     setSelectedArticleIds(new Set());
     setSelectedSectionIds(new Set());
   }, [selectedBucket, articleReviews, sectionReviews, approveArticles, approveSections]);
@@ -265,6 +315,78 @@ export function ConsolidationReviewView({
       });
     },
     [slug],
+  );
+
+  // ----- Specialty-level consolidation trigger -----
+  // Omitting `categories` runs primary for every mapped category in
+  // the specialty. The same endpoint handles both bootstrap (no
+  // output yet) and re-run scenarios. `chainSecondaries: true` so
+  // one click produces end-to-end output.
+  const startConsolidationAll = useCallback(async () => {
+    if (isRunningAll) return;
+    setConsolidateError(null);
+    setIsRunningAll(true);
+    try {
+      const res = await fetch('/api/workflows/consolidate-primary', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          specialtySlug: slug,
+          chainSecondaries: true,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsolidateError(body?.error ?? `HTTP ${res.status} starting consolidation`);
+        return;
+      }
+      router.refresh();
+    } catch (e) {
+      setConsolidateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsRunningAll(false);
+    }
+  }, [slug, router, isRunningAll]);
+
+  // ----- Per-category consolidation trigger -----
+  const startConsolidation = useCallback(
+    async (category: string) => {
+      if (consolidatingSet.has(category)) return;
+      setConsolidateError(null);
+      setConsolidatingSet((prev) => {
+        const next = new Set(prev);
+        next.add(category);
+        return next;
+      });
+      try {
+        const res = await fetch('/api/workflows/consolidate-primary', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            specialtySlug: slug,
+            categories: [category],
+            chainSecondaries: true,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setConsolidateError(
+            body?.error ?? `HTTP ${res.status} starting consolidation for ${category}`,
+          );
+          return;
+        }
+        router.refresh();
+      } catch (e) {
+        setConsolidateError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setConsolidatingSet((prev) => {
+          const next = new Set(prev);
+          next.delete(category);
+          return next;
+        });
+      }
+    },
+    [slug, router, consolidatingSet],
   );
 
   // ----- Modal close -----
@@ -291,8 +413,16 @@ export function ConsolidationReviewView({
           categories={categories}
           counts={counts}
           flaggedSet={flaggedSet}
+          mappingByCategory={mappingByCategory}
+          hasAnyMapping={hasAnyMapping}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
+          consolidatingSet={consolidatingSet}
+          onStartConsolidation={startConsolidation}
+          isRunningAll={isRunningAll}
+          onStartConsolidationAll={startConsolidationAll}
+          consolidateError={consolidateError}
+          onDismissError={() => setConsolidateError(null)}
         />
         <div style={{ minWidth: 0 }}>
           {selectedCategory && selectedBucket ? (
@@ -310,11 +440,25 @@ export function ConsolidationReviewView({
               setSelectedSectionIds={setSelectedSectionIds}
               categoryLookup={categoryLookup}
               onApproveSelectedArticles={() => {
-                approveArticles(Array.from(selectedArticleIds));
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.articles
+                  .filter((a) => a.id && a.articleKey && selectedArticleIds.has(a.id))
+                  .map((a) => ({
+                    articleKey: a.articleKey as string,
+                    articleRecordId: a.id as string,
+                  }));
+                approveArticles(pairs);
                 setSelectedArticleIds(new Set());
               }}
               onApproveSelectedSections={() => {
-                approveSections(Array.from(selectedSectionIds));
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.sections
+                  .filter((s) => s.id && s.sectionKey && selectedSectionIds.has(s.id))
+                  .map((s) => ({
+                    sectionKey: s.sectionKey as string,
+                    sectionRecordId: s.id as string,
+                  }));
+                approveSections(pairs);
                 setSelectedSectionIds(new Set());
               }}
               onApproveAll={approveAllInCategory}
@@ -325,7 +469,7 @@ export function ConsolidationReviewView({
           ) : (
             <Text color="secondary">
               {articles.length + sections.length === 0
-                ? `No 1st-pass content for this specialty yet (consolidatedArticles: ${articles.length}, consolidatedSections: ${sections.length}). Run the consolidation pipeline first, or re-seed your data.`
+                ? 'No consolidation output yet for this specialty. Use "Run consolidation for all categories" in the rail to start.'
                 : 'Select a category from the left to start reviewing.'}
             </Text>
           )}
@@ -388,8 +532,16 @@ function CategoryRail({
   categories,
   counts,
   flaggedSet,
+  mappingByCategory,
+  hasAnyMapping,
   selectedCategory,
   onSelect,
+  consolidatingSet,
+  onStartConsolidation,
+  isRunningAll,
+  onStartConsolidationAll,
+  consolidateError,
+  onDismissError,
 }: {
   categories: string[];
   counts: Record<
@@ -397,9 +549,18 @@ function CategoryRail({
     { articleApproved: number; sectionApproved: number; total: number }
   >;
   flaggedSet: Set<string>;
+  mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
+  hasAnyMapping: boolean;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
+  consolidatingSet: Set<string>;
+  onStartConsolidation: (cat: string) => void;
+  isRunningAll: boolean;
+  onStartConsolidationAll: () => void;
+  consolidateError: string | null;
+  onDismissError: () => void;
 }) {
+  const hasOutput = categories.length > 0;
   return (
     <div
       style={{
@@ -410,9 +571,45 @@ function CategoryRail({
       }}
     >
       <Stack space="xs">
+        {consolidateError ? (
+          <button
+            type="button"
+            onClick={onDismissError}
+            style={{
+              textAlign: 'left',
+              padding: '6px 8px',
+              border: '1px solid rgb(220, 38, 38)',
+              borderRadius: 4,
+              background: 'rgb(254, 226, 226)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color: 'rgb(127, 29, 29)',
+              fontSize: 12,
+            }}
+            title="Dismiss"
+          >
+            {consolidateError}
+          </button>
+        ) : null}
+        {hasAnyMapping ? (
+          <Button
+            variant={hasOutput ? 'tertiary' : 'primary'}
+            fullWidth
+            onClick={onStartConsolidationAll}
+            disabled={isRunningAll}
+          >
+            {isRunningAll
+              ? 'Consolidating…'
+              : hasOutput
+                ? 'Re-run all consolidation'
+                : 'Run consolidation for all categories'}
+          </Button>
+        ) : null}
         {categories.length === 0 && (
           <Text color="secondary" size="s">
-            No categories yet.
+            {hasAnyMapping
+              ? 'No consolidation output yet. Use the button above to start.'
+              : 'Map some codes to a category first to enable consolidation.'}
           </Text>
         )}
         {categories.map((cat) => {
@@ -424,7 +621,7 @@ function CategoryRail({
           const itemStyle: CSSProperties = {
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'flex-start',
+            alignItems: 'stretch',
             gap: 4,
             padding: '8px 10px',
             border: '1px solid',
@@ -436,26 +633,63 @@ function CategoryRail({
             textAlign: 'left',
             width: '100%',
           };
+          const mapping = mappingByCategory[cat];
+          const isConsolidating = consolidatingSet.has(cat);
+          const hasOutput = c.total > 0;
+          // Two siblings inside a plain non-interactive container:
+          //   1) the category-select button (label + status badges)
+          //   2) an optional Start-consolidation button
+          // Avoids nested <button> (invalid HTML) and the bubbling-onClick
+          // workaround the linter rejected.
+          const selectStyle: CSSProperties = {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 4,
+            padding: 0,
+            margin: 0,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            font: 'inherit',
+            color: 'inherit',
+            textAlign: 'left',
+            width: '100%',
+          };
           return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => onSelect(cat)}
-              style={itemStyle}
-            >
-              <Text size="s" weight={isActive ? 'bold' : 'normal'}>
-                {cat}
-              </Text>
-              <Inline space="xxs" vAlignItems="center">
-                {isFlagged && <Badge text="re-run" color="red" />}
-                {allApproved && !isFlagged && <Badge text="all approved" color="green" />}
-                {!allApproved && !isFlagged && (
-                  <Text size="xs" color="secondary">
-                    {approved}/{c.total} approved
-                  </Text>
-                )}
-              </Inline>
-            </button>
+            <div key={cat} style={itemStyle}>
+              <button type="button" onClick={() => onSelect(cat)} style={selectStyle}>
+                <Text size="s" weight={isActive ? 'bold' : 'normal'}>
+                  {cat}
+                </Text>
+                <Inline space="xxs" vAlignItems="center">
+                  {isFlagged && <Badge text="re-run" color="red" />}
+                  {allApproved && !isFlagged && (
+                    <Badge text="all approved" color="green" />
+                  )}
+                  {!allApproved && !isFlagged && hasOutput && (
+                    <Text size="xs" color="secondary">
+                      {approved}/{c.total} approved
+                    </Text>
+                  )}
+                  {mapping && !mapping.ready ? (
+                    <Text size="xs" color="secondary">
+                      {mapping.mapped}/{mapping.total} mapped
+                    </Text>
+                  ) : null}
+                </Inline>
+              </button>
+              {hasOutput && mapping?.ready ? (
+                <Button
+                  variant="tertiary"
+                  fullWidth
+                  onClick={() => onStartConsolidation(cat)}
+                  disabled={isConsolidating}
+                >
+                  {isConsolidating ? 'Consolidating…' : 'Re-run consolidation'}
+                </Button>
+              ) : null}
+            </div>
           );
         })}
       </Stack>
@@ -695,8 +929,8 @@ function ArticleSubTable({
           <tbody>
             {rows.map((r) => {
               if (!r.id) return null;
-              const status = reviews[r.id];
               const rowId = r.id;
+              const status = reviews[rowId];
               const rowStyle: CSSProperties = {
                 ...rowTint(status),
                 cursor: 'pointer',

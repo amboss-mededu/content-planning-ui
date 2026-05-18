@@ -17,9 +17,8 @@ async function userClient(): Promise<PocketBase> {
 }
 
 /**
- * Reviews keyed by the consolidatedSections record id, mirroring the
- * articleReviews shape so the view layer can do an O(1) status lookup
- * per row.
+ * Reviews keyed by the stable `sectionKey`. Empty-key rows are
+ * filtered out — they're zombies from a pre-keys consolidation re-run.
  */
 export async function listSectionReviews(
   slug: string,
@@ -30,21 +29,29 @@ export async function listSectionReviews(
     .collection<SectionReviewRecord>('sectionReviews')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   const out: Record<string, SectionReviewRecord> = {};
-  for (const r of rows) out[r.sectionRecordId] = r;
+  for (const r of rows) {
+    if (!r.sectionKey) continue;
+    out[r.sectionKey] = r;
+  }
   return out;
 }
 
 export async function setSectionReview(
   slug: string,
+  sectionKey: string,
   sectionRecordId: string,
   status: ArticleReviewStatus,
   reviewerEmail: string | null,
   notes?: string,
 ): Promise<void> {
+  if (!sectionKey) {
+    throw new Error('setSectionReview: sectionKey is required');
+  }
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && sectionRecordId = "${sectionRecordId}"`;
+  const filter = `specialtySlug = "${slug}" && sectionKey = "${sectionKey}"`;
   const payload: Record<string, unknown> = {
     specialtySlug: slug,
+    sectionKey,
     sectionRecordId,
     status,
     reviewerEmail: reviewerEmail ?? '',
@@ -68,10 +75,11 @@ export async function setSectionReview(
 
 export async function clearSectionReview(
   slug: string,
-  sectionRecordId: string,
+  sectionKey: string,
 ): Promise<void> {
+  if (!sectionKey) return;
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && sectionRecordId = "${sectionRecordId}"`;
+  const filter = `specialtySlug = "${slug}" && sectionKey = "${sectionKey}"`;
   try {
     const existing = await pb
       .collection<SectionReviewRecord>('sectionReviews')

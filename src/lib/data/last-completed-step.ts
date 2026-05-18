@@ -54,6 +54,7 @@ type Signals = {
   stageCompleted: Partial<Record<string, boolean>>;
   milestonesText: boolean;
   mappedCodeCount: number;
+  totalCodeCount: number;
   consolidatedArticleCount: number;
   consolidatedSectionCount: number;
   approvedArticleCount: number;
@@ -84,9 +85,14 @@ function resolveLastStep(s: Signals): LastStep {
     s.milestonesText ||
     bool(o.extract_milestones) ||
     bool(k.extract_milestones);
+  // "Mapping done" only auto-fires once every code is mapped. Partial
+  // progress shouldn't claim the whole stage is complete — that misled
+  // the dashboard into showing "Mapping done" after a single code landed.
+  // Editors can still force-complete via the override blob if some codes
+  // legitimately can't be mapped.
   const r3_mapping =
     bool(s.stageCompleted.map_codes) ||
-    s.mappedCodeCount >= 1 ||
+    (s.totalCodeCount > 0 && s.mappedCodeCount === s.totalCodeCount) ||
     bool(o.map_codes) ||
     bool(k.map_codes);
   const r4_consolidations =
@@ -210,6 +216,7 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
     milestonesText:
       typeof specialty?.milestones === 'string' && specialty.milestones.length > 0,
     mappedCodeCount: codeRows.filter((c) => (c.mappedAt ?? 0) > 0).length,
+    totalCodeCount: codeRows.length,
     consolidatedArticleCount: articles.length,
     consolidatedSectionCount: sections.length,
     approvedArticleCount: approvedArticleIds.length,
@@ -294,7 +301,9 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   );
 
   const mappedCount = new Map<string, number>();
+  const totalCount = new Map<string, number>();
   for (const c of codes) {
+    totalCount.set(c.specialtySlug, (totalCount.get(c.specialtySlug) ?? 0) + 1);
     if ((c.mappedAt ?? 0) > 0) {
       mappedCount.set(c.specialtySlug, (mappedCount.get(c.specialtySlug) ?? 0) + 1);
     }
@@ -354,6 +363,7 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
       stageCompleted,
       milestonesText: typeof sp.milestones === 'string' && sp.milestones.length > 0,
       mappedCodeCount: mappedCount.get(slug) ?? 0,
+      totalCodeCount: totalCount.get(slug) ?? 0,
       consolidatedArticleCount: articleCount.get(slug) ?? 0,
       consolidatedSectionCount: sectionCount.get(slug) ?? 0,
       approvedArticleCount: approvedArticleCount.get(slug) ?? 0,

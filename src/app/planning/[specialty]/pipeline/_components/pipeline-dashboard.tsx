@@ -17,10 +17,12 @@ import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/code
 import type { MapCodesHistory, PipelineRunRow, StageContext } from '@/lib/data/pipeline';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { BulkDraftArticlesButton } from './bulk-draft-card';
 import { PhaseGroup } from './phase-group';
 import { RunLitSearchButton } from './run-lit-search-button';
 import { SourcesCard } from './sources-card';
 import { StageCard } from './stage-card';
+import { StartConsolidationForm } from './start-consolidation-form';
 import { StartMapCodesForm } from './start-map-codes-form';
 import { StartMilestonesForm } from './start-milestones-form';
 import { StartRunForm } from './start-run-form';
@@ -48,6 +50,7 @@ export function PipelineDashboard({
   mapCodesHistory,
   articleApprovalStats,
   litSearchStats,
+  draftEligibleIds,
   stageHasOutput,
   stageOverrides,
   stageSkipped,
@@ -70,6 +73,9 @@ export function PipelineDashboard({
     searched: number;
     laterStages: number;
   };
+  /** newArticleSuggestions PB ids whose backlog status is
+   *  `ready-for-llm-draft` — eligible to enqueue for article writing. */
+  draftEligibleIds: string[];
   stageHasOutput: Record<string, boolean>;
   stageOverrides: Record<string, boolean>;
   stageSkipped: Record<string, boolean>;
@@ -413,7 +419,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualOverride={stageOverrides.consolidate_primary === true}
             manualSkipped={stageSkipped.consolidate_primary === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_primary"
+            />
+          </StageCard>
           <StageCard
             title="Articles (secondary)"
             description={
@@ -428,7 +439,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_articles ?? true}
             manualOverride={stageOverrides.consolidate_articles === true}
             manualSkipped={stageSkipped.consolidate_articles === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_articles"
+            />
+          </StageCard>
           <StageCard
             title="Sections (secondary)"
             description="Dedupe sections and updates within each consolidated article."
@@ -439,7 +455,12 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_sections ?? true}
             manualOverride={stageOverrides.consolidate_sections === true}
             manualSkipped={stageSkipped.consolidate_sections === true}
-          />
+          >
+            <StartConsolidationForm
+              specialtySlug={specialtySlug}
+              stage="consolidate_sections"
+            />
+          </StageCard>
           <Stack space="s">
             <StageCard
               title="Literature search"
@@ -462,6 +483,22 @@ export function PipelineDashboard({
               running={stages.literature_search?.stage.status === 'running'}
             />
           </Stack>
+          <Card outlined>
+            <CardBox>
+              <Stack space="s">
+                <H2>Draft articles</H2>
+                <Text size="s" color="secondary">
+                  {draftEligibleIds.length === 0
+                    ? 'Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
+                    : `Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
+                </Text>
+                <BulkDraftArticlesButton
+                  specialtySlug={specialtySlug}
+                  articleRecordIds={draftEligibleIds}
+                />
+              </Stack>
+            </CardBox>
+          </Card>
         </Stack>
       </PhaseGroup>
 

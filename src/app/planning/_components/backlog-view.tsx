@@ -12,10 +12,13 @@ import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
   ArticleSourceRecord,
+  ArticleWritingRunRecord,
   ReviewCommentRecord,
 } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
+import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
 import {
   IN_PROGRESS_STATUSES,
   NEXT_ACTION,
@@ -27,12 +30,23 @@ import {
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { canRunLitSearch } from './pipeline-stage-gates';
+import { RegisterCortexButton } from './register-cortex-button';
+import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
+import { StartWritingButton } from './start-writing-button';
 
 export type BacklogRow = {
   /** For type='new': PB id of the underlying newArticleSuggestions row.
-   *  For type='update': the parent article's CMS articleId. */
+   *  For type='update': the parent article's CMS articleId. Use this
+   *  for click-target routing only — cross-collection joins go through
+   *  `articleKey`. */
   id: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Computed by the loader page from
+   *  the row's current title (or CMS articleId for updates); never
+   *  synthesized client-side. */
+  articleKey: string;
   /** Discriminator. type='update' rows are built by aggregating approved
    *  section reviews; type='new' rows mirror approved newArticleSuggestions. */
   type: 'new' | 'update';
@@ -41,6 +55,10 @@ export type BacklogRow = {
   codes: EmbeddedCode[];
   /** Sources attached to this article (type='new' only — empty for updates). */
   sourcesCount: number;
+  /** Of `sourcesCount`, how many have a non-empty `cortexSourceId` —
+   *  i.e. have been registered in Cortex CMS. Drives the "Register in
+   *  Cortex" per-row affordance + the status gate before drafting. */
+  registeredSourcesCount: number;
   /** Approved section changes for type='update' rows; undefined otherwise. */
   sections?: SectionRow[];
 };
@@ -83,8 +101,9 @@ export function BacklogView({
   categoryLookup,
   assignableUsers,
   initialBacklog,
-  initialSourcesByArticle,
+  initialSourcesByArticleKey,
   initialCommentsByArticle,
+  initialWritingRuns,
   viewerEmail,
 }: {
   slug: string;
@@ -92,8 +111,9 @@ export function BacklogView({
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
-  initialSourcesByArticle: Record<string, ArticleSourceRecord[]>;
+  initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
+  initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
   viewerEmail?: string;
 }) {
   const params = useSearchParams();
@@ -103,10 +123,32 @@ export function BacklogView({
   const [assigneeFilter, setAssigneeFilter] = useState<string>(
     () => params.get('assignee') ?? '',
   );
-  const [backlog, setBacklog] =
-    useState<Record<string, ArticleBacklogRecord>>(initialBacklog);
+  // Live PB subscription on `articleBacklog`. The hook seeds from the
+  // SSR snapshot (`initialBacklog`) and applies every realtime event to
+  // its internal array; we project the array back to a key-indexed map
+  // for the existing callers. PB writes from any source — this tab,
+  // another tab, async pipeline workers — flow through the same channel,
+  // so the row list always reflects current state without manual
+  // refreshes or cross-view cache tags.
+  const liveBacklogRows = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    useMemo(() => Object.values(initialBacklog), [initialBacklog]),
+    { filter: `specialtySlug = "${slug}"` },
+  );
+  const backlog = useMemo(() => {
+    const m: Record<string, ArticleBacklogRecord> = {};
+    for (const r of liveBacklogRows) {
+      if (r.articleKey) m[r.articleKey] = r;
+    }
+    return m;
+  }, [liveBacklogRows]);
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
+  // Multi-select for the bulk-action toolbar. Keyed by row.id (the
+  // newArticleSuggestions PB id for type='new', the parent CMS articleId
+  // for type='update'). Updates clear automatically when the row leaves
+  // the table (e.g. status filter excludes it).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -117,25 +159,29 @@ export function BacklogView({
     window.history.replaceState(null, '', next);
   }, [statusFilter, assigneeFilter]);
 
+  // State + actions are keyed by articleKey (stable across re-runs).
+  // `articleRecordId` is still threaded through for the PB row's
+  // breadcrumb column, but it is never used as a lookup key.
+
   const statusOf = useCallback(
-    (id: string): ArticleBacklogStatus => backlog[id]?.status ?? 'waiting-for-sources',
+    (key: string): ArticleBacklogStatus => backlog[key]?.status ?? 'waiting-for-sources',
     [backlog],
   );
   const assigneeOf = useCallback(
-    (id: string): string => backlog[id]?.assigneeEmail ?? '',
+    (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
 
   const filtered = useMemo(() => {
     let out = rows;
     if (statusFilter) {
-      out = out.filter((r) => statusOf(r.id) === statusFilter);
+      out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
     }
     if (assigneeFilter) {
       if (assigneeFilter === '__unassigned__') {
-        out = out.filter((r) => !assigneeOf(r.id));
+        out = out.filter((r) => !assigneeOf(r.articleKey));
       } else {
-        out = out.filter((r) => assigneeOf(r.id) === assigneeFilter);
+        out = out.filter((r) => assigneeOf(r.articleKey) === assigneeFilter);
       }
     }
     return out;
@@ -146,7 +192,7 @@ export function BacklogView({
     let inProgress = 0;
     let waiting = 0;
     for (const r of rows) {
-      const s = statusOf(r.id);
+      const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
@@ -154,85 +200,73 @@ export function BacklogView({
     return { published, inProgress, waiting };
   }, [rows, statusOf]);
 
-  // Picking a status in the inline cell. Selecting 'unassigned' is the
-  // reset path — delete the PB row entirely so the article returns to
-  // its default state. Any other value is an upsert.
+  // Optimistic state was removed when this view moved to PB realtime —
+  // the live subscription applies the server's write back to the row
+  // list within ~50–200ms, which is fast enough for an admin tool. The
+  // handlers below are now thin: write, log on failure, let realtime
+  // catch the rest.
   async function handleStatusChange(
-    rowId: string,
+    articleKey: string,
+    articleRecordId: string,
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
-    const prev = backlog[rowId];
     if (next === 'unassigned') {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        delete copy[rowId];
-        return copy;
-      });
       try {
-        await clearBacklogRow(slug, rowId);
+        await clearBacklogRow(slug, articleKey);
       } catch (e) {
-        setBacklog((curr) => (prev ? { ...curr, [rowId]: prev } : curr));
         console.error('clearBacklogRow failed', e);
       }
       return;
     }
-    setBacklog((curr) => ({
-      ...curr,
-      [rowId]: {
-        ...(curr[rowId] ?? ({} as ArticleBacklogRecord)),
-        articleRecordId: rowId,
-        specialtySlug: slug,
-        status: next,
-        assigneeEmail: curr[rowId]?.assigneeEmail ?? '',
-        lastChangedByEmail: viewerEmail ?? '',
-        lastChangedAt: Date.now(),
-        ...(notes !== undefined ? { notes } : {}),
-      } as ArticleBacklogRecord,
-    }));
     try {
-      await setBacklogStatus(slug, rowId, next, notes);
+      await setBacklogStatus(slug, articleKey, articleRecordId, next, notes);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[rowId] = prev;
-        else delete copy[rowId];
-        return copy;
-      });
       console.error('setBacklogStatus failed', e);
     }
   }
 
-  async function handleAssigneeChange(rowId: string, nextEmail: string): Promise<void> {
-    const prev = backlog[rowId];
+  async function handleAssigneeChange(
+    articleKey: string,
+    articleRecordId: string,
+    nextEmail: string,
+  ): Promise<void> {
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
-
-    setBacklog((curr) => ({
-      ...curr,
-      [rowId]: {
-        ...(curr[rowId] ?? ({} as ArticleBacklogRecord)),
-        articleRecordId: rowId,
-        specialtySlug: slug,
-        status: curr[rowId]?.status ?? 'waiting-for-sources',
-        assigneeEmail: emailOrNull ?? '',
-        lastChangedByEmail: viewerEmail ?? '',
-        lastChangedAt: Date.now(),
-      } as ArticleBacklogRecord,
-    }));
     try {
-      await setBacklogAssignee(slug, rowId, emailOrNull);
+      await setBacklogAssignee(slug, articleKey, articleRecordId, emailOrNull);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[rowId] = prev;
-        else delete copy[rowId];
-        return copy;
-      });
       console.error('setBacklogAssignee failed', e);
     }
   }
 
+  const toggleRow = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const columns: Column<BacklogRow>[] = [
+    {
+      key: 'select',
+      label: '',
+      description: 'Select rows to enable bulk-action toolbar.',
+      width: 36,
+      verticalAlign: 'middle',
+      align: 'center',
+      render: (r) =>
+        r.type === 'update' ? null : (
+          <input
+            type="checkbox"
+            aria-label="Select row"
+            checked={selectedIds.has(r.id)}
+            onChange={() => toggleRow(r.id)}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ),
+    },
     {
       key: 'kind',
       label: 'Kind',
@@ -301,13 +335,13 @@ export function BacklogView({
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => STATUS_LABEL[statusOf(r.id)],
+      accessor: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
-      filterValue: (r) => STATUS_LABEL[statusOf(r.id)],
+      filterValue: (r) => STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
-        const s = statusOf(r.id);
+        const s = statusOf(r.articleKey);
         return (
           <span
             style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
@@ -320,7 +354,11 @@ export function BacklogView({
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
-                handleStatusChange(r.id, e.target.value as ArticleBacklogStatus);
+                handleStatusChange(
+                  r.articleKey,
+                  r.id,
+                  e.target.value as ArticleBacklogStatus,
+                );
               }}
             >
               {STATUS_OPTIONS.map((o) => (
@@ -341,14 +379,14 @@ export function BacklogView({
       width: 180,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => NEXT_ACTION[statusOf(r.id)],
+      accessor: (r) => NEXT_ACTION[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: Array.from(
         new Set(Object.values(NEXT_ACTION).filter((v) => v !== '—')),
       ).map((v) => ({ value: v, label: v })),
-      filterValue: (r) => NEXT_ACTION[statusOf(r.id)],
-      render: (r) => <Text>{NEXT_ACTION[statusOf(r.id)]}</Text>,
+      filterValue: (r) => NEXT_ACTION[statusOf(r.articleKey)],
+      render: (r) => <Text>{NEXT_ACTION[statusOf(r.articleKey)]}</Text>,
     },
     {
       key: 'assignee',
@@ -357,7 +395,7 @@ export function BacklogView({
       width: 200,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => assigneeOf(r.id) || null,
+      accessor: (r) => assigneeOf(r.articleKey) || null,
       type: 'string',
       filterable: true,
       filterOptions: [
@@ -367,13 +405,13 @@ export function BacklogView({
           label: u.name ?? u.email,
         })),
       ],
-      filterValue: (r) => assigneeOf(r.id) || '__unassigned__',
+      filterValue: (r) => assigneeOf(r.articleKey) || '__unassigned__',
       render: (r) => (
         <select
           aria-label="Assignee"
           style={inlineSelectStyle}
-          value={assigneeOf(r.id)}
-          onChange={(e) => handleAssigneeChange(r.id, e.target.value)}
+          value={assigneeOf(r.articleKey)}
+          onChange={(e) => handleAssigneeChange(r.articleKey, r.id, e.target.value)}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -402,16 +440,23 @@ export function BacklogView({
     {
       key: 'sourcesAction',
       label: 'Sources',
-      description: 'Open the per-article sources drawer (new articles only).',
-      width: 120,
+      description:
+        'Per-row literature search (when waiting) or open the sources drawer (after sources land). New articles only.',
+      width: 200,
       verticalAlign: 'middle',
       align: 'center',
-      render: (r) =>
-        r.type === 'update' ? (
-          <Text size="xs" color="secondary">
-            —
-          </Text>
-        ) : (
+      render: (r) => {
+        if (r.type === 'update') {
+          return (
+            <Text size="xs" color="secondary">
+              —
+            </Text>
+          );
+        }
+        if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
+          return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
+        }
+        return (
           <Button
             variant="tertiary"
             size="s"
@@ -422,13 +467,55 @@ export function BacklogView({
           >
             View
           </Button>
+        );
+      },
+    },
+    {
+      key: 'draft',
+      label: 'Draft',
+      description:
+        'Kick off the 6-pass LLM article draft. New articles only — updates use a different editorial path.',
+      width: 220,
+      verticalAlign: 'middle',
+      align: 'left',
+      render: (r) =>
+        r.type === 'update' ? (
+          <Text size="xs" color="secondary">
+            —
+          </Text>
+        ) : (
+          <Inline space="xs" vAlignItems="center">
+            <RegisterCortexButton
+              slug={slug}
+              articleRecordId={r.id}
+              sourcesCount={r.sourcesCount}
+              registeredSourcesCount={r.registeredSourcesCount}
+            />
+            <StartWritingButton
+              slug={slug}
+              articleRecordId={r.id}
+              hasSources={r.sourcesCount > 0}
+              initialRun={initialWritingRuns?.[r.id] ?? null}
+            />
+          </Inline>
         ),
     },
   ];
 
+  // Mapping selected row id → effective backlog status, so the bulk
+  // toolbar can show per-stage eligibility counts. Rows that no longer
+  // appear in `rows` (e.g. filtered out) get pruned silently.
+  const statusByRowId = useMemo(() => {
+    const out: Record<string, ArticleBacklogStatus | undefined> = {};
+    for (const r of rows) out[r.id] = statusOf(r.articleKey);
+    return out;
+  }, [rows, statusOf]);
+
+  const selectedIdsArr = useMemo(() => Array.from(selectedIds), [selectedIds]);
+
   const drawerRow = drawerArticleId ? rows.find((r) => r.id === drawerArticleId) : null;
-  const drawerSources = drawerArticleId
-    ? (initialSourcesByArticle[drawerArticleId] ?? [])
+  const drawerSources = drawerRow?.articleKey
+    ? (initialSourcesByArticleKey[drawerRow.articleKey] ?? [])
     : [];
   const managerRow = managerArticleId
     ? (rows.find((r) => r.id === managerArticleId) ?? null)
@@ -466,6 +553,14 @@ export function BacklogView({
           />
         </div>
       </Inline>
+      {selectedIds.size > 0 && (
+        <BacklogBulkToolbar
+          slug={slug}
+          selectedIds={selectedIdsArr}
+          statusById={statusByRowId}
+          onClear={() => setSelectedIds(new Set())}
+        />
+      )}
       <DataTable
         rows={filtered}
         columns={columns}
@@ -489,14 +584,15 @@ export function BacklogView({
             stage: 'backlog',
             slug,
             article: managerRow,
-            currentStatus: statusOf(managerArticleId),
-            sources: initialSourcesByArticle[managerArticleId] ?? [],
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
+            sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) =>
-              handleStatusChange(managerArticleId, next, notes),
+              handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
           }}
           onClose={() => setManagerArticleId(null)}
         />
@@ -509,13 +605,14 @@ export function BacklogView({
             slug,
             article: managerRow,
             sections: managerRow.sections ?? [],
-            currentStatus: statusOf(managerArticleId),
-            initialComments: initialCommentsByArticle[managerArticleId] ?? [],
-            initialNotes: backlog[managerArticleId]?.notes ?? '',
+            currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
+            initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
+            initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) =>
-              handleStatusChange(managerArticleId, next, notes),
+              handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
           }}
           onClose={() => setManagerArticleId(null)}
         />

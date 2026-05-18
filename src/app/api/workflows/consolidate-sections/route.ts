@@ -1,0 +1,66 @@
+/**
+ * Trigger endpoint for the whole-specialty sections-secondary step.
+ *
+ * POST /api/workflows/consolidate-sections
+ *   body: { specialtySlug: string }
+ *
+ * Stub today: dedupes `articleUpdateSuggestions` by article/section key →
+ * writes the specialty's `consolidatedSections` rows.
+ */
+
+import { revalidateTag } from 'next/cache';
+import { type NextRequest, NextResponse } from 'next/server';
+import { requireUserResponse } from '@/lib/auth';
+import { listArticleUpdateSuggestionsAsAdmin } from '@/lib/data/articles';
+import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
+import { getSpecialty } from '@/lib/data/specialties';
+import { consolidateSectionsSecondaryWorkflow } from '@/lib/workflows/consolidation/sections-secondary';
+
+type Body = {
+  specialtySlug?: string;
+};
+
+export async function POST(req: NextRequest) {
+  const guard = await requireUserResponse();
+  if (guard) return guard;
+  const body = (await req.json().catch(() => ({}))) as Body;
+  const slug = body.specialtySlug;
+  if (!slug) {
+    return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
+  }
+
+  const spec = await getSpecialty(slug);
+  if (!spec) {
+    return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
+  }
+
+  const staging = await listArticleUpdateSuggestionsAsAdmin(slug);
+  if (staging.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          'No primary staging rows to dedupe. Run primary consolidation for at least one category first.',
+      },
+      { status: 409 },
+    );
+  }
+
+  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
+  await initPipelineStage({ runId, stage: 'consolidate_sections' });
+
+  void consolidateSectionsSecondaryWorkflow({
+    runId,
+    specialtySlug: slug,
+  }).catch((e) => {
+    console.error('[consolidate-sections] workflow unhandled rejection', e);
+  });
+
+  revalidateTag(`pipeline:${slug}`, 'max');
+  revalidateTag('specialty-phases', 'max');
+
+  return NextResponse.json({
+    runId,
+    specialty: slug,
+    stagingCandidates: staging.length,
+  });
+}

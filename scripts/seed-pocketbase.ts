@@ -16,6 +16,7 @@
  * `npm run import-board` against board_specialty_mapping_competencies.xlsx.
  */
 
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { bulkCreate, clearCollection, pbAdminClient } from './_lib/pb';
 import { buildXlsxRegistry, createXlsxRepos } from './_lib/xlsx';
 
@@ -126,10 +127,18 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'consolidatedArticles',
-        consolidatedArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        consolidatedArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+              category: cleaned.category,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${consolidatedArticles.length} consolidatedArticles`);
     }
@@ -137,10 +146,28 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'newArticleSuggestions',
-        newArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        newArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug } as Record<
+            string,
+            unknown
+          >;
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle:
+                typeof cleaned.articleTitle === 'string'
+                  ? cleaned.articleTitle
+                  : undefined,
+              articleId:
+                typeof cleaned.articleId === 'string' ? cleaned.articleId : undefined,
+              // newArticleSuggestions has no `category` column today; read
+              // through as `unknown` in case xlsx fixtures sneak one in.
+              category:
+                typeof cleaned.category === 'string' ? cleaned.category : undefined,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${newArticles.length} newArticleSuggestions`);
     }
@@ -148,10 +175,26 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'articleUpdateSuggestions',
-        updateArticles.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        updateArticles.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug } as Record<
+            string,
+            unknown
+          >;
+          return {
+            ...cleaned,
+            articleKey: computeArticleKey({
+              specialtySlug: slug,
+              articleTitle:
+                typeof cleaned.articleTitle === 'string'
+                  ? cleaned.articleTitle
+                  : undefined,
+              articleId:
+                typeof cleaned.articleId === 'string' ? cleaned.articleId : undefined,
+              category:
+                typeof cleaned.category === 'string' ? cleaned.category : undefined,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${updateArticles.length} articleUpdateSuggestions`);
     }
@@ -159,10 +202,20 @@ async function main(): Promise<void> {
       await bulkCreate(
         pb,
         'consolidatedSections',
-        sections.map(({ index: _i, ...r }) => ({
-          ...stripUndef(r),
-          specialtySlug: slug,
-        })),
+        sections.map(({ index: _i, ...r }) => {
+          const cleaned = { ...stripUndef(r), specialtySlug: slug };
+          return {
+            ...cleaned,
+            sectionKey: computeSectionKey({
+              specialtySlug: slug,
+              articleTitle: cleaned.articleTitle,
+              articleId: cleaned.articleId,
+              sectionName: cleaned.sectionName,
+              sectionId: cleaned.sectionId,
+              category: cleaned.category,
+            }),
+          };
+        }),
       );
       console.log(`  inserted ${sections.length} consolidatedSections`);
     }

@@ -3,12 +3,37 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { computeArticleKey } from '@/lib/data/article-keys';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   ArticleSuggestionRecord,
   ConsolidatedArticleRecord,
   PbRecord,
 } from '@/lib/pb/types';
+
+/**
+ * Inject `articleKey` into a row about to be inserted into one of the
+ * article-shaped collections. Keeps producers honest — the bulk-insert
+ * helpers are the only path into PB, so attaching the key here means a
+ * caller cannot forget. Falls back to no-op when title/articleId are
+ * both missing, leaving the row's key empty (UI will filter it out).
+ */
+function withArticleKey(
+  slug: string,
+  r: Record<string, unknown>,
+): Record<string, unknown> {
+  const articleTitle = typeof r.articleTitle === 'string' ? r.articleTitle : undefined;
+  const articleId = typeof r.articleId === 'string' ? r.articleId : undefined;
+  const category = typeof r.category === 'string' ? r.category : undefined;
+  const key = computeArticleKey({
+    specialtySlug: slug,
+    articleTitle,
+    articleId,
+    category,
+  });
+  return key ? { ...r, articleKey: key } : r;
+}
+
 import type {
   ArticleUpdateSuggestion,
   ConsolidatedArticle,
@@ -53,6 +78,36 @@ export async function listConsolidatedArticles(
   return strip<ConsolidatedArticle>(rows);
 }
 
+/**
+ * Bulk fetch of consolidatedArticles by `articleKey`, regardless of
+ * specialty. Used by the global "My Backlog" view so each backlog row
+ * resolves to the current PB row via the stable key.
+ */
+export async function listConsolidatedArticlesForKeys(
+  keys: string[],
+): Promise<Record<string, ConsolidatedArticle>> {
+  const out: Record<string, ConsolidatedArticle> = {};
+  const unique = Array.from(new Set(keys.filter((s) => s.length > 0)));
+  if (unique.length === 0) return out;
+  await connection();
+  const pb = await userClient();
+  const CHUNK = 30;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const filter = chunk
+      .map((k) => `articleKey = "${k.replace(/"/g, '\\"')}"`)
+      .join(' || ');
+    const rows = await pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getFullList({ filter });
+    const stripped = strip<ConsolidatedArticle>(rows);
+    for (const r of stripped) {
+      if (r.articleKey) out[r.articleKey] = r;
+    }
+  }
+  return out;
+}
+
 export async function listNewArticleSuggestions(
   slug: string,
 ): Promise<NewArticleSuggestion[]> {
@@ -65,32 +120,32 @@ export async function listNewArticleSuggestions(
 }
 
 /**
- * Bulk fetch of new-article suggestions by PB id, regardless of
- * specialty. Used by the global "My Backlog" view to enrich
- * cross-specialty backlog rows with title/type/codes in one shot.
- * Returns a map keyed by record id for O(1) lookup; rows whose ids
- * no longer exist are simply omitted.
+ * Bulk fetch of new-article suggestions by `articleKey`, regardless of
+ * specialty. Used by the global "My Backlog" view so each backlog
+ * row's title/type/codes resolves through the stable key (suggestions
+ * keep their key across re-seeds and consolidation re-runs; PB ids
+ * don't). Returns a map keyed by `articleKey` for O(1) lookup.
  */
-export async function listNewArticleSuggestionsForIds(
-  ids: string[],
+export async function listNewArticleSuggestionsForKeys(
+  keys: string[],
 ): Promise<Record<string, NewArticleSuggestion>> {
   const out: Record<string, NewArticleSuggestion> = {};
-  const unique = Array.from(new Set(ids.filter((s) => s.length > 0)));
+  const unique = Array.from(new Set(keys.filter((s) => s.length > 0)));
   if (unique.length === 0) return out;
   await connection();
   const pb = await userClient();
-  // Chunked OR-filter to keep filter strings short. PB's filter has a
-  // generous limit but tens of thousands of ORs would still strain it.
   const CHUNK = 30;
   for (let i = 0; i < unique.length; i += CHUNK) {
     const chunk = unique.slice(i, i + CHUNK);
-    const filter = chunk.map((id) => `id = "${id}"`).join(' || ');
+    const filter = chunk
+      .map((k) => `articleKey = "${k.replace(/"/g, '\\"')}"`)
+      .join(' || ');
     const rows = await pb
       .collection<ArticleSuggestionRecord>('newArticleSuggestions')
       .getFullList({ filter });
     const stripped = strip<NewArticleSuggestion>(rows);
     for (const r of stripped) {
-      if (r.id) out[r.id] = r;
+      if (r.articleKey) out[r.articleKey] = r;
     }
   }
   return out;
@@ -141,8 +196,41 @@ export async function bulkInsertConsolidatedArticlesAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   for (const r of rows) {
-    await pb.collection('consolidatedArticles').create({ specialtySlug: slug, ...r });
+    await pb
+      .collection('consolidatedArticles')
+      .create({ specialtySlug: slug, ...withArticleKey(slug, r) });
   }
+}
+
+export async function listNewArticleSuggestionsAsAdmin(
+  slug: string,
+): Promise<Array<ArticleSuggestionRecord>> {
+  const pb = await createAdminClient();
+  return pb
+    .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+}
+
+export async function getNewArticleSuggestionByIdAsAdmin(
+  id: string,
+): Promise<ArticleSuggestionRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getOne(id);
+  } catch {
+    return null;
+  }
+}
+
+export async function listArticleUpdateSuggestionsAsAdmin(
+  slug: string,
+): Promise<Array<ArticleSuggestionRecord>> {
+  const pb = await createAdminClient();
+  return pb
+    .collection<ArticleSuggestionRecord>('articleUpdateSuggestions')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
 }
 
 export async function bulkInsertNewArticleSuggestionsAsAdmin(
@@ -151,7 +239,9 @@ export async function bulkInsertNewArticleSuggestionsAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   for (const r of rows) {
-    await pb.collection('newArticleSuggestions').create({ specialtySlug: slug, ...r });
+    await pb
+      .collection('newArticleSuggestions')
+      .create({ specialtySlug: slug, ...withArticleKey(slug, r) });
   }
 }
 
@@ -161,6 +251,8 @@ export async function bulkInsertArticleUpdateSuggestionsAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   for (const r of rows) {
-    await pb.collection('articleUpdateSuggestions').create({ specialtySlug: slug, ...r });
+    await pb
+      .collection('articleUpdateSuggestions')
+      .create({ specialtySlug: slug, ...withArticleKey(slug, r) });
   }
 }

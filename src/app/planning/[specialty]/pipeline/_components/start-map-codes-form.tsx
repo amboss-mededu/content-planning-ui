@@ -4,33 +4,31 @@ import {
   Button,
   Callout,
   Checkbox,
-  Combobox,
   Inline,
-  SegmentedControl,
   Select,
   Stack,
   Text,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { AmbossLibraryStats } from '@/lib/data/amboss-library';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { DEFAULT_MAPPING_SYSTEM_PROMPT } from '@/lib/workflows/lib/prompts';
+import {
+  estimateScopeCount,
+  MappingScopePicker,
+  type MappingScopeValue,
+} from '../../../_components/mapping-scope-picker';
 import { DefaultPromptModal } from './default-prompt-modal';
 import { MissingKeyModal } from './missing-key-modal';
 import {
   backupModelKey,
   DEFAULT_BACKUP_MODEL,
-  modelKey,
   readSpec,
+  readSpecForStage,
 } from './model-selection-storage';
 import { PromptSection } from './prompt-section';
-
-// Sentinels that appear at the top of the category dropdown. We intercept
-// them in onChange so they act like actions rather than real selections.
-const SELECT_ALL = '__select_all__';
-const CLEAR_ALL = '__clear_all__';
 
 function fmtNum(n: number): string {
   return new Intl.NumberFormat().format(n);
@@ -64,20 +62,11 @@ export function StartMapCodesForm({
   const [instructions, setInstructions] = useState('');
   const [showDefault, setShowDefault] = useState(false);
 
-  const allCategoryValues = useMemo(
-    () => categories.map((c) => c.category),
-    [categories],
-  );
-  // Default: all categories selected. Tracked as a string[] (the order users
-  // see in the Combobox) so "all selected" and "none selected" are both
-  // representable without a separate sentinel flag.
-  const [selectedCats, setSelectedCats] = useState<string[]>(allCategoryValues);
-  const [specificCodes, setSpecificCodes] = useState<string[]>([]);
-  // Mode toggle: the user picks either a category filter OR a specific-code
-  // list, never both. Default to categories when available, otherwise codes.
-  const [mode, setMode] = useState<'categories' | 'codes'>(
-    categories.length > 0 ? 'categories' : 'codes',
-  );
+  const [scope, setScope] = useState<MappingScopeValue>({
+    mode: categories.length > 0 ? 'categories' : 'codes',
+    selectedCats: categories.map((c) => c.category),
+    specificCodes: [],
+  });
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,57 +78,9 @@ export function StartMapCodesForm({
     ? `${fmtNum(libraryStats.sections)} sections · ${fmtNum(libraryStats.articles)} articles · last synced ${fmtDate(libraryStats.lastSyncedAt)}`
     : 'No AMBOSS article library loaded yet.';
 
+  const estimatedCount = estimateScopeCount(scope, categories, unmappedCount);
   const allSelected =
-    selectedCats.length === allCategoryValues.length && allCategoryValues.length > 0;
-  const selectedCategoryTotal = useMemo(() => {
-    if (allSelected) return unmappedCount;
-    const set = new Set(selectedCats);
-    return categories
-      .filter((c) => set.has(c.category))
-      .reduce((sum, c) => sum + c.unmapped, 0);
-  }, [allSelected, categories, selectedCats, unmappedCount]);
-  const estimatedCount =
-    mode === 'categories' ? selectedCategoryTotal : specificCodes.length;
-
-  const categoryOptions = useMemo(() => {
-    return [
-      { value: SELECT_ALL, label: '✓  Select all categories' },
-      { value: CLEAR_ALL, label: '✕  Clear all categories' },
-      ...categories.map((c) => {
-        const mapped = c.total - c.unmapped;
-        return {
-          value: c.category,
-          label: `${c.category} (${mapped}/${c.total} mapped)`,
-        };
-      }),
-    ];
-  }, [categories]);
-
-  /**
-   * `<code> — <description>` options so users can search by either the code
-   * ID or words in the description. `description` passed as the DS
-   * `description` field too so it renders as a second line under the code.
-   */
-  const codeOptions = useMemo(() => {
-    return unmappedCodes.map((c) => ({
-      value: c.code,
-      label: c.code,
-      description: c.description ?? '(no description)',
-    }));
-  }, [unmappedCodes]);
-
-  const onCategoryChange = (values: string[]) => {
-    if (values.includes(SELECT_ALL)) {
-      setSelectedCats(allCategoryValues);
-      return;
-    }
-    if (values.includes(CLEAR_ALL)) {
-      setSelectedCats([]);
-      return;
-    }
-    setSelectedCats(values.filter((v) => v !== SELECT_ALL && v !== CLEAR_ALL));
-  };
-
+    scope.selectedCats.length === categories.length && categories.length > 0;
   const submitDisabled = submitting || estimatedCount === 0;
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -147,9 +88,11 @@ export function StartMapCodesForm({
     setError(null);
     setSuccess(null);
 
-    const primaryModel = readSpec(modelKey(specialtySlug, 'map_codes'));
+    const primaryModel = readSpecForStage(specialtySlug, 'map_codes');
     if (!primaryModel) {
-      setError('Pick a primary model on the Map codes card before starting.');
+      setError(
+        'No primary model configured for Map codes. Open the gear icon to pick one.',
+      );
       return;
     }
     const backupModel = readSpec(backupModelKey(specialtySlug)) ?? DEFAULT_BACKUP_MODEL;
@@ -160,11 +103,13 @@ export function StartMapCodesForm({
       // enforces an exclusive choice. For "categories": omit when the user
       // kept every category checked (equivalent to no filter).
       const categoriesPayload =
-        mode === 'categories' && !allSelected && selectedCats.length > 0
-          ? selectedCats
+        scope.mode === 'categories' && !allSelected && scope.selectedCats.length > 0
+          ? scope.selectedCats
           : undefined;
       const codesPayload =
-        mode === 'codes' && specificCodes.length > 0 ? specificCodes : undefined;
+        scope.mode === 'codes' && scope.specificCodes.length > 0
+          ? scope.specificCodes
+          : undefined;
       const res = await fetch('/api/workflows/map-codes', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -232,96 +177,13 @@ export function StartMapCodesForm({
           </Text>
         </Stack>
 
-        <Stack space="xs">
-          <SegmentedControl
-            label="Mapping scope"
-            isLabelHidden
-            value={mode}
-            onChange={(value) => setMode(value as 'categories' | 'codes')}
-            options={[
-              {
-                name: 'mapping-scope',
-                label: 'Limit to categories',
-                value: 'categories',
-                disabled: categories.length === 0,
-              },
-              {
-                name: 'mapping-scope',
-                label: 'Specific codes',
-                value: 'codes',
-                disabled: unmappedCodes.length === 0,
-              },
-            ]}
-          />
-
-          {mode === 'categories' ? (
-            categories.length > 0 ? (
-              <Combobox
-                name="mappingCategories"
-                label="Limit to categories"
-                hint={
-                  allSelected
-                    ? `All ${categories.length} categories (${fmtNum(unmappedCount)} unmapped)`
-                    : `${selectedCats.length} of ${categories.length} selected · ${fmtNum(selectedCategoryTotal)} unmapped codes`
-                }
-                multiple
-                value={selectedCats}
-                onChange={(values) => onCategoryChange(values as string[])}
-                options={categoryOptions}
-                placeholder="Select categories to map…"
-                emptyStateMessage="No categories match the filter."
-                maxHeight={320}
-                slotProps={{
-                  tag: {
-                    clearButtonAriaLabel: 'Remove category',
-                  },
-                }}
-              />
-            ) : (
-              <Callout
-                type="info"
-                text="No categories yet — extract codes first to populate the filter dropdown."
-              />
-            )
-          ) : unmappedCodes.length > 0 ? (
-            <Combobox
-              name="specificCodes"
-              label="Specific codes"
-              hint={
-                specificCodes.length === 0
-                  ? `Search ${fmtNum(unmappedCodes.length)} unmapped codes by ID or description`
-                  : `${specificCodes.length} code${specificCodes.length === 1 ? '' : 's'} selected`
-              }
-              multiple
-              value={specificCodes}
-              onChange={(values) => setSpecificCodes(values as string[])}
-              options={codeOptions}
-              placeholder="Start typing a code or description…"
-              emptyStateMessage="No unmapped codes match your search."
-              maxHeight={320}
-              filterMethod={(option, query) => {
-                if (!query) return true;
-                const q = query.toLowerCase();
-                const label = option.label.toLowerCase();
-                const desc =
-                  typeof option.description === 'string'
-                    ? option.description.toLowerCase()
-                    : '';
-                return label.includes(q) || desc.includes(q);
-              }}
-              slotProps={{
-                tag: {
-                  clearButtonAriaLabel: 'Remove code',
-                },
-              }}
-            />
-          ) : (
-            <Callout
-              type="info"
-              text="No unmapped codes available. Everything is already mapped."
-            />
-          )}
-        </Stack>
+        <MappingScopePicker
+          categories={categories}
+          unmappedCodes={unmappedCodes}
+          unmappedCount={unmappedCount}
+          value={scope}
+          onChange={setScope}
+        />
 
         <Stack space="xxs">
           <Checkbox

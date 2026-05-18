@@ -9,31 +9,57 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type {
+  ArticleBacklogRecord,
   ArticleBacklogStatus,
   ArticleSourceRecord,
   PredatoryJournalRisk,
   ReviewCommentRecord,
+  SourceReviewStatus,
 } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
+  getLatestDraftForArticle,
+  resetArticle,
   resetArticleReview,
   resetSectionReview,
   submitArticleReview,
   submitSectionReview,
+  submitSourceCortexId,
+  submitSourceReview,
+  submitSourcesOrder,
 } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import {
+  type ArticleManagerPhase,
+  PHASE_LABEL,
   STATUS_COLOR,
   STATUS_LABEL,
-  STATUS_OPTIONS,
-  statusToStepValue,
 } from './backlog-constants';
 import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import {
+  canApproveSources,
+  canDraft,
+  canRunLitSearch,
+  canStartDraft,
+  missingCortexIdCount,
+  phaseFromStatus,
+} from './pipeline-stage-gates';
+import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
+import { StartWritingButton } from './start-writing-button';
 
 // ---------------------------------------------------------------------------
 // Shared types — used by both review-stage variants. Kept here so the v2
@@ -90,6 +116,11 @@ export type ManagerOpener =
       slug: string;
       article: BacklogRow;
       currentStatus: ArticleBacklogStatus;
+      /** Full backlog row at modal-open time. Used to seed the modal's
+       *  PB realtime subscription so the live status survives updates
+       *  from any source (other tabs, async pipelines, the editor's own
+       *  clicks). Falls back to `currentStatus` if missing. */
+      currentBacklogRow?: ArticleBacklogRecord;
       sources: ArticleSourceRecord[];
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
@@ -125,6 +156,7 @@ export type ManagerOpener =
       article: BacklogRow;
       sections: SectionRow[];
       currentStatus: ArticleBacklogStatus;
+      currentBacklogRow?: ArticleBacklogRecord;
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
       categoryLookup: CategoryLookup;
@@ -276,6 +308,11 @@ function ReviewManagerView({
   async function decide(status: ReviewStatus) {
     if (!current) return;
     const rowId = current.id;
+    const articleKey = current.articleKey ?? '';
+    if (!articleKey) {
+      console.error('decide: row has no articleKey — cannot persist review');
+      return;
+    }
     const notesValue = notesById[rowId] ?? '';
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
@@ -288,7 +325,7 @@ function ReviewManagerView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await submitArticleReview(slug, rowId, status, notesValue);
+      await submitArticleReview(slug, articleKey, rowId, status, notesValue);
     } catch (err) {
       console.error('submitArticleReview failed', err);
       const revertedReviews = { ...reviews };
@@ -308,6 +345,8 @@ function ReviewManagerView({
   async function clearDecision() {
     if (!current) return;
     const rowId = current.id;
+    const articleKey = current.articleKey ?? '';
+    if (!articleKey) return;
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
@@ -318,7 +357,7 @@ function ReviewManagerView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await resetArticleReview(slug, rowId);
+      await resetArticleReview(slug, articleKey);
     } catch (err) {
       console.error('resetArticleReview failed', err);
     } finally {
@@ -436,7 +475,7 @@ function ReviewManagerView({
               <Text size="s" weight="bold">
                 Previous article titles
               </Text>
-              {previousTitles.map((t) => {
+              {Array.from(new Set(previousTitles)).map((t) => {
                 const origin = titleOriginLookup[t];
                 const tagText =
                   origin?.kind === 'article'
@@ -482,8 +521,9 @@ function ReviewManagerView({
             key={current.id}
             slug={slug}
             recordKind="article"
+            recordKey={current.articleKey ?? ''}
             recordId={current.id}
-            initialComments={initialCommentsByArticle[current.id] ?? []}
+            initialComments={initialCommentsByArticle[current.articleKey ?? ''] ?? []}
             viewerEmail={viewerEmail}
           />
         </div>
@@ -548,18 +588,54 @@ function BacklogManagerView({
   const {
     slug,
     article,
-    currentStatus,
-    sources,
+    currentStatus: openerCurrentStatus,
+    currentBacklogRow,
+    sources: openerSources,
     initialComments,
     initialNotes,
     categoryLookup,
     viewerEmail,
     onStatusChange,
   } = opener;
+  const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
   const [savingNotes, setSavingNotes] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const notesDirty = pendingNotes !== notes;
+
+  // Live PB subscriptions — the modal becomes its own source of truth.
+  // Status: seed from the parent's optimistic backlog row (if present)
+  // so the first render matches the row list. PB realtime applies every
+  // change after that — including async pipeline writes from the writer
+  // and the lit-search worker.
+  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    currentBacklogRow ? [currentBacklogRow] : [],
+    { filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"` },
+  );
+  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+
+  // Sources: same pattern. Seeded with the opener's SSR snapshot; live
+  // sub adds rows created by lit-search and applies review-status updates
+  // without a router.refresh.
+  const sources = useLiveCollection<ArticleSourceRecord>(
+    'articleSources',
+    openerSources,
+    { filter: `articleKey = "${article.articleKey}"` },
+  );
+
+  // The article's real phase, derived from the persisted status.
+  const actualPhase = phaseFromStatus(currentStatus);
+  // The phase the editor is *looking at*. Defaults to actual phase but
+  // can be dragged backwards by chip clicks (pure navigation — no PB
+  // write). When the article advances (lit-search completes, writer
+  // finishes, or the editor re-runs an earlier phase), the effect below
+  // pulls viewedPhase forward so the panel follows.
+  const [viewedPhase, setViewedPhase] = useState<ArticleManagerPhase>(actualPhase);
+  useEffect(() => {
+    setViewedPhase(actualPhase);
+  }, [actualPhase]);
 
   async function pickStatus(next: ArticleBacklogStatus) {
     // Persist any dirty notes with the same status write so the user
@@ -583,7 +659,7 @@ function BacklogManagerView({
     <Modal
       header={article.articleTitle ?? 'Manage article'}
       subHeader={`Currently: ${STATUS_LABEL[currentStatus]}`}
-      size="l"
+      isFullScreen
       isDismissible
       onAction={() => onClose()}
       privateProps={{ height: '90vh' }}
@@ -641,8 +717,20 @@ function BacklogManagerView({
             </Stack>
           )}
 
-          <Stepper current={currentStatus} onPick={pickStatus} />
-          <StepBody status={currentStatus} sources={sources} />
+          <Stepper
+            actualPhase={actualPhase}
+            viewedPhase={viewedPhase}
+            onPick={setViewedPhase}
+          />
+          <PhaseBody
+            phase={viewedPhase}
+            status={currentStatus}
+            sources={sources}
+            slug={slug}
+            articleRecordId={article.id}
+            viewerEmail={viewerEmail}
+            onAdvance={pickStatus}
+          />
 
           <DecisionNoteField
             value={pendingNotes}
@@ -673,10 +761,80 @@ function BacklogManagerView({
           <CommentsSection
             slug={slug}
             recordKind="article"
+            recordKey={article.articleKey}
             recordId={article.id}
             initialComments={initialComments}
             viewerEmail={viewerEmail}
           />
+
+          <div
+            style={{
+              marginTop: 8,
+              paddingTop: 16,
+              borderTop: '1px solid rgba(0, 0, 0, 0.08)',
+            }}
+          >
+            <Stack space="xs">
+              <Text size="xs" color="secondary" weight="bold">
+                Danger zone
+              </Text>
+              <Inline space="s" vAlignItems="center">
+                <button
+                  type="button"
+                  disabled={resetting}
+                  onClick={async () => {
+                    if (resetting) return;
+                    const ok = window.confirm(
+                      `Reset "${article.articleTitle ?? '(untitled)'}" to a blank slate?\n\n` +
+                        `This deletes ALL sources, comments, draft runs, ` +
+                        `and draft outputs for this article. The article ` +
+                        `stays approved and remains in your backlog at ` +
+                        `the "Search sources" phase.\n\n` +
+                        `This cannot be undone.`,
+                    );
+                    if (!ok) return;
+                    setResetting(true);
+                    try {
+                      await resetArticle(slug, article.articleKey, article.id);
+                      // Force the page's server-rendered data to refresh
+                      // so the underlying rows array picks up the new
+                      // status. The PB realtime sub on the parent backlog
+                      // map already reflects the change, but the server-
+                      // rendered `rows` (sourcesCount, etc.) needs a
+                      // re-fetch. Keep the modal open so the user sees
+                      // the article is still here, just back at phase 1
+                      // — addresses the "reset removed the article"
+                      // report.
+                      router.refresh();
+                      setResetting(false);
+                    } catch (e) {
+                      console.error('[reset-article] failed', e);
+                      setResetting(false);
+                      window.alert(
+                        `Reset failed: ${e instanceof Error ? e.message : String(e)}`,
+                      );
+                    }
+                  }}
+                  style={{
+                    background: 'white',
+                    color: 'rgb(180, 30, 30)',
+                    border: '1px solid rgb(220, 160, 160)',
+                    padding: '6px 12px',
+                    borderRadius: 4,
+                    fontSize: 13,
+                    cursor: resetting ? 'wait' : 'pointer',
+                    opacity: resetting ? 0.6 : 1,
+                  }}
+                >
+                  {resetting ? 'Resetting…' : 'Reset article'}
+                </button>
+                <Text size="xs" color="secondary">
+                  Wipes sources, comments, and drafts. Keeps the article approved and in
+                  your backlog.
+                </Text>
+              </Inline>
+            </Stack>
+          </div>
         </div>
       </div>
     </Modal>
@@ -785,44 +943,33 @@ const RISK_COLOR: Record<PredatoryJournalRisk, BadgeColor> = {
   predatory: 'purple',
 };
 
-const STEP_COPY: Record<ArticleBacklogStatus, string> = {
-  unassigned: 'This article is waiting for the first literature search.',
-  'waiting-for-sources':
-    'No sources fetched yet. Run the Literature search card on the Pipeline tab to fetch and rank PubMed candidates for every article in this state.',
-  'sources-searched':
-    'PubMed ranked these sources for this article. Review the list and move to "Sources approved" once you\'re satisfied.',
-  'sources-approved':
-    'The source list is locked in. Next: upload the source PDFs to Cortex CMS, then mark this article as ready for the LLM draft.',
-  'ready-for-llm-draft':
-    'Sources are in Cortex. Trigger article-draft generation when ready (coming in a follow-up). Once the draft is back, move this article to "Ready for editing".',
-  'ready-for-editing':
-    'The LLM draft is in Cortex CMS. Open it there to start editing. When you begin, move this article to "Editing in progress".',
-  'editing-in-progress':
-    'Editing is happening in Cortex CMS. When the article is ready for a final pass, move it to "Ready to publish".',
-  'ready-to-publish':
-    'Final review checklist (coming in a follow-up). When done, mark this article as "Published".',
-  published: 'This article has been published.',
-};
-
 const tableStyle: CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
   fontSize: '0.9em',
+  tableLayout: 'fixed',
 };
 const thStyle: CSSProperties = {
   textAlign: 'left',
   borderBottom: '1px solid rgb(220, 220, 225)',
+  borderRight: '1px solid var(--ads-c-divider, rgba(0, 0, 0, 0.08))',
   padding: '8px 6px',
   fontWeight: 600,
   color: 'rgb(70, 70, 80)',
   background: 'rgb(248, 248, 250)',
   position: 'sticky',
   top: 0,
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
 };
 const tdStyle: CSSProperties = {
   borderBottom: '1px solid rgb(238, 238, 242)',
+  borderRight: '1px solid var(--ads-c-divider, rgba(0, 0, 0, 0.08))',
   padding: '8px 6px',
   verticalAlign: 'top',
+  overflow: 'hidden',
+  wordBreak: 'break-word',
 };
 
 const footerStyle: CSSProperties = {
@@ -834,120 +981,466 @@ const footerStyle: CSSProperties = {
   gap: 8,
 };
 
-function SourcesTable({ sources }: { sources: ArticleSourceRecord[] }) {
+type SourceColumn = {
+  key: string;
+  label: string;
+  initialWidth: number;
+  /** Defaults to true. The trailing decision column and the leading drag
+   *  handle don't get a resize grip. */
+  resizable?: boolean;
+};
+
+const MIN_COL_WIDTH = 32;
+
+function ResizableHeader({
+  column,
+  onResize,
+}: {
+  column: SourceColumn;
+  onResize: (width: number) => void;
+}) {
+  const thRef = useRef<HTMLTableCellElement | null>(null);
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startWidth = thRef.current?.getBoundingClientRect().width ?? MIN_COL_WIDTH;
+      const move = (ev: MouseEvent) => {
+        onResize(startWidth + (ev.clientX - startX));
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+    [onResize],
+  );
+  const resizable = column.resizable !== false;
+  return (
+    <th ref={thRef} style={{ ...thStyle, position: 'sticky', top: 0 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 4,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {column.label}
+        </span>
+        {resizable ? (
+          <span
+            onMouseDown={onMouseDown}
+            style={{
+              width: 6,
+              flex: 'none',
+              cursor: 'col-resize',
+              alignSelf: 'stretch',
+              marginRight: -6,
+            }}
+            aria-hidden="true"
+          />
+        ) : null}
+      </div>
+    </th>
+  );
+}
+
+function SourcesTable({
+  sources,
+  slug,
+  viewerEmail,
+  mode,
+}: {
+  sources: ArticleSourceRecord[];
+  slug: string;
+  viewerEmail?: string;
+  mode: 'curation' | 'priority';
+}) {
+  // Local order is the source of truth for the priority view so DnD
+  // feels immediate; reconciled with props when the modal's live
+  // subscription emits a fresh row set.
+  const [order, setOrder] = useState<string[]>(() => sources.map((s) => s.id));
+  useEffect(() => {
+    setOrder(sources.map((s) => s.id));
+  }, [sources]);
+
+  const byId = useMemo(() => {
+    const m: Record<string, ArticleSourceRecord> = {};
+    for (const s of sources) m[s.id] = s;
+    return m;
+  }, [sources]);
+
+  const ordered =
+    mode === 'priority' ? order.map((id) => byId[id]).filter(Boolean) : sources;
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropId, setDropId] = useState<string | null>(null);
+  // Column widths are persisted per mode (curation vs priority) so the
+  // two views remember their own layouts independently.
+  const widthsStorageKey = `sources-table:widths:${mode}`;
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(widthsStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const cleaned: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v >= MIN_COL_WIDTH) {
+            cleaned[k] = v;
+          }
+        }
+        setWidths(cleaned);
+      }
+    } catch {
+      /* corrupt blob — ignore */
+    }
+  }, [widthsStorageKey]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (Object.keys(widths).length === 0) return;
+    try {
+      window.localStorage.setItem(widthsStorageKey, JSON.stringify(widths));
+    } catch {
+      /* quota or disabled — silent */
+    }
+  }, [widths, widthsStorageKey]);
+
+  const onDrop = useCallback(async () => {
+    if (!dragId || !dropId || dragId === dropId) {
+      setDragId(null);
+      setDropId(null);
+      return;
+    }
+    const from = order.indexOf(dragId);
+    const to = order.indexOf(dropId);
+    if (from === -1 || to === -1) return;
+    const next = order.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, dragId);
+    setOrder(next);
+    setDragId(null);
+    setDropId(null);
+    try {
+      await submitSourcesOrder(slug, next);
+    } catch (e) {
+      console.error('[sources-order] submit failed', e);
+    }
+  }, [dragId, dropId, order, slug]);
+
   if (sources.length === 0) {
     return (
       <Stack space="s">
-        <Text>No sources attached yet.</Text>
-        <Text size="s" color="secondary">
-          Run the Literature search card on the Pipeline tab to fetch PubMed candidates
-          for every article still waiting for sources.
+        <Text>
+          {mode === 'priority'
+            ? 'No approved sources yet — approve sources in the previous step.'
+            : 'No sources attached yet.'}
         </Text>
+        {mode === 'curation' ? (
+          <Text size="s" color="secondary">
+            Run the Literature search card on the Pipeline tab to fetch PubMed candidates
+            for every article still waiting for sources.
+          </Text>
+        ) : null}
       </Stack>
     );
   }
+
+  const columnList: SourceColumn[] =
+    mode === 'priority'
+      ? [
+          { key: 'drag', label: '', initialWidth: 28, resizable: false },
+          { key: 'idx', label: '#', initialWidth: 44 },
+          { key: 'sourceId', label: 'Source ID', initialWidth: 160 },
+          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
+          { key: 'title', label: 'Title', initialWidth: 320 },
+          { key: 'type', label: 'Type', initialWidth: 140 },
+          { key: 'journal', label: 'Journal', initialWidth: 220 },
+          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'doi', label: 'DOI', initialWidth: 180 },
+          { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
+        ]
+      : [
+          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
+          { key: 'title', label: 'Title', initialWidth: 360 },
+          { key: 'type', label: 'Type', initialWidth: 140 },
+          { key: 'journal', label: 'Journal', initialWidth: 240 },
+          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'doi', label: 'DOI', initialWidth: 200 },
+          { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
+        ];
+
   return (
     <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
       <table style={tableStyle}>
+        <colgroup>
+          {columnList.map((c) => (
+            <col key={c.key} style={{ width: widths[c.key] ?? c.initialWidth }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ ...thStyle, width: 50 }}>Use</th>
-            <th style={{ ...thStyle, width: 60 }}>Rank</th>
-            <th style={thStyle}>Title</th>
-            <th style={{ ...thStyle, width: 130 }}>Type</th>
-            <th style={thStyle}>Journal</th>
-            <th style={{ ...thStyle, width: 110 }}>Risk</th>
-            <th style={{ ...thStyle, width: 160 }}>DOI</th>
+            {columnList.map((c) => (
+              <ResizableHeader
+                key={c.key}
+                column={c}
+                onResize={(next) =>
+                  setWidths((w) => ({ ...w, [c.key]: Math.max(MIN_COL_WIDTH, next) }))
+                }
+              />
+            ))}
           </tr>
         </thead>
         <tbody>
-          {sources.map((s) => (
-            <tr key={s.id}>
-              <td style={{ ...tdStyle, textAlign: 'center' }}>
-                {s.useFlag ? (
-                  <Text as="span" size="s" weight="bold">
-                    ✓
-                  </Text>
-                ) : (
-                  <Text as="span" size="s" color="secondary">
-                    ✗
-                  </Text>
-                )}
-              </td>
-              <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
-              <td style={tdStyle}>
-                <Text weight="bold">{s.title}</Text>
-                {s.llmSummary ? (
-                  <Text size="xs" color="secondary">
-                    {s.llmSummary}
-                  </Text>
+          {ordered.map((s, idx) => {
+            const isDragging = dragId === s.id;
+            const isDropTarget = dropId === s.id && dragId !== s.id;
+            return (
+              <tr
+                key={s.id}
+                onDragOver={(e) => {
+                  if (mode !== 'priority' || !dragId) return;
+                  e.preventDefault();
+                  if (dropId !== s.id) setDropId(s.id);
+                }}
+                onDrop={(e) => {
+                  if (mode !== 'priority') return;
+                  e.preventDefault();
+                  void onDrop();
+                }}
+                style={{
+                  opacity: isDragging ? 0.4 : 1,
+                  boxShadow: isDropTarget ? 'inset 0 2px 0 rgb(59, 130, 246)' : undefined,
+                }}
+              >
+                {mode === 'priority' ? (
+                  <>
+                    <td
+                      style={{ ...tdStyle, textAlign: 'center', cursor: 'grab' }}
+                      draggable
+                      onDragStart={() => setDragId(s.id)}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setDropId(null);
+                      }}
+                      title="Drag to reorder"
+                      aria-label="Drag to reorder"
+                    >
+                      ≡
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>{idx + 1}</td>
+                    <td style={tdStyle}>
+                      <SourceIdCell source={s} slug={slug} />
+                    </td>
+                  </>
                 ) : null}
-              </td>
-              <td style={tdStyle}>
-                {s.sourceType ? (
-                  <Badge
-                    text={SOURCE_TYPE_LABEL[s.sourceType] ?? s.sourceType}
-                    color="blue"
-                  />
-                ) : (
-                  '—'
-                )}
-              </td>
-              <td style={tdStyle}>
-                {s.journal ?? '—'}
-                {s.journalNlm ? (
-                  <Text size="xs" color="secondary">
-                    {s.journalNlm}
-                  </Text>
-                ) : null}
-              </td>
-              <td style={tdStyle}>
-                {s.predatoryJournalRisk ? (
-                  <Badge
-                    text={s.predatoryJournalRisk}
-                    color={RISK_COLOR[s.predatoryJournalRisk]}
-                  />
-                ) : (
-                  '—'
-                )}
-              </td>
-              <td style={tdStyle}>
-                {s.doi ? (
-                  <a
-                    href={`https://doi.org/${s.doi}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ wordBreak: 'break-all' }}
-                  >
-                    {s.doi}
-                  </a>
-                ) : s.url ? (
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ wordBreak: 'break-all' }}
-                  >
-                    {s.url}
-                  </a>
-                ) : (
-                  '—'
-                )}
-              </td>
-            </tr>
-          ))}
+                <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
+                <td style={tdStyle}>
+                  <Text weight="bold">{s.title}</Text>
+                  {s.llmSummary ? (
+                    <Text size="xs" color="secondary">
+                      {s.llmSummary}
+                    </Text>
+                  ) : null}
+                </td>
+                <td style={tdStyle}>
+                  {s.sourceType ? (
+                    <Badge
+                      text={SOURCE_TYPE_LABEL[s.sourceType] ?? s.sourceType}
+                      color="blue"
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={tdStyle}>
+                  {s.journal ?? '—'}
+                  {s.journalNlm ? (
+                    <Text size="xs" color="secondary">
+                      {s.journalNlm}
+                    </Text>
+                  ) : null}
+                </td>
+                <td style={tdStyle}>
+                  {s.predatoryJournalRisk ? (
+                    <Badge
+                      text={s.predatoryJournalRisk}
+                      color={RISK_COLOR[s.predatoryJournalRisk]}
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={tdStyle}>
+                  {s.doi ? (
+                    <a
+                      href={`https://doi.org/${s.doi}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {s.doi}
+                    </a>
+                  ) : s.url ? (
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {s.url}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'center' }}>
+                  <SourceDecisionCell source={s} slug={slug} viewerEmail={viewerEmail} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-type StepState = 'completed' | 'current' | 'upcoming';
+function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: string }) {
+  const [value, setValue] = useState<string>(source.cortexSourceId ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    setValue(source.cortexSourceId ?? '');
+  }, [source.cortexSourceId]);
 
-function stepStateFor(stepIndex: number, currentIndex: number): StepState {
-  if (stepIndex < currentIndex) return 'completed';
-  if (stepIndex === currentIndex) return 'current';
-  return 'upcoming';
+  const persist = useCallback(async () => {
+    const trimmed = value.trim();
+    const current = source.cortexSourceId ?? '';
+    if (trimmed === current) return;
+    setSubmitting(true);
+    try {
+      await submitSourceCortexId(slug, source.id, trimmed);
+    } catch (e) {
+      console.error('[source-id] submit failed', e);
+      setValue(current);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [value, source.id, source.cortexSourceId, slug]);
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void persist()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      disabled={submitting}
+      placeholder="Paste source ID"
+      style={{
+        width: '100%',
+        padding: '4px 6px',
+        fontSize: 12,
+        border: '1px solid rgba(0, 0, 0, 0.15)',
+        borderRadius: 4,
+        background: '#fff',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      }}
+    />
+  );
+}
+
+function SourceDecisionCell({
+  source,
+  slug,
+  viewerEmail,
+}: {
+  source: ArticleSourceRecord;
+  slug: string;
+  viewerEmail?: string;
+}) {
+  const [status, setStatus] = useState<SourceReviewStatus | null>(
+    source.reviewStatus ?? null,
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reconcile with the parent's live source row — the modal subscribes
+  // to `articleSources` via useLiveCollection, so an update from another
+  // tab or a server-side flip propagates through props.
+  useEffect(() => {
+    setStatus(source.reviewStatus ?? null);
+  }, [source.reviewStatus]);
+
+  const toggle = useCallback(
+    async (target: SourceReviewStatus) => {
+      if (submitting) return;
+      const next = status === target ? null : target;
+      setSubmitting(true);
+      setStatus(next);
+      try {
+        await submitSourceReview(slug, source.id, next);
+      } catch (e) {
+        setStatus(source.reviewStatus ?? null);
+        console.error('[source-review] submit failed', e);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [submitting, status, slug, source.id, source.reviewStatus],
+  );
+
+  const reviewerHandle = source.reviewerEmail ? source.reviewerEmail.split('@')[0] : '';
+  const stamp = source.reviewedAt ? new Date(source.reviewedAt).toLocaleString() : '';
+  const approveTitle =
+    status === 'approved' && reviewerHandle
+      ? `Approved by ${reviewerHandle}${stamp ? ` · ${stamp}` : ''}`
+      : 'Approve source';
+  const rejectTitle =
+    status === 'rejected' && reviewerHandle
+      ? `Rejected by ${reviewerHandle}${stamp ? ` · ${stamp}` : ''}`
+      : 'Reject source';
+
+  return (
+    <Inline space="xxs" vAlignItems="center">
+      <button
+        type="button"
+        style={decideButton(status === 'approved', 'approve')}
+        title={approveTitle}
+        disabled={submitting}
+        onClick={() => toggle('approved')}
+        aria-label={approveTitle}
+      >
+        ✓
+      </button>
+      <button
+        type="button"
+        style={decideButton(status === 'rejected', 'reject')}
+        title={rejectTitle}
+        disabled={submitting}
+        onClick={() => toggle('rejected')}
+        aria-label={rejectTitle}
+      >
+        ✗
+      </button>
+      {viewerEmail ? null : null}
+    </Inline>
+  );
 }
 
 const stepButtonBase: CSSProperties = {
@@ -977,16 +1470,106 @@ const circleBase: CSSProperties = {
   fontWeight: 600,
 };
 
+const PHASES: ArticleManagerPhase[] = [1, 2, 3, 4, 5, 6, 7];
+
+function DraftPreview({
+  slug,
+  articleRecordId,
+}: {
+  slug: string;
+  articleRecordId: string;
+}) {
+  type State =
+    | { kind: 'loading' }
+    | { kind: 'empty' }
+    | { kind: 'ready'; pass: string; output: string; finishedAt?: number }
+    | { kind: 'error'; message: string };
+  const [state, setState] = useState<State>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: 'loading' });
+    getLatestDraftForArticle(slug, articleRecordId)
+      .then((d) => {
+        if (cancelled) return;
+        if (!d) {
+          setState({ kind: 'empty' });
+          return;
+        }
+        setState({
+          kind: 'ready',
+          pass: d.pass,
+          output: d.output,
+          finishedAt: d.finishedAt,
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setState({ kind: 'error', message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, articleRecordId]);
+
+  if (state.kind === 'loading') {
+    return (
+      <Text size="s" color="secondary">
+        Loading draft…
+      </Text>
+    );
+  }
+  if (state.kind === 'error') {
+    return (
+      <Text size="s" color="error">
+        Failed to load draft: {state.message}
+      </Text>
+    );
+  }
+  if (state.kind === 'empty') {
+    return (
+      <Text size="s" color="secondary">
+        No completed draft yet.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="xs">
+      <Text size="xs" color="secondary">
+        Pass: {state.pass}
+        {state.finishedAt ? ` · ${new Date(state.finishedAt).toLocaleString()}` : ''}
+      </Text>
+      <div
+        style={{
+          maxHeight: '50vh',
+          overflow: 'auto',
+          border: '1px solid rgba(0, 0, 0, 0.12)',
+          borderRadius: 6,
+          padding: 16,
+          background: 'white',
+          fontSize: 14,
+          lineHeight: 1.5,
+        }}
+        // Output is HTML from our own LLM pipeline; not user input. v1
+        // skips sanitization. If risk concerns surface later, wrap with
+        // DOMPurify.
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted internal LLM output
+        dangerouslySetInnerHTML={{ __html: state.output }}
+      />
+    </Stack>
+  );
+}
+
 function Stepper({
-  current,
+  actualPhase,
+  viewedPhase,
   onPick,
 }: {
-  current: ArticleBacklogStatus;
-  onPick: (next: ArticleBacklogStatus) => void;
+  actualPhase: ArticleManagerPhase;
+  viewedPhase: ArticleManagerPhase;
+  onPick: (phase: ArticleManagerPhase) => void;
 }) {
-  const stepValue = statusToStepValue(current);
-  const currentIndex = STATUS_OPTIONS.findIndex((s) => s.value === stepValue);
-
   return (
     <div
       style={{
@@ -997,10 +1580,14 @@ function Stepper({
         alignItems: 'center',
       }}
     >
-      {STATUS_OPTIONS.map((step, i) => {
-        const state = stepStateFor(i, currentIndex < 0 ? 0 : currentIndex);
-        const isCurrent = state === 'current';
-        const isCompleted = state === 'completed';
+      {PHASES.map((phase) => {
+        const isCurrent = phase === actualPhase;
+        const isCompleted = phase < actualPhase;
+        const isFuture = phase > actualPhase;
+        // The viewed-but-not-current cue: a 2px amber outline on whichever
+        // past chip the user is parked on. Lets them see "I'm looking at
+        // approval, even though the article is in editing".
+        const isViewed = phase === viewedPhase && viewedPhase !== actualPhase;
         const buttonStyle: CSSProperties = {
           ...stepButtonBase,
           background: isCurrent ? 'rgb(255, 248, 230)' : 'white',
@@ -1013,8 +1600,12 @@ function Stepper({
             ? 'rgb(120, 70, 0)'
             : isCompleted
               ? 'rgb(15, 95, 50)'
-              : 'rgb(90, 90, 100)',
+              : 'rgb(140, 140, 150)',
           fontWeight: isCurrent ? 600 : 400,
+          cursor: isFuture ? 'not-allowed' : 'pointer',
+          opacity: isFuture ? 0.6 : 1,
+          outline: isViewed ? '2px solid rgb(217, 119, 6)' : 'none',
+          outlineOffset: isViewed ? 2 : 0,
         };
         const circleStyle: CSSProperties = {
           ...circleBase,
@@ -1023,19 +1614,23 @@ function Stepper({
             : isCurrent
               ? 'rgb(217, 119, 6)'
               : 'rgb(230, 230, 235)',
-          color: isCompleted || isCurrent ? 'white' : 'rgb(90, 90, 100)',
+          color: isCompleted || isCurrent ? 'white' : 'rgb(140, 140, 150)',
         };
         return (
           <button
-            key={step.value}
+            key={phase}
             type="button"
-            onClick={() => onPick(step.value)}
+            onClick={() => {
+              if (isFuture) return;
+              onPick(phase);
+            }}
             style={buttonStyle}
             aria-current={isCurrent ? 'step' : undefined}
-            title={step.label}
+            aria-disabled={isFuture}
+            title={PHASE_LABEL[phase]}
           >
-            <span style={circleStyle}>{isCompleted ? '✓' : i + 1}</span>
-            <span>{step.label}</span>
+            <span style={circleStyle}>{isCompleted ? '✓' : phase}</span>
+            <span>{PHASE_LABEL[phase]}</span>
           </button>
         );
       })}
@@ -1043,33 +1638,172 @@ function Stepper({
   );
 }
 
-function StepBody({
+const PHASE_COPY: Record<ArticleManagerPhase, string> = {
+  1: 'No sources fetched yet. Run a literature search to fetch and rank PubMed candidates for this article.',
+  2: 'PubMed ranked these sources. Approve the ones to keep and reject the rest — then advance to prioritize.',
+  3: 'Drag to reorder by priority. Paste the Cortex Source ID for every approved source — the draft step needs all of them.',
+  4: 'Article draft is being generated. The dispatcher runs up to 3 articles concurrently.',
+  5: "Preview the latest draft. When you've finished editing in Cortex, mark the article ready to publish.",
+  6: 'Final QC check before publishing. Mark as published when the article is live.',
+  7: 'Article is published.',
+};
+
+function PhaseBody({
+  phase,
   status,
   sources,
+  slug,
+  articleRecordId,
+  viewerEmail,
+  onAdvance,
 }: {
+  /** The phase the user is *viewing* — drives which panel renders. May lag
+   *  behind `status` when the editor has chip-navigated to an earlier
+   *  phase to review/redo it. */
+  phase: ArticleManagerPhase;
+  /** The article's *real* status — drives the in-panel action gates
+   *  (`canRunLitSearch`, `canDraft`). A phase-1 view of a phase-5 article
+   *  shows the copy but no run button, because the lit-search route would
+   *  no-op anyway. */
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
+  slug: string;
+  articleRecordId: string;
+  viewerEmail?: string;
+  onAdvance: (next: ArticleBacklogStatus) => void;
 }) {
-  const copy = STEP_COPY[status];
-  if (status === 'sources-searched' || status === 'sources-approved') {
+  const copy = PHASE_COPY[phase];
+
+  if (phase === 1) {
+    const litEligible = canRunLitSearch(status, sources.length);
     return (
       <Stack space="m">
-        <Text color="secondary">{copy}</Text>
-        {status === 'sources-approved' ? (
+        <Text color="secondary">
+          {litEligible
+            ? copy
+            : `Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
+        </Text>
+        {litEligible ? (
           <Inline space="s" vAlignItems="center">
-            <Badge text="Sources approved" color="green" />
-            <Text size="s" color="secondary">
-              {sources.length} source{sources.length === 1 ? '' : 's'} locked in
-            </Text>
+            <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
           </Inline>
         ) : null}
-        <SourcesTable sources={sources} />
       </Stack>
     );
   }
+
+  if (phase === 2) {
+    const approveEnabled = canApproveSources(sources);
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
+        <SourcesTable
+          sources={sources}
+          slug={slug}
+          viewerEmail={viewerEmail}
+          mode="curation"
+        />
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            disabled={!approveEnabled}
+            onClick={() => onAdvance('sources-approved')}
+          >
+            Approve sources
+          </Button>
+          {!approveEnabled ? (
+            <Text size="xs" color="secondary">
+              Approve at least one source to continue.
+            </Text>
+          ) : null}
+        </Inline>
+      </Stack>
+    );
+  }
+
+  if (phase === 3) {
+    const visible = sources
+      .filter((s) => s.reviewStatus === 'approved')
+      .slice()
+      .sort(
+        (a, b) =>
+          (a.priority ?? Number.POSITIVE_INFINITY) -
+          (b.priority ?? Number.POSITIVE_INFINITY),
+      );
+    const draftReady = canStartDraft(sources);
+    const missingIds = missingCortexIdCount(sources);
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
+        <SourcesTable
+          sources={visible}
+          slug={slug}
+          viewerEmail={viewerEmail}
+          mode="priority"
+        />
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            disabled={!draftReady}
+            onClick={() => onAdvance('ready-for-llm-draft')}
+          >
+            Ready to draft
+          </Button>
+          {!draftReady ? (
+            <Text size="xs" color="secondary">
+              {missingIds > 0
+                ? `Paste Source IDs for ${missingIds} more source${missingIds === 1 ? '' : 's'} to continue.`
+                : 'Approve at least one source to continue.'}
+            </Text>
+          ) : null}
+        </Inline>
+      </Stack>
+    );
+  }
+
+  if (phase === 4) {
+    return (
+      <Stack space="m">
+        <Text color="secondary">{copy}</Text>
+        {canDraft(status) ? (
+          <Inline space="s" vAlignItems="center">
+            <StartWritingButton
+              slug={slug}
+              articleRecordId={articleRecordId}
+              hasSources={sources.length > 0}
+              initialRun={null}
+            />
+          </Inline>
+        ) : null}
+      </Stack>
+    );
+  }
+
+  // Phases 5, 6, 7 — preview the latest draft + advance buttons.
   return (
-    <Stack space="s">
-      <Text>{copy}</Text>
+    <Stack space="m">
+      <Text color="secondary">{copy}</Text>
+      <DraftPreview slug={slug} articleRecordId={articleRecordId} />
+      {phase === 5 ? (
+        <Inline space="s" vAlignItems="center">
+          <Button
+            variant="primary"
+            size="s"
+            onClick={() => onAdvance('ready-to-publish')}
+          >
+            Mark ready to publish
+          </Button>
+        </Inline>
+      ) : null}
+      {phase === 6 ? (
+        <Inline space="s" vAlignItems="center">
+          <Button variant="primary" size="s" onClick={() => onAdvance('published')}>
+            Mark published
+          </Button>
+        </Inline>
+      ) : null}
     </Stack>
   );
 }
@@ -1237,7 +1971,17 @@ function UpdateReviewView({
     }
   }
 
+  function sectionKeyOf(rowId: string): string {
+    const row = sorted.find((r) => r.id === rowId);
+    return row?.sectionKey ?? '';
+  }
+
   async function setRowStatus(rowId: string, status: ReviewStatus, notes?: string) {
+    const sectionKey = sectionKeyOf(rowId);
+    if (!sectionKey) {
+      console.error('setRowStatus: row has no sectionKey — cannot persist review');
+      return;
+    }
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
     const nextReviewers: ReviewerMap = {
@@ -1249,7 +1993,7 @@ function UpdateReviewView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await submitSectionReview(slug, rowId, status, notes);
+      await submitSectionReview(slug, sectionKey, rowId, status, notes);
     } catch (err) {
       console.error('submitSectionReview failed', err);
       const revertedReviews = { ...reviews };
@@ -1266,6 +2010,8 @@ function UpdateReviewView({
   }
 
   async function clearRowStatus(rowId: string) {
+    const sectionKey = sectionKeyOf(rowId);
+    if (!sectionKey) return;
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
@@ -1276,7 +2022,7 @@ function UpdateReviewView({
     onReviewsChange(next);
     onReviewersChange(nextReviewers);
     try {
-      await resetSectionReview(slug, rowId);
+      await resetSectionReview(slug, sectionKey, rowId);
     } catch (err) {
       console.error('resetSectionReview failed', err);
     } finally {
@@ -1451,7 +2197,7 @@ function UpdateReviewView({
                   <Text size="s" weight="bold">
                     Previous names
                   </Text>
-                  {previousNames.map((t) => {
+                  {Array.from(new Set(previousNames)).map((t) => {
                     const origin = titleOriginLookup[t];
                     const formatted =
                       origin?.kind === 'section' || origin?.kind === 'both'
@@ -1489,8 +2235,9 @@ function UpdateReviewView({
                 key={current.id}
                 slug={slug}
                 recordKind="section"
+                recordKey={current.sectionKey ?? ''}
                 recordId={current.id}
-                initialComments={initialCommentsBySection[current.id] ?? []}
+                initialComments={initialCommentsBySection[current.sectionKey ?? ''] ?? []}
                 viewerEmail={viewerEmail}
               />
             </>
@@ -1803,7 +2550,8 @@ function UpdateArticleViewBody({
         key={articleKey}
         slug={slug}
         recordKind="article"
-        recordId={`pa:${articleKey}`}
+        recordKey={`upd::${articleKey}`}
+        recordId={articleKey}
         initialComments={initialComments}
         viewerEmail={viewerEmail}
       />
@@ -1831,7 +2579,8 @@ function BacklogUpdateView({
     slug,
     article,
     sections,
-    currentStatus,
+    currentStatus: openerCurrentStatus,
+    currentBacklogRow,
     initialComments,
     initialNotes,
     categoryLookup,
@@ -1839,15 +2588,29 @@ function BacklogUpdateView({
     onStatusChange,
   } = opener;
 
+  // Live sub mirrors the new-article modal so cross-tab / async writes
+  // keep the stepper in sync.
+  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    currentBacklogRow ? [currentBacklogRow] : [],
+    {
+      filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
+    },
+  );
+  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
   const [savingNotes, setSavingNotes] = useState(false);
   const notesDirty = pendingNotes !== notes;
 
-  async function pickStatus(next: ArticleBacklogStatus) {
-    await onStatusChange(next, notesDirty ? pendingNotes : undefined);
-    if (notesDirty) setNotes(pendingNotes);
-  }
+  // Stepper is purely visual here (no PhaseBody) — chip clicks just park
+  // viewedPhase locally. They never flip the persisted status.
+  const actualPhase = phaseFromStatus(currentStatus);
+  const [viewedPhase, setViewedPhase] = useState<ArticleManagerPhase>(actualPhase);
+  useEffect(() => {
+    setViewedPhase(actualPhase);
+  }, [actualPhase]);
 
   async function saveNotesOnly() {
     if (!notesDirty || savingNotes) return;
@@ -1906,7 +2669,11 @@ function BacklogUpdateView({
             }
           />
 
-          <Stepper current={currentStatus} onPick={pickStatus} />
+          <Stepper
+            actualPhase={actualPhase}
+            viewedPhase={viewedPhase}
+            onPick={setViewedPhase}
+          />
 
           <Stack space="xs">
             <Text size="s" weight="bold">
@@ -1944,7 +2711,8 @@ function BacklogUpdateView({
           <CommentsSection
             slug={slug}
             recordKind="article"
-            recordId={`pa:${article.id}`}
+            recordKey={article.articleKey}
+            recordId={article.id}
             initialComments={initialComments}
             viewerEmail={viewerEmail}
           />

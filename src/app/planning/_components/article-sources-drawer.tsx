@@ -88,8 +88,7 @@ export function ArticleSourcesDrawer({
             <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th style={{ ...thStyle, width: 50 }}>Use</th>
-                  <th style={{ ...thStyle, width: 60 }}>Rank</th>
+                  <th style={{ ...thStyle, width: 60 }}>LLM rank</th>
                   <th style={thStyle}>Title</th>
                   <th style={{ ...thStyle, width: 130 }}>Type</th>
                   <th style={thStyle}>Journal</th>
@@ -101,17 +100,6 @@ export function ArticleSourcesDrawer({
               <tbody>
                 {sources.map((s) => (
                   <tr key={s.id}>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>
-                      {s.useFlag ? (
-                        <Text as="span" size="s" weight="bold">
-                          ✓
-                        </Text>
-                      ) : (
-                        <Text as="span" size="s" color="secondary">
-                          ✗
-                        </Text>
-                      )}
-                    </td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
                     <td style={tdStyle}>
                       <Text weight="bold">{s.title}</Text>

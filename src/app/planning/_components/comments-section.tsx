@@ -23,12 +23,18 @@ function formatTime(iso: string): string {
 export function CommentsSection({
   slug,
   recordKind,
+  recordKey,
   recordId,
   initialComments,
   viewerEmail,
 }: {
   slug: string;
   recordKind: ReviewRecordKind;
+  /** Stable identifier — articleKey or sectionKey depending on
+   *  `recordKind`. Empty means "no thread" and disables posting. */
+  recordKey: string;
+  /** Current PB id of the underlying record. Stored alongside the key
+   *  as a debugging breadcrumb; not used for joins. */
   recordId: string;
   initialComments: ReviewCommentRecord[];
   /** Email of the currently signed-in editor. Used to decide which
@@ -42,10 +48,16 @@ export function CommentsSection({
 
   async function submit() {
     const body = draft.trim();
-    if (!body) return;
+    if (!body || !recordKey) return;
     setSubmitting(true);
     try {
-      const created = await postReviewComment(slug, recordKind, recordId, body);
+      const created = await postReviewComment(
+        slug,
+        recordKind,
+        recordKey,
+        recordId,
+        body,
+      );
       setComments((prev) => [...prev, created]);
       setDraft('');
     } catch (err) {

@@ -60,6 +60,15 @@ export const env = createEnv({
     // which mints a session for this email via the PB impersonate API. Useful
     // when OAuth credentials aren't provisioned yet. Ignored in production.
     DEV_AUTOLOGIN_EMAIL: optionalString,
+    // Cortex CMS source-registration API. When unset, the Stage 2
+    // workflow returns a deterministic stub ID and logs a warning —
+    // unblocks the orchestration UX before the API contract is final.
+    CORTEX_API_URL: z.string().url().optional(),
+    CORTEX_API_KEY: optionalString,
+    // Optional NCBI E-utilities API key. With a key NCBI permits ~10
+    // req/sec; without one the limit is ~3 req/sec and IP-rate-limited.
+    // The PubMed client paces accordingly.
+    NCBI_API_KEY: optionalString,
   },
   client: {
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
@@ -81,6 +90,9 @@ export const env = createEnv({
     GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
     GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
+    CORTEX_API_URL: process.env.CORTEX_API_URL,
+    CORTEX_API_KEY: process.env.CORTEX_API_KEY,
+    NCBI_API_KEY: process.env.NCBI_API_KEY,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
   },
   emptyStringAsUndefined: true,

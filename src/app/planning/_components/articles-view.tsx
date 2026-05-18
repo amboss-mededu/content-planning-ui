@@ -31,9 +31,14 @@ import { type Column, DataTable } from './data-table';
  * is 2nd-pass-only).
  */
 export type ArticleRow = {
-  /** PB record id of the underlying consolidatedArticles row. Set on
-   *  1st-pass rows; the review pass keys reviews on this. */
+  /** PB record id of the underlying consolidatedArticles row. Use for
+   *  routing only — review/backlog joins go through `articleKey`. */
   id?: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. Empty when the row's title /
+   *  articleId aren't enough to compute one (which makes the row
+   *  un-reviewable). */
+  articleKey?: string;
   articleTitle?: string;
   articleType?: string;
   category?: string;
@@ -67,7 +72,14 @@ function PreviousTitlesCell({
   if (!titles || titles.length === 0) return <Text size="xs">—</Text>;
   return (
     <Stack space="xxs">
-      {titles.map((t) => {
+      {/*
+       * Dedupe titles before mapping — the LLM occasionally emits the
+       * same precursor suggestion twice under different categories,
+       * which would collide on the React key when we use the title.
+       * The duplicate row carries no extra signal for the editor, so
+       * dropping it is fine.
+       */}
+      {Array.from(new Set(titles)).map((t) => {
         const origin = titleOriginLookup[t];
         const tag =
           origin?.kind === 'section' || origin?.kind === 'both'

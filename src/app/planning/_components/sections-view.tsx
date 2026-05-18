@@ -27,12 +27,16 @@ import { type Column, DataTable } from './data-table';
  * and a derived `updateType` without re-deriving on every render.
  */
 export type SectionRow = {
-  /** PB record id of the underlying consolidatedSections row. The
-   *  review pass keys reviews on this. */
+  /** PB record id of the underlying consolidatedSections row. Use for
+   *  routing only — review/comment joins go through `sectionKey`. */
   id?: string;
+  /** Stable, content-derived identifier — see
+   *  `src/lib/data/article-keys.ts`. */
+  sectionKey?: string;
   articleTitle?: string;
   articleId?: string;
   sectionName?: string;
+  sectionId?: string;
   updateType: 'new' | 'update' | null;
   category?: string;
   codes: EmbeddedCode[];
@@ -219,13 +223,17 @@ function buildArticleGroups(
   sections: SectionRow[],
   reviews: ReviewMap,
 ): ArticleGroupRow[] {
+  // Group by `articleId || articleTitle` so two CMS articles that
+  // happen to share a display title stay as separate groups in the
+  // aggregate view. Keying by title alone collapsed them into one row
+  // and tripped React's duplicate-key check on the table.
   const byKey = new Map<string, ArticleGroupRow>();
   for (const s of sections) {
-    const key = s.articleTitle ?? '(no article)';
+    const key = s.articleId || s.articleTitle || '(no article)';
     let g = byKey.get(key);
     if (!g) {
       g = {
-        articleTitle: key,
+        articleTitle: s.articleTitle ?? '(no article)',
         articleId: s.articleId,
         sections: [],
         sectionCount: 0,
@@ -406,10 +414,11 @@ export function SectionsView({
   const params = useSearchParams();
   const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
-  // Whether the table renders one row per section (default) or one row
-  // per parent article aggregating its sections.
+  // Whether the table renders one row per parent article (default — the
+  // editor-friendly view) or one row per section. The `?grouping=section`
+  // URL flips back to the per-section layout.
   const [grouping, setGrouping] = useState<'section' | 'article'>(() =>
-    params.get('grouping') === 'article' ? 'article' : 'section',
+    params.get('grouping') === 'section' ? 'section' : 'article',
   );
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
@@ -435,7 +444,7 @@ export function SectionsView({
     const p = new URLSearchParams();
     if (kind) p.set('kind', kind);
     if (article) p.set('article', article);
-    if (grouping === 'article') p.set('grouping', 'article');
+    if (grouping === 'section') p.set('grouping', 'section');
     const qs = p.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
@@ -509,8 +518,8 @@ export function SectionsView({
           value={grouping}
           onChange={(v) => setGrouping(v === 'article' ? 'article' : 'section')}
           options={[
-            { name: 'grouping', value: 'section', label: 'By section' },
             { name: 'grouping', value: 'article', label: 'By article' },
+            { name: 'grouping', value: 'section', label: 'By section' },
           ]}
         />
         <div className="filter-cell">
@@ -587,7 +596,7 @@ export function SectionsView({
         <DataTable
           rows={groupRows}
           columns={groupColumns}
-          getRowKey={(g) => g.articleTitle}
+          getRowKey={(g) => g.articleId || g.articleTitle}
           // Keep the toolbar's visibleRows aligned with the underlying
           // section set the Start review buttons walk — the aggregate
           // table's filters only affect the visible groups, but reviews

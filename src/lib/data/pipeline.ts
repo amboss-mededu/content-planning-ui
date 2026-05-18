@@ -511,6 +511,26 @@ export async function updatePipelineRunAsAdmin(
   await pb.collection('pipelineRuns').update(runId, cleaned);
 }
 
+/**
+ * Lean status read used by fire-and-forget workflows to cooperatively
+ * cancel when an editor resets the stage mid-batch. Returns null if the
+ * run row has been deleted underneath us.
+ */
+export async function getPipelineRunStatusAsAdmin(
+  runId: string,
+): Promise<PipelineRunRecord['status'] | null> {
+  const pb = await createAdminClient();
+  try {
+    const row = await pb
+      .collection<PipelineRunRecord>('pipelineRuns')
+      .getOne(runId, { fields: 'status' });
+    return row.status;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 export async function initPipelineStageAsAdmin(args: {
   runId: string;
   stage: StageName;
@@ -583,7 +603,7 @@ export async function listEventsAsAdmin(runId: string): Promise<PipelineEventRow
 
 export async function logPipelineEventAsAdmin(args: {
   runId: string;
-  stage: StageName;
+  stage: string;
   level: string;
   message: string;
   metrics?: unknown;

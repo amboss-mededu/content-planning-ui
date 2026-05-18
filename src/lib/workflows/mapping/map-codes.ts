@@ -14,6 +14,7 @@
 import { mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
+  getPipelineRunStatus,
   listUnmappedCodes,
   loadSpecialtyForMapping,
   type MappingFilter,
@@ -30,6 +31,22 @@ import { revalidateSpecialtyCache } from '../lib/revalidate';
 import { chunk } from '../lib/util';
 
 const CODE_CONCURRENCY = 10;
+
+/**
+ * Thrown when a cooperative cancellation check sees the run is no longer
+ * `running`. The outer `try/catch` in `mapCodesWorkflow` treats this as
+ * "the editor reset the stage" — no `markStageFailed`, no rethrow.
+ */
+class RunCancelledError extends Error {
+  constructor(public readonly observedStatus: string | null) {
+    super(`map_codes run cancelled (status=${observedStatus ?? 'missing'})`);
+    this.name = 'RunCancelledError';
+  }
+}
+
+function shouldAbort(status: string | null): boolean {
+  return status === 'cancelled' || status === 'failed' || status === null;
+}
 
 export type MapCodesInput = {
   runId: string;
@@ -98,6 +115,10 @@ async function mapAndWriteOne(input: {
     backupModel: input.backupModel,
     apiKeys: input.apiKeys,
   });
+  // Cooperative cancellation: agent call took 10–60s; if the editor reset
+  // the stage mid-call we must not stamp mappedAt over the cleared row.
+  const status = await getPipelineRunStatus(input.runId);
+  if (shouldAbort(status)) throw new RunCancelledError(status);
   await writeCodeMapping(input.specialtySlug, input.code, result.mapping);
   return {
     code: input.code,
@@ -147,6 +168,10 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
       let escalations = 0;
       let unresolvedCount = 0;
       for (const batch of chunk(unmapped, CODE_CONCURRENCY)) {
+        // Cooperative cancellation: bail if a Reset flipped the run.
+        const preStatus = await getPipelineRunStatus(input.runId);
+        if (shouldAbort(preStatus)) throw new RunCancelledError(preStatus);
+
         await markCodesInFlight(
           input.specialtySlug,
           batch.map((c) => c.code),
@@ -217,6 +242,25 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
+    if (e instanceof RunCancelledError) {
+      // Editor reset the stage mid-run. The reset cascade already cleared
+      // the stage row and any mappedAt fields; do not flip the stage to
+      // `failed`. Just drop in-flight markers and surface the cancellation
+      // in the run log.
+      console.log('[pipeline] mapCodesWorkflow cancelled mid-batch', {
+        runId: input.runId,
+        observedStatus: e.observedStatus,
+      });
+      await clearInFlightForRun(input.runId);
+      await logEvent({
+        runId: input.runId,
+        stage: 'map_codes',
+        level: 'info',
+        message: 'Run cancelled mid-batch — stage reset by editor.',
+      }).catch(() => {});
+      await revalidateSpecialtyCache(input.specialtySlug);
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     await markStageFailed(input.runId, 'map_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);

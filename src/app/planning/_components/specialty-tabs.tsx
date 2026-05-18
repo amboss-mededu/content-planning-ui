@@ -12,7 +12,7 @@ const TABS = [
   { label: 'Pipeline', segment: 'pipeline', numbered: false },
   { label: 'Milestones', segment: 'milestones', numbered: true },
   { label: 'Categories', segment: 'categories', numbered: true },
-  { label: 'Mapping', segment: 'codes', numbered: true },
+  { label: 'Mapping', segment: 'mapping', numbered: true },
   { label: 'Consolidation Review', segment: 'consolidation-review', numbered: true },
   { label: 'New Articles', segment: 'articles', numbered: true },
   { label: 'Article Updates', segment: 'sections', numbered: true },

@@ -85,3 +85,34 @@ export const IN_PROGRESS_STATUSES: ArticleBacklogStatus[] = [
 export function statusToStepValue(s: ArticleBacklogStatus): ArticleBacklogStatus {
   return s === 'unassigned' ? 'waiting-for-sources' : s;
 }
+
+/**
+ * The Article Manager modal collapses the 9 backlog statuses into a 7-phase
+ * linear pipeline. Each phase has its own content panel + advance affordance.
+ * Phase 5 covers both `ready-for-editing` and `editing-in-progress`.
+ */
+export type ArticleManagerPhase = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export const PHASE_LABEL: Record<ArticleManagerPhase, string> = {
+  1: 'Search sources',
+  2: 'Approve sources',
+  3: 'Prioritize sources',
+  4: 'Draft article',
+  5: 'Review article',
+  6: 'Article ready',
+  7: 'Published',
+};
+
+/** Canonical status the stepper picks when the editor revisits an earlier
+ *  phase. Picking phase 5 lands on `ready-for-editing` (the entry point);
+ *  if the editor was already at `editing-in-progress` they can flip it
+ *  explicitly via other tooling. */
+export const PHASE_TO_STATUS: Record<ArticleManagerPhase, ArticleBacklogStatus> = {
+  1: 'waiting-for-sources',
+  2: 'sources-searched',
+  3: 'sources-approved',
+  4: 'ready-for-llm-draft',
+  5: 'ready-for-editing',
+  6: 'ready-to-publish',
+  7: 'published',
+};

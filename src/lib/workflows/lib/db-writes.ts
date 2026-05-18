@@ -20,6 +20,7 @@ import {
 } from '@/lib/data/codes';
 import {
   createPipelineRunAsAdmin,
+  getPipelineRunStatusAsAdmin,
   initPipelineStageAsAdmin,
   listExtractedCodesForRunAsAdmin,
   updatePipelineRunAsAdmin,
@@ -50,6 +51,14 @@ export type StageName =
   | 'consolidate_articles'
   | 'consolidate_sections'
   | 'literature_search';
+
+/**
+ * Event-log scope is wider than `StageName` because some sub-pipelines
+ * (article writing) don't have a row in the specialty's `pipelineStages`
+ * table but still produce useful events. `EventStageName` is the
+ * superset that the event log + UI filters accept.
+ */
+export type EventStageName = StageName | 'write_article';
 
 export type StageStatus =
   | 'pending'
@@ -88,6 +97,18 @@ export async function updatePipelineRunStatus(
     ...(terminal ? { finishedAt: Date.now() } : {}),
     ...(error !== undefined ? { error } : {}),
   });
+}
+
+/**
+ * Poll a run's current status from the fire-and-forget workflow. Used by
+ * mapCodesWorkflow between batches (and inside the per-code step) so that
+ * a `resetStageCascade` → `cancelStaleRunsForSpecialty` flip causes
+ * cooperative shutdown before the next mappedAt write lands.
+ */
+export async function getPipelineRunStatus(
+  runId: string,
+): Promise<PipelineRunStatus | null> {
+  return (await getPipelineRunStatusAsAdmin(runId)) as PipelineRunStatus | null;
 }
 
 // --- pipeline_stages ---------------------------------------------------------

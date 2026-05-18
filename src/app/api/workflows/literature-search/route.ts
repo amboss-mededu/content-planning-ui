@@ -2,7 +2,10 @@
  * Trigger endpoint for the literature-search workflow.
  *
  * POST /api/workflows/literature-search
- *   body: { specialtySlug: string }
+ *   body: {
+ *     specialtySlug: string,
+ *     articleRecordIds?: string[],   // narrow the run to specific rows
+ *   }
  *
  * Responsibility:
  *   1. Verify auth + specialty.
@@ -10,7 +13,8 @@
  *   3. Find approved 2nd-pass new-article suggestions whose effective
  *      backlog status is `waiting-for-sources` (no PB row, status=
  *      `unassigned`, or status=`waiting-for-sources` are all treated
- *      as waiting).
+ *      as waiting). When `articleRecordIds` is provided, the eligible
+ *      set is intersected with it so editors can search a chosen subset.
  *   4. Skip with 200 + `{ skipped: true }` if nothing to do — no run
  *      row created.
  *   5. Otherwise create the pipelineRuns + pipelineStages rows and
@@ -29,7 +33,7 @@ import { getSpecialty } from '@/lib/data/specialties';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { runLiteratureSearch } from '@/lib/workflows/literature-search';
 
-type Body = { specialtySlug?: string };
+type Body = { specialtySlug?: string; articleRecordIds?: string[] };
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
@@ -64,18 +68,21 @@ export async function POST(req: NextRequest) {
 
   // Eligible articles: approved 2nd-pass + effective status is
   // waiting-for-sources (no row, unassigned, or explicit waiting).
-  const eligible = suggestions
-    .filter((r) => r.id && reviews[r.id]?.status === 'approved')
-    .filter((r) => {
-      const id = r.id;
-      if (!id) return false;
-      const status = backlog[id]?.status;
-      return (
-        status === undefined ||
-        status === 'unassigned' ||
-        status === 'waiting-for-sources'
-      );
-    });
+  // Reviews and backlog are keyed by stable `articleKey` (survives
+  // consolidation re-runs); `filterIds` keeps using PB id because the
+  // frontend sends `articleRecordId` from the suggestion row.
+  const filterIds = Array.isArray(body.articleRecordIds)
+    ? new Set(body.articleRecordIds.filter((s) => typeof s === 'string' && s.length > 0))
+    : null;
+  const eligible = suggestions.filter((r) => {
+    if (!r.id || !r.articleKey) return false;
+    if (reviews[r.articleKey]?.status !== 'approved') return false;
+    if (filterIds && !filterIds.has(r.id)) return false;
+    const status = backlog[r.articleKey]?.status;
+    return (
+      status === undefined || status === 'unassigned' || status === 'waiting-for-sources'
+    );
+  });
 
   if (eligible.length === 0) {
     return NextResponse.json({ skipped: true, articles: 0 });
