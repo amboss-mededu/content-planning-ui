@@ -759,7 +759,7 @@ function CategoryDetailPane({
 
       <Inline space="xs" vAlignItems="center">
         <Button variant="primary" onClick={onApproveAll} disabled={unapprovedCount === 0}>
-          {`Approve all unapproved (${unapprovedCount})`}
+          {`Send all to backlog (${unapprovedCount})`}
         </Button>
         {flagged ? (
           <Button variant="tertiary" onClick={() => onToggleFlag(false)}>
@@ -902,7 +902,7 @@ function ArticleSubTable({
           onClick={onApproveSelected}
           disabled={selectedIds.size === 0}
         >
-          {`Approve selected (${selectedIds.size})`}
+          {`Send to suggested new articles (${selectedIds.size})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -1008,7 +1008,7 @@ function SectionSubTable({
           onClick={onApproveSelected}
           disabled={selectedIds.size === 0}
         >
-          {`Approve selected (${selectedIds.size})`}
+          {`Send to article updates (${selectedIds.size})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
