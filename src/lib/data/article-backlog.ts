@@ -234,6 +234,42 @@ export async function ensureUpdateBacklogRow(
 }
 
 /**
+ * Idempotent: create an articleBacklog row of type='new' for the given
+ * approved article candidate if one doesn't already exist. Mirrors
+ * `ensureUpdateBacklogRow` so approving a new article on the
+ * consolidation-review screen surfaces it on `/my-backlog` (which
+ * reads `articleBacklog`) the same way section approvals do.
+ */
+export async function ensureNewArticleBacklogRow(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  changedByEmail: string | null,
+): Promise<void> {
+  if (!articleKey) return;
+  const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  try {
+    await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
+    return;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      await pb.collection('articleBacklog').create({
+        specialtySlug: slug,
+        articleKey,
+        articleRecordId,
+        type: 'new',
+        status: 'waiting-for-sources',
+        lastChangedByEmail: changedByEmail ?? '',
+        lastChangedAt: Date.now(),
+      });
+      return;
+    }
+    throw e;
+  }
+}
+
+/**
  * Tear down an update-type backlog row. Used when the last approved
  * section under the parent article is unreviewed/rejected.
  */
