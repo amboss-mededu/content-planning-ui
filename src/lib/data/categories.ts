@@ -8,7 +8,6 @@ import type {
   ArticleSuggestionRecord,
   CodeCategoryRecord,
   CodeRecord,
-  ConsolidatedArticleRecord,
 } from '@/lib/pb/types';
 import type { CodeCategory } from '@/lib/types';
 
@@ -115,15 +114,14 @@ export async function deleteCategoriesForSpecialtyAsAdmin(slug: string): Promise
  * arrays of any source codeCategories record — pipeline never saw them.
  *
  * "Consolidated" signal: a bucket counts as consolidated iff at least one
- * of its codes is cited by any consolidation-output row across BOTH
- * `newArticleSuggestions` and `consolidatedArticles`. Two shape variants
- * of the `codes` JSON column are tolerated:
- *   - `[{ code: "X", ... }, …]` — xlsx-imported fixtures
- *   - `["X", …]` — live pipeline output (aggregate.ts writes string[])
- * Earlier attempts at a stricter per-source-category check via
- * `consolidatedArticles.category` produced false negatives for specialties
- * imported from xlsx (where `consolidatedArticles` can be empty even
- * though `newArticleSuggestions` is populated).
+ * of its codes has a status entry (included / excluded / ignored) in any
+ * `codeCategories` record — i.e. `hasAnyStatusInfo`. Consolidation writes
+ * these decision arrays alongside the suggestion/output rows, but the
+ * decision arrays are the more reliable signal: xlsx fixtures often ship
+ * `codeCategories` populated for every source category while the
+ * `newArticleSuggestions` / `consolidatedArticles` output rows only cover
+ * a subset. Earlier output-row checks produced false negatives for
+ * imported specialties.
  */
 export type CategoryOrchestration = {
   consolidationCategory: string;
@@ -146,10 +144,12 @@ export type CategoryOrchestration = {
    *  reached a yes/no verdict on AMBOSS coverage for them. Drives the
    *  mapping-progress + status columns. */
   numMappedCodes: number;
-  /** True when at least one code in this bucket is cited by a consolidation
-   *  output row — either `newArticleSuggestions` or `consolidatedArticles`.
-   *  Matches both shapes of the `codes` JSON column: `{ code: string }`
-   *  objects (xlsx fixtures) and plain `string[]` (live pipeline output). */
+  /** True when at least one code in this bucket has a status entry in some
+   *  `codeCategories` record (included / excluded / ignored arrays).
+   *  Equivalent to `hasAnyStatusInfo`. Output rows
+   *  (newArticleSuggestions / consolidatedArticles) aren't a reliable
+   *  signal — xlsx fixtures can ship decision arrays without the
+   *  corresponding output rows. */
   hasConsolidatedOutput: boolean;
 };
 
@@ -180,46 +180,14 @@ export async function listCategoryOrchestration(
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows, newSuggestions, consolidatedArticles] = await Promise.all([
+  const [codes, categoryRows] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
-    pb
-      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
-    pb
-      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
-
-  // Set of code-strings cited by any consolidation-output row. Walks both
-  // `newArticleSuggestions` and `consolidatedArticles`, and tolerates both
-  // shapes of their `codes` JSON column:
-  //   - { code: "X", ... } objects (xlsx-imported fixtures)
-  //   - "X" plain strings (output of the live consolidation pipeline —
-  //     see aggregate.ts:aggregateNewArticles which writes string[]).
-  // A bucket counts as having consolidated output iff any of its codes
-  // appears in this set.
-  const codesWithConsolidatedOutput = new Set<string>();
-  const collectCodes = (arr: unknown) => {
-    if (!Array.isArray(arr)) return;
-    for (const c of arr) {
-      if (typeof c === 'string') {
-        codesWithConsolidatedOutput.add(c);
-      } else if (
-        c &&
-        typeof c === 'object' &&
-        typeof (c as { code?: unknown }).code === 'string'
-      ) {
-        codesWithConsolidatedOutput.add((c as { code: string }).code);
-      }
-    }
-  };
-  for (const s of newSuggestions) collectCodes(s.codes);
-  for (const a of consolidatedArticles) collectCodes(a.codes);
 
   // Build a per-code status lookup from the source-category records.
   // Priority: included > excluded > ignored. A code that appears in
@@ -294,15 +262,15 @@ export async function listCategoryOrchestration(
       }
     }
 
-    // "Consolidated" iff any code in the bucket is cited by a consolidation
-    // output row (newArticleSuggestions or consolidatedArticles).
-    let hasConsolidatedOutput = false;
-    for (const c of bucket.codes) {
-      if (codesWithConsolidatedOutput.has(c)) {
-        hasConsolidatedOutput = true;
-        break;
-      }
-    }
+    // "Consolidated" iff any code in this bucket has a status entry in a
+    // `codeCategories` record (included / excluded / ignored) — i.e.
+    // anyStatus is true. That's the same signal as `hasAnyStatusInfo`
+    // and it's the most reliable across both live-pipeline output and
+    // xlsx-imported fixtures, where output rows
+    // (newArticleSuggestions / consolidatedArticles) can be partial or
+    // entirely absent for some source categories even when consolidation
+    // decisions were recorded.
+    const hasConsolidatedOutput = anyStatus;
 
     out.push({
       consolidationCategory: bucket.key,
