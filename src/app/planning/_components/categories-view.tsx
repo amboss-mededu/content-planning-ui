@@ -1,11 +1,12 @@
 'use client';
 
-import { Badge, Inline, Link, Stack, Text, Tooltip } from '@amboss/design-system';
-import { type CSSProperties, type ReactNode, useState } from 'react';
+import { Badge, SegmentedControl, Stack, Text, Tooltip } from '@amboss/design-system';
+import { type ReactNode, useState } from 'react';
 import type {
   CategoryOrchestration,
   SourceCategoryProgress,
 } from '@/lib/data/categories';
+import { CategoryDetailsModal } from './category-details-modal';
 import { type Column, DataTable } from './data-table';
 
 type ChipTone = 'amber' | 'red' | 'none';
@@ -80,6 +81,7 @@ export function CategoriesView({
   slug: string;
 }) {
   const [mode, setMode] = useState<ViewMode>('consolidation');
+  const [openBucket, setOpenBucket] = useState<CategoryOrchestration | null>(null);
 
   const columns: Column<CategoryOrchestration>[] = [
     {
@@ -88,31 +90,22 @@ export function CategoriesView({
       description:
         'Bucket the consolidation pipeline assigned codes to. Rows are derived from extracted codes — one row per unique consolidationCategory present in the codes table. The "(unbucketed)" row groups codes the pipeline never assigned a bucket to.',
       render: (r) => {
-        const label = r.isUnbucketed ? r.consolidationCategory : r.consolidationCategory;
-        const link = r.isUnbucketed ? (
-          <span style={{ color: 'inherit' }}>{label}</span>
-        ) : (
-          <Link
-            href={`/planning/${encodeURIComponent(slug)}/mapping?consolidationCategory=${encodeURIComponent(r.consolidationCategory)}`}
-          >
-            {label}
-          </Link>
-        );
+        const label = <span style={{ color: 'inherit' }}>{r.consolidationCategory}</span>;
         if (r.isUnbucketed) {
           return (
             <Tooltip content="Codes with no consolidationCategory — pipeline never bucketed them.">
-              <QcChip value={link} tone="amber" />
+              <QcChip value={label} tone="amber" />
             </Tooltip>
           );
         }
         if (!r.hasAnyStatusInfo) {
           return (
             <Tooltip content="No source-category status info for any code in this bucket — every code reports as orphan.">
-              <QcChip value={link} tone="amber" />
+              <QcChip value={label} tone="amber" />
             </Tooltip>
           );
         }
-        return link;
+        return label;
       },
       accessor: (r) => r.consolidationCategory,
       type: 'string',
@@ -257,74 +250,45 @@ export function CategoriesView({
 
   return (
     <Stack space="m">
-      <ViewModeToggle mode={mode} onChange={setMode} />
+      <SegmentedControl
+        label="Categories view"
+        isLabelHidden
+        value={mode}
+        onChange={(v) => setMode(v === 'source' ? 'source' : 'consolidation')}
+        options={[
+          { name: 'mode', value: 'consolidation', label: 'Consolidation buckets' },
+          { name: 'mode', value: 'source', label: 'Source categories' },
+        ]}
+      />
       {mode === 'consolidation' ? (
-        <>
-          <Text color="secondary">
-            {rows.length} consolidation buckets derived from extracted codes. Click a
-            bucket name to drill into its codes.
-          </Text>
-          <DataTable
-            rows={rows}
-            columns={columns}
-            getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
-            emptyText="No consolidation buckets found."
-            storageKey={`categories-table:${slug}`}
-          />
-        </>
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
+          emptyText="No consolidation buckets found."
+          storageKey={`categories-table:${slug}`}
+          onRowClick={(r) => {
+            if (r.isUnbucketed) return;
+            setOpenBucket(r);
+          }}
+        />
       ) : (
         <SourceCategoriesTable rows={sourceRows} slug={slug} />
+      )}
+      {openBucket && (
+        <CategoryDetailsModal
+          bucket={openBucket}
+          slug={slug}
+          onClose={() => setOpenBucket(null)}
+        />
       )}
     </Stack>
   );
 }
 
 // ---------------------------------------------------------------------------
-// View-mode toggle + source-category table (backup view)
+// Source-category table (backup view)
 // ---------------------------------------------------------------------------
-
-function ViewModeToggle({
-  mode,
-  onChange,
-}: {
-  mode: ViewMode;
-  onChange: (m: ViewMode) => void;
-}) {
-  const buttonStyle = (active: boolean): CSSProperties => ({
-    padding: '6px 12px',
-    fontSize: 13,
-    borderRadius: 4,
-    border: `1px solid ${active ? 'rgb(217, 119, 6)' : 'rgb(210, 210, 215)'}`,
-    background: active ? 'rgb(255, 247, 235)' : 'white',
-    color: active ? 'rgb(30, 30, 40)' : 'rgb(80, 80, 90)',
-    fontWeight: active ? 600 : 400,
-    cursor: 'pointer',
-    font: 'inherit',
-  });
-  return (
-    <Inline space="xs" vAlignItems="center">
-      <Text size="s" color="secondary">
-        View:
-      </Text>
-      <button
-        type="button"
-        style={buttonStyle(mode === 'consolidation')}
-        onClick={() => onChange('consolidation')}
-        aria-pressed={mode === 'consolidation'}
-      >
-        Consolidation buckets
-      </button>
-      <button
-        type="button"
-        style={buttonStyle(mode === 'source')}
-        onClick={() => onChange('source')}
-        aria-pressed={mode === 'source'}
-      >
-        Source categories
-      </button>
-    </Inline>
-  );
-}
 
 function SourceCategoriesTable({
   rows,
