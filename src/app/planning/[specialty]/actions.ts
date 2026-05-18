@@ -21,6 +21,10 @@ import {
   deleteWritingRunsForArticleAsAdmin,
   listDraftsForArticle,
 } from '@/lib/data/article-writing';
+import {
+  type BucketCode,
+  listBucketCodes as listBucketCodesData,
+} from '@/lib/data/categories';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import {
   addReviewComment,
@@ -47,6 +51,13 @@ import type {
 
 export async function refreshSpecialty(slug: string) {
   updateTag(`specialty:${slug}`);
+}
+
+export async function listBucketCodes(
+  slug: string,
+  bucket: string,
+): Promise<BucketCode[]> {
+  return listBucketCodesData(slug, bucket);
 }
 
 export async function submitArticleReview(

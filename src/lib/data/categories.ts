@@ -304,6 +304,85 @@ export async function listCategoryOrchestration(
   return out;
 }
 
+// --- Per-bucket code drill-down --------------------------------------------
+
+export type BucketCode = {
+  code: string;
+  description?: string;
+  source?: string;
+  category?: string;
+  status: 'included' | 'excluded' | 'ignored' | 'orphan';
+  mapped: boolean;
+};
+
+/**
+ * Codes belonging to a single consolidationCategory bucket, each annotated
+ * with its per-code status (included / excluded / ignored / orphan) and
+ * mapping verdict. Same per-code status derivation as
+ * `listCategoryOrchestration`, just unaggregated. Used by the bucket-detail
+ * modal on the categories page.
+ *
+ * Pass `bucket` as the consolidationCategory value to drill into — or the
+ * literal `(unbucketed)` sentinel for codes with no consolidationCategory.
+ */
+export async function listBucketCodes(
+  slug: string,
+  bucket: string,
+): Promise<BucketCode[]> {
+  await connection();
+  const pb = await userClient();
+
+  const [codes, categoryRows] = await Promise.all([
+    pb
+      .collection<CodeRecord>('codes')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<CodeCategoryRecord>('codeCategories')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+  ]);
+
+  const statusByCode = new Map<string, CodeStatus>();
+  for (const rec of categoryRows) {
+    for (const c of castStringArray(rec.includedArticleCodes) ?? [])
+      statusByCode.set(c, 'included');
+    for (const c of castStringArray(rec.includedSectionCodes) ?? [])
+      statusByCode.set(c, 'included');
+  }
+  for (const rec of categoryRows) {
+    for (const c of castStringArray(rec.excludedArticleCodes) ?? [])
+      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
+    for (const c of castStringArray(rec.excludedSectionCodes) ?? [])
+      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
+  }
+  for (const rec of categoryRows) {
+    for (const c of castStringArray(rec.totallyIgnoredCodes) ?? [])
+      if (!statusByCode.has(c)) statusByCode.set(c, 'ignored');
+  }
+
+  const wantUnbucketed = bucket === UNBUCKETED_LABEL;
+  const matched = codes.filter((c) =>
+    wantUnbucketed ? !c.consolidationCategory : c.consolidationCategory === bucket,
+  );
+
+  // De-dupe on code-string to mirror the bucket-level aggregation; pick the
+  // first occurrence's metadata.
+  const seen = new Set<string>();
+  const out: BucketCode[] = [];
+  for (const r of matched) {
+    if (seen.has(r.code)) continue;
+    seen.add(r.code);
+    out.push({
+      code: r.code,
+      description: r.description ?? undefined,
+      source: r.source ?? undefined,
+      category: r.category ?? undefined,
+      status: statusByCode.get(r.code) ?? 'orphan',
+      mapped: (r.mappedAt ?? 0) > 0,
+    });
+  }
+  return out.sort((a, b) => a.code.localeCompare(b.code));
+}
+
 // --- Source-category rollup (backup view) ----------------------------------
 
 /**
