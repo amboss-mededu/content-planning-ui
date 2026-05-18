@@ -114,13 +114,16 @@ export async function deleteCategoriesForSpecialtyAsAdmin(slug: string): Promise
  * # Orphan = codes in the bucket whose code-string is in none of the four
  * arrays of any source codeCategories record — pipeline never saw them.
  *
- * "Consolidated" signal: consolidation runs per source `category`, not per
- * consolidationCategory bucket. We mark a bucket consolidated iff every
- * source-category contributing codes to it appears in `consolidatedArticles`
- * — the persisted, post-consolidation output table with a real `category`
- * column. `newArticleSuggestions` doesn't carry a category column, so it
- * can't be used for this signal even though the pipeline tags suggestion
- * rows with a category at construction time.
+ * "Consolidated" signal: a bucket counts as consolidated iff at least one
+ * of its codes is cited by any consolidation-output row across BOTH
+ * `newArticleSuggestions` and `consolidatedArticles`. Two shape variants
+ * of the `codes` JSON column are tolerated:
+ *   - `[{ code: "X", ... }, …]` — xlsx-imported fixtures
+ *   - `["X", …]` — live pipeline output (aggregate.ts writes string[])
+ * Earlier attempts at a stricter per-source-category check via
+ * `consolidatedArticles.category` produced false negatives for specialties
+ * imported from xlsx (where `consolidatedArticles` can be empty even
+ * though `newArticleSuggestions` is populated).
  */
 export type CategoryOrchestration = {
   consolidationCategory: string;
@@ -143,11 +146,10 @@ export type CategoryOrchestration = {
    *  reached a yes/no verdict on AMBOSS coverage for them. Drives the
    *  mapping-progress + status columns. */
   numMappedCodes: number;
-  /** True when every source-ontology `category` represented in this bucket's
-   *  codes has at least one `consolidatedArticles` row stamped with the same
-   *  `category`. Consolidation runs per source category, so this is the
-   *  authoritative per-bucket signal that consolidation has executed for
-   *  every source-category contributing codes to this bucket. */
+  /** True when at least one code in this bucket is cited by a consolidation
+   *  output row — either `newArticleSuggestions` or `consolidatedArticles`.
+   *  Matches both shapes of the `codes` JSON column: `{ code: string }`
+   *  objects (xlsx fixtures) and plain `string[]` (live pipeline output). */
   hasConsolidatedOutput: boolean;
 };
 
@@ -178,7 +180,7 @@ export async function listCategoryOrchestration(
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows, consolidatedArticles] = await Promise.all([
+  const [codes, categoryRows, newSuggestions, consolidatedArticles] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
@@ -186,20 +188,38 @@ export async function listCategoryOrchestration(
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
+      .collection<ArticleSuggestionRecord>('newArticleSuggestions')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
       .collection<ConsolidatedArticleRecord>('consolidatedArticles')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
 
-  // Set of source-ontology categories for which `consolidatedArticles` has
-  // at least one row. Consolidation runs per source `category` and the
-  // `consolidatedArticles` collection is the canonical post-consolidation
-  // output (its rows carry `category`, unlike `newArticleSuggestions`
-  // which doesn't persist that column). A bucket is "consolidated" iff
-  // every source category contributing codes to it appears in this set.
-  const consolidatedSourceCategories = new Set<string>();
-  for (const a of consolidatedArticles) {
-    if (a.category) consolidatedSourceCategories.add(a.category);
-  }
+  // Set of code-strings cited by any consolidation-output row. Walks both
+  // `newArticleSuggestions` and `consolidatedArticles`, and tolerates both
+  // shapes of their `codes` JSON column:
+  //   - { code: "X", ... } objects (xlsx-imported fixtures)
+  //   - "X" plain strings (output of the live consolidation pipeline —
+  //     see aggregate.ts:aggregateNewArticles which writes string[]).
+  // A bucket counts as having consolidated output iff any of its codes
+  // appears in this set.
+  const codesWithConsolidatedOutput = new Set<string>();
+  const collectCodes = (arr: unknown) => {
+    if (!Array.isArray(arr)) return;
+    for (const c of arr) {
+      if (typeof c === 'string') {
+        codesWithConsolidatedOutput.add(c);
+      } else if (
+        c &&
+        typeof c === 'object' &&
+        typeof (c as { code?: unknown }).code === 'string'
+      ) {
+        codesWithConsolidatedOutput.add((c as { code: string }).code);
+      }
+    }
+  };
+  for (const s of newSuggestions) collectCodes(s.codes);
+  for (const a of consolidatedArticles) collectCodes(a.codes);
 
   // Build a per-code status lookup from the source-category records.
   // Priority: included > excluded > ignored. A code that appears in
@@ -232,7 +252,6 @@ export async function listCategoryOrchestration(
     codes: Set<string>;
     mappedCodes: Set<string>;
     sources: string[];
-    sourceCategories: Set<string>;
   };
   const byBucket = new Map<string, Bucket>();
   for (const r of codes) {
@@ -245,12 +264,10 @@ export async function listCategoryOrchestration(
       codes: new Set<string>(),
       mappedCodes: new Set<string>(),
       sources: [],
-      sourceCategories: new Set<string>(),
     };
     entry.codes.add(r.code);
     if ((r.mappedAt ?? 0) > 0) entry.mappedCodes.add(r.code);
     if (r.source) entry.sources.push(r.source);
-    if (r.category) entry.sourceCategories.add(r.category);
     byBucket.set(key, entry);
   }
 
@@ -277,15 +294,15 @@ export async function listCategoryOrchestration(
       }
     }
 
-    // "Consolidated" iff every source-category contributing codes to this
-    // bucket has at least one row in `consolidatedArticles`. Buckets whose
-    // codes carry no source-category at all (sourceCategories.size === 0)
-    // can't be evaluated and stay non-consolidated.
-    const hasConsolidatedOutput =
-      bucket.sourceCategories.size > 0 &&
-      [...bucket.sourceCategories].every((c) =>
-        consolidatedSourceCategories.has(c),
-      );
+    // "Consolidated" iff any code in the bucket is cited by a consolidation
+    // output row (newArticleSuggestions or consolidatedArticles).
+    let hasConsolidatedOutput = false;
+    for (const c of bucket.codes) {
+      if (codesWithConsolidatedOutput.has(c)) {
+        hasConsolidatedOutput = true;
+        break;
+      }
+    }
 
     out.push({
       consolidationCategory: bucket.key,
