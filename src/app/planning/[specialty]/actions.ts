@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth';
 import {
   clearArticleBacklog,
   clearUpdateBacklogRow,
+  ensureNewArticleBacklogRow,
   ensureUpdateBacklogRow,
   resetArticleBacklogStatusAsAdmin,
   setArticleBacklogAssignee,
@@ -76,6 +77,14 @@ export async function submitArticleReview(
     user?.email ?? null,
     notes,
   );
+  if (status === 'approved') {
+    await ensureNewArticleBacklogRow(
+      slug,
+      articleKey,
+      articleRecordId,
+      user?.email ?? null,
+    );
+  }
   updateTag(`specialty:${slug}`);
 }
 
@@ -179,6 +188,12 @@ export async function bulkApproveArticleReviews(
       r.articleKey,
       r.articleRecordId,
       'approved',
+      user?.email ?? null,
+    );
+    await ensureNewArticleBacklogRow(
+      slug,
+      r.articleKey,
+      r.articleRecordId,
       user?.email ?? null,
     );
   }
