@@ -567,7 +567,11 @@ function CategoryRail({
         width: 280,
         flexShrink: 0,
         borderRight: '1px solid rgb(228, 228, 234)',
-        paddingRight: 12,
+        paddingRight: 8,
+        position: 'sticky',
+        top: 16,
+        maxHeight: 'calc(100vh - 32px)',
+        overflowY: 'auto',
       }}
     >
       <Stack space="xs">
