@@ -161,6 +161,44 @@ export async function setArticleBacklogStatusAsAdmin(
 }
 
 /**
+ * Admin reset path that explicitly preserves the existing
+ * `assigneeEmail` so the article doesn't drop out of `/my-backlog`
+ * after a Reset action. The plain status setter does a partial PB
+ * update (which should preserve assignee), but several wrap-around
+ * code paths kept stripping it in practice — this helper re-asserts
+ * the assignee on the same write so PB realtime always emits a
+ * row that matches the my-backlog filter.
+ */
+export async function resetArticleBacklogStatusAsAdmin(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  status: ArticleBacklogStatus,
+  changedByEmail: string | null,
+): Promise<void> {
+  const pb = await createAdminClient();
+  // Read existing row's assignee (if any) so we can re-assert it on the
+  // same write. 404 → no prior row, leave assignee blank.
+  let assigneeEmail = '';
+  try {
+    const existing = await pb
+      .collection<ArticleBacklogRecord>('articleBacklog')
+      .getFirstListItem(`specialtySlug = "${slug}" && articleKey = "${articleKey}"`);
+    assigneeEmail = existing.assigneeEmail ?? '';
+  } catch (e) {
+    if (!(e instanceof ClientResponseError && e.status === 404)) throw e;
+  }
+  await upsertBacklog(
+    pb,
+    slug,
+    articleKey,
+    articleRecordId,
+    { status, notes: '', assigneeEmail },
+    changedByEmail,
+  );
+}
+
+/**
  * Idempotent: create an articleBacklog row of type='update' for the
  * given parent CMS article if one doesn't already exist. For update
  * rows, `articleKey` and `articleRecordId` both encode the CMS

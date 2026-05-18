@@ -6,18 +6,27 @@ import {
   clearArticleBacklog,
   clearUpdateBacklogRow,
   ensureUpdateBacklogRow,
+  resetArticleBacklogStatusAsAdmin,
   setArticleBacklogAssignee,
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
 import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
 import {
+  deleteArticleSourcesByArticleKeyAsAdmin,
   markSourceCortexRegisteredAsAdmin,
   setArticleSourceReviewAsAdmin,
   setSourcesPriorityAsAdmin,
 } from '@/lib/data/article-sources';
-import { listDraftsForArticle } from '@/lib/data/article-writing';
+import {
+  deleteWritingRunsForArticleAsAdmin,
+  listDraftsForArticle,
+} from '@/lib/data/article-writing';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
-import { addReviewComment, deleteReviewComment } from '@/lib/data/review-comments';
+import {
+  addReviewComment,
+  deleteReviewComment,
+  deleteReviewCommentsForArticleAsAdmin,
+} from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
 import {
   getConsolidatedSectionParentArticleId,
@@ -308,6 +317,41 @@ export async function setBacklogAssignee(
 
 export async function clearBacklogRow(slug: string, articleKey: string): Promise<void> {
   await clearArticleBacklog(slug, articleKey);
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Wipe every derived pipeline artifact for one article and return it
+ * to phase 1 (`waiting-for-sources`). Keeps `newArticleSuggestions` and
+ * the `consolidatedArticles` representation; preserves the backlog
+ * row's assignee so the article doesn't disappear from `/my-backlog`.
+ *
+ * Order: writing runs (cascade drafts) → sources → comments → article
+ * review → backlog status. Drafts come first so a mid-cascade failure
+ * doesn't leave orphaned children pointing at deleted parents.
+ */
+export async function resetArticle(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await deleteWritingRunsForArticleAsAdmin(slug, articleRecordId);
+  await deleteArticleSourcesByArticleKeyAsAdmin(slug, articleKey);
+  await deleteReviewCommentsForArticleAsAdmin(slug, articleKey);
+  // NOTE: do NOT clear `articleReviews` here. The specialty backlog
+  // page (`/planning/<slug>/backlog`) gates which articles appear by
+  // `articleReviews.status === 'approved'` — deleting that row drops
+  // the article out of the backlog entirely. Reset only wipes
+  // pipeline-derived state; the editorial approval that put the
+  // article into the pipeline stays.
+  await resetArticleBacklogStatusAsAdmin(
+    slug,
+    articleKey,
+    articleRecordId,
+    'waiting-for-sources',
+    user?.email ?? null,
+  );
   updateTag(`specialty:${slug}`);
 }
 

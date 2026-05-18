@@ -15,6 +15,7 @@ import type {
   ArticleWritingRunRecord,
   ReviewCommentRecord,
 } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
@@ -122,8 +123,25 @@ export function BacklogView({
   const [assigneeFilter, setAssigneeFilter] = useState<string>(
     () => params.get('assignee') ?? '',
   );
-  const [backlog, setBacklog] =
-    useState<Record<string, ArticleBacklogRecord>>(initialBacklog);
+  // Live PB subscription on `articleBacklog`. The hook seeds from the
+  // SSR snapshot (`initialBacklog`) and applies every realtime event to
+  // its internal array; we project the array back to a key-indexed map
+  // for the existing callers. PB writes from any source — this tab,
+  // another tab, async pipeline workers — flow through the same channel,
+  // so the row list always reflects current state without manual
+  // refreshes or cross-view cache tags.
+  const liveBacklogRows = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    useMemo(() => Object.values(initialBacklog), [initialBacklog]),
+    { filter: `specialtySlug = "${slug}"` },
+  );
+  const backlog = useMemo(() => {
+    const m: Record<string, ArticleBacklogRecord> = {};
+    for (const r of liveBacklogRows) {
+      if (r.articleKey) m[r.articleKey] = r;
+    }
+    return m;
+  }, [liveBacklogRows]);
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
   // Multi-select for the bulk-action toolbar. Keyed by row.id (the
@@ -182,50 +200,28 @@ export function BacklogView({
     return { published, inProgress, waiting };
   }, [rows, statusOf]);
 
+  // Optimistic state was removed when this view moved to PB realtime —
+  // the live subscription applies the server's write back to the row
+  // list within ~50–200ms, which is fast enough for an admin tool. The
+  // handlers below are now thin: write, log on failure, let realtime
+  // catch the rest.
   async function handleStatusChange(
     articleKey: string,
     articleRecordId: string,
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
-    const prev = backlog[articleKey];
     if (next === 'unassigned') {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        delete copy[articleKey];
-        return copy;
-      });
       try {
         await clearBacklogRow(slug, articleKey);
       } catch (e) {
-        setBacklog((curr) => (prev ? { ...curr, [articleKey]: prev } : curr));
         console.error('clearBacklogRow failed', e);
       }
       return;
     }
-    setBacklog((curr) => ({
-      ...curr,
-      [articleKey]: {
-        ...(curr[articleKey] ?? ({} as ArticleBacklogRecord)),
-        articleKey,
-        articleRecordId,
-        specialtySlug: slug,
-        status: next,
-        assigneeEmail: curr[articleKey]?.assigneeEmail ?? '',
-        lastChangedByEmail: viewerEmail ?? '',
-        lastChangedAt: Date.now(),
-        ...(notes !== undefined ? { notes } : {}),
-      } as ArticleBacklogRecord,
-    }));
     try {
       await setBacklogStatus(slug, articleKey, articleRecordId, next, notes);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[articleKey] = prev;
-        else delete copy[articleKey];
-        return copy;
-      });
       console.error('setBacklogStatus failed', e);
     }
   }
@@ -235,31 +231,10 @@ export function BacklogView({
     articleRecordId: string,
     nextEmail: string,
   ): Promise<void> {
-    const prev = backlog[articleKey];
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
-
-    setBacklog((curr) => ({
-      ...curr,
-      [articleKey]: {
-        ...(curr[articleKey] ?? ({} as ArticleBacklogRecord)),
-        articleKey,
-        articleRecordId,
-        specialtySlug: slug,
-        status: curr[articleKey]?.status ?? 'waiting-for-sources',
-        assigneeEmail: emailOrNull ?? '',
-        lastChangedByEmail: viewerEmail ?? '',
-        lastChangedAt: Date.now(),
-      } as ArticleBacklogRecord,
-    }));
     try {
       await setBacklogAssignee(slug, articleKey, articleRecordId, emailOrNull);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[articleKey] = prev;
-        else delete copy[articleKey];
-        return copy;
-      });
       console.error('setBacklogAssignee failed', e);
     }
   }
@@ -610,6 +585,7 @@ export function BacklogView({
             slug,
             article: managerRow,
             currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
             sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
@@ -630,6 +606,7 @@ export function BacklogView({
             article: managerRow,
             sections: managerRow.sections ?? [],
             currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,

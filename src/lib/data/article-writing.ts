@@ -257,5 +257,34 @@ export async function cancelWritingRunAsAdmin(runId: string): Promise<void> {
   });
 }
 
+/**
+ * Wipe every writing run + associated draft pass for one article.
+ * Used by the "Reset article" action. Drafts are deleted first so a
+ * mid-cascade failure leaves orphaned drafts that the retry can still
+ * find via `runId`; once a run row is gone we'd lose that handle.
+ */
+export async function deleteWritingRunsForArticleAsAdmin(
+  slug: string,
+  articleRecordId: string,
+): Promise<{ runs: number; drafts: number }> {
+  if (!articleRecordId) return { runs: 0, drafts: 0 };
+  const pb = await createAdminClient();
+  const runs = await pb
+    .collection<ArticleWritingRunRecord>('articleWritingRuns')
+    .getFullList({
+      filter: `specialtySlug = "${slug}" && articleRecordId = "${articleRecordId}"`,
+    });
+  let draftCount = 0;
+  for (const run of runs) {
+    const drafts = await pb
+      .collection<ArticleDraftRecord>('articleDrafts')
+      .getFullList({ filter: `runId = "${run.id}"` });
+    await Promise.all(drafts.map((d) => pb.collection('articleDrafts').delete(d.id)));
+    draftCount += drafts.length;
+  }
+  await Promise.all(runs.map((r) => pb.collection('articleWritingRuns').delete(r.id)));
+  return { runs: runs.length, drafts: draftCount };
+}
+
 /** Re-export so route handlers don't have to import types separately. */
 export type { ArticleWritingRunStatus };

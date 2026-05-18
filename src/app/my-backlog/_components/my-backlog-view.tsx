@@ -28,6 +28,7 @@ import type {
   ArticleSourceRecord,
   ReviewCommentRecord,
 } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 
 export type MyBacklogRow = {
   /** For type='new': PB id of the current underlying newArticleSuggestions
@@ -104,8 +105,23 @@ export function MyBacklogView({
   const [specialtyFilter, setSpecialtyFilter] = useState<string>(
     () => params.get('specialty') ?? '',
   );
-  const [backlog, setBacklog] =
-    useState<Record<string, ArticleBacklogRecord>>(initialBacklog);
+  // Live PB sub on `articleBacklog`. Filter on the current user's email
+  // so the cross-specialty view only resubscribes when the assignee
+  // changes (i.e. never within a session). Same key-indexed projection
+  // as the specialty backlog view — see `backlog-view.tsx` for the
+  // mirror.
+  const liveBacklogRows = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    useMemo(() => Object.values(initialBacklog), [initialBacklog]),
+    { filter: `assigneeEmail = "${viewerEmail}"` },
+  );
+  const backlog = useMemo(() => {
+    const m: Record<string, ArticleBacklogRecord> = {};
+    for (const r of liveBacklogRows) {
+      if (r.articleKey) m[r.articleKey] = r;
+    }
+    return m;
+  }, [liveBacklogRows]);
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
 
@@ -164,49 +180,25 @@ export function MyBacklogView({
     return { published, inProgress, waiting };
   }, [rows, statusOf]);
 
+  // Optimistic state was removed when this view moved to PB realtime —
+  // see the matching comment in `backlog-view.tsx`. Server writes, the
+  // live sub catches the change, the table re-renders.
   async function handleStatusChange(
     row: MyBacklogRow,
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
-    const prev = backlog[row.articleKey];
     if (next === 'unassigned') {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        delete copy[row.articleKey];
-        return copy;
-      });
       try {
         await clearBacklogRow(row.specialtySlug, row.articleKey);
       } catch (e) {
-        setBacklog((curr) => (prev ? { ...curr, [row.articleKey]: prev } : curr));
         console.error('clearBacklogRow failed', e);
       }
       return;
     }
-    setBacklog((curr) => ({
-      ...curr,
-      [row.articleKey]: {
-        ...(curr[row.articleKey] ?? ({} as ArticleBacklogRecord)),
-        articleKey: row.articleKey,
-        articleRecordId: row.id,
-        specialtySlug: row.specialtySlug,
-        status: next,
-        assigneeEmail: curr[row.articleKey]?.assigneeEmail ?? '',
-        lastChangedByEmail: viewerEmail,
-        lastChangedAt: Date.now(),
-        ...(notes !== undefined ? { notes } : {}),
-      } as ArticleBacklogRecord,
-    }));
     try {
       await setBacklogStatus(row.specialtySlug, row.articleKey, row.id, next, notes);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[row.articleKey] = prev;
-        else delete copy[row.articleKey];
-        return copy;
-      });
       console.error('setBacklogStatus failed', e);
     }
   }
@@ -215,31 +207,10 @@ export function MyBacklogView({
     row: MyBacklogRow,
     nextEmail: string,
   ): Promise<void> {
-    const prev = backlog[row.articleKey];
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
-
-    setBacklog((curr) => ({
-      ...curr,
-      [row.articleKey]: {
-        ...(curr[row.articleKey] ?? ({} as ArticleBacklogRecord)),
-        articleKey: row.articleKey,
-        articleRecordId: row.id,
-        specialtySlug: row.specialtySlug,
-        status: curr[row.articleKey]?.status ?? 'waiting-for-sources',
-        assigneeEmail: emailOrNull ?? '',
-        lastChangedByEmail: viewerEmail,
-        lastChangedAt: Date.now(),
-      } as ArticleBacklogRecord,
-    }));
     try {
       await setBacklogAssignee(row.specialtySlug, row.articleKey, row.id, emailOrNull);
     } catch (e) {
-      setBacklog((curr) => {
-        const copy = { ...curr };
-        if (prev) copy[row.articleKey] = prev;
-        else delete copy[row.articleKey];
-        return copy;
-      });
       console.error('setBacklogAssignee failed', e);
     }
   }
@@ -508,6 +479,7 @@ export function MyBacklogView({
             slug: managerRow.specialtySlug,
             article: managerRow,
             currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
             sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
@@ -527,6 +499,7 @@ export function MyBacklogView({
             article: managerRow,
             sections: managerRow.sections ?? [],
             currentStatus: statusOf(managerRow.articleKey),
+            currentBacklogRow: backlog[managerRow.articleKey],
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,

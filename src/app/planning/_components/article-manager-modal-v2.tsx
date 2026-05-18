@@ -19,14 +19,17 @@ import {
   useState,
 } from 'react';
 import type {
+  ArticleBacklogRecord,
   ArticleBacklogStatus,
   ArticleSourceRecord,
   PredatoryJournalRisk,
   ReviewCommentRecord,
   SourceReviewStatus,
 } from '@/lib/pb/types';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
   getLatestDraftForArticle,
+  resetArticle,
   resetArticleReview,
   resetSectionReview,
   submitArticleReview,
@@ -39,7 +42,6 @@ import type { ArticleRow } from './articles-view';
 import {
   type ArticleManagerPhase,
   PHASE_LABEL,
-  PHASE_TO_STATUS,
   STATUS_COLOR,
   STATUS_LABEL,
 } from './backlog-constants';
@@ -114,6 +116,11 @@ export type ManagerOpener =
       slug: string;
       article: BacklogRow;
       currentStatus: ArticleBacklogStatus;
+      /** Full backlog row at modal-open time. Used to seed the modal's
+       *  PB realtime subscription so the live status survives updates
+       *  from any source (other tabs, async pipelines, the editor's own
+       *  clicks). Falls back to `currentStatus` if missing. */
+      currentBacklogRow?: ArticleBacklogRecord;
       sources: ArticleSourceRecord[];
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
@@ -149,6 +156,7 @@ export type ManagerOpener =
       article: BacklogRow;
       sections: SectionRow[];
       currentStatus: ArticleBacklogStatus;
+      currentBacklogRow?: ArticleBacklogRecord;
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
       categoryLookup: CategoryLookup;
@@ -580,18 +588,54 @@ function BacklogManagerView({
   const {
     slug,
     article,
-    currentStatus,
-    sources,
+    currentStatus: openerCurrentStatus,
+    currentBacklogRow,
+    sources: openerSources,
     initialComments,
     initialNotes,
     categoryLookup,
     viewerEmail,
     onStatusChange,
   } = opener;
+  const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
   const [savingNotes, setSavingNotes] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const notesDirty = pendingNotes !== notes;
+
+  // Live PB subscriptions — the modal becomes its own source of truth.
+  // Status: seed from the parent's optimistic backlog row (if present)
+  // so the first render matches the row list. PB realtime applies every
+  // change after that — including async pipeline writes from the writer
+  // and the lit-search worker.
+  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    currentBacklogRow ? [currentBacklogRow] : [],
+    { filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"` },
+  );
+  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+
+  // Sources: same pattern. Seeded with the opener's SSR snapshot; live
+  // sub adds rows created by lit-search and applies review-status updates
+  // without a router.refresh.
+  const sources = useLiveCollection<ArticleSourceRecord>(
+    'articleSources',
+    openerSources,
+    { filter: `articleKey = "${article.articleKey}"` },
+  );
+
+  // The article's real phase, derived from the persisted status.
+  const actualPhase = phaseFromStatus(currentStatus);
+  // The phase the editor is *looking at*. Defaults to actual phase but
+  // can be dragged backwards by chip clicks (pure navigation — no PB
+  // write). When the article advances (lit-search completes, writer
+  // finishes, or the editor re-runs an earlier phase), the effect below
+  // pulls viewedPhase forward so the panel follows.
+  const [viewedPhase, setViewedPhase] = useState<ArticleManagerPhase>(actualPhase);
+  useEffect(() => {
+    setViewedPhase(actualPhase);
+  }, [actualPhase]);
 
   async function pickStatus(next: ArticleBacklogStatus) {
     // Persist any dirty notes with the same status write so the user
@@ -673,8 +717,13 @@ function BacklogManagerView({
             </Stack>
           )}
 
-          <Stepper current={currentStatus} onPick={pickStatus} />
+          <Stepper
+            actualPhase={actualPhase}
+            viewedPhase={viewedPhase}
+            onPick={setViewedPhase}
+          />
           <PhaseBody
+            phase={viewedPhase}
             status={currentStatus}
             sources={sources}
             slug={slug}
@@ -717,6 +766,75 @@ function BacklogManagerView({
             initialComments={initialComments}
             viewerEmail={viewerEmail}
           />
+
+          <div
+            style={{
+              marginTop: 8,
+              paddingTop: 16,
+              borderTop: '1px solid rgba(0, 0, 0, 0.08)',
+            }}
+          >
+            <Stack space="xs">
+              <Text size="xs" color="secondary" weight="bold">
+                Danger zone
+              </Text>
+              <Inline space="s" vAlignItems="center">
+                <button
+                  type="button"
+                  disabled={resetting}
+                  onClick={async () => {
+                    if (resetting) return;
+                    const ok = window.confirm(
+                      `Reset "${article.articleTitle ?? '(untitled)'}" to a blank slate?\n\n` +
+                        `This deletes ALL sources, comments, draft runs, ` +
+                        `and draft outputs for this article. The article ` +
+                        `stays approved and remains in your backlog at ` +
+                        `the "Search sources" phase.\n\n` +
+                        `This cannot be undone.`,
+                    );
+                    if (!ok) return;
+                    setResetting(true);
+                    try {
+                      await resetArticle(slug, article.articleKey, article.id);
+                      // Force the page's server-rendered data to refresh
+                      // so the underlying rows array picks up the new
+                      // status. The PB realtime sub on the parent backlog
+                      // map already reflects the change, but the server-
+                      // rendered `rows` (sourcesCount, etc.) needs a
+                      // re-fetch. Keep the modal open so the user sees
+                      // the article is still here, just back at phase 1
+                      // — addresses the "reset removed the article"
+                      // report.
+                      router.refresh();
+                      setResetting(false);
+                    } catch (e) {
+                      console.error('[reset-article] failed', e);
+                      setResetting(false);
+                      window.alert(
+                        `Reset failed: ${e instanceof Error ? e.message : String(e)}`,
+                      );
+                    }
+                  }}
+                  style={{
+                    background: 'white',
+                    color: 'rgb(180, 30, 30)',
+                    border: '1px solid rgb(220, 160, 160)',
+                    padding: '6px 12px',
+                    borderRadius: 4,
+                    fontSize: 13,
+                    cursor: resetting ? 'wait' : 'pointer',
+                    opacity: resetting ? 0.6 : 1,
+                  }}
+                >
+                  {resetting ? 'Resetting…' : 'Reset article'}
+                </button>
+                <Text size="xs" color="secondary">
+                  Wipes sources, comments, and drafts. Keeps the article approved and in
+                  your backlog.
+                </Text>
+              </Inline>
+            </Stack>
+          </div>
         </div>
       </div>
     </Modal>
@@ -947,9 +1065,9 @@ function SourcesTable({
   viewerEmail?: string;
   mode: 'curation' | 'priority';
 }) {
-  const router = useRouter();
   // Local order is the source of truth for the priority view so DnD
-  // feels immediate; reconciled with props on parent refresh.
+  // feels immediate; reconciled with props when the modal's live
+  // subscription emits a fresh row set.
   const [order, setOrder] = useState<string[]>(() => sources.map((s) => s.id));
   useEffect(() => {
     setOrder(sources.map((s) => s.id));
@@ -1016,11 +1134,10 @@ function SourcesTable({
     setDropId(null);
     try {
       await submitSourcesOrder(slug, next);
-      router.refresh();
     } catch (e) {
       console.error('[sources-order] submit failed', e);
     }
-  }, [dragId, dropId, order, slug, router]);
+  }, [dragId, dropId, order, slug]);
 
   if (sources.length === 0) {
     return (
@@ -1258,14 +1375,14 @@ function SourceDecisionCell({
   slug: string;
   viewerEmail?: string;
 }) {
-  const router = useRouter();
   const [status, setStatus] = useState<SourceReviewStatus | null>(
     source.reviewStatus ?? null,
   );
   const [submitting, setSubmitting] = useState(false);
 
-  // Reconcile with props when the parent refreshes (router.refresh
-  // re-renders this component with fresh server state).
+  // Reconcile with the parent's live source row — the modal subscribes
+  // to `articleSources` via useLiveCollection, so an update from another
+  // tab or a server-side flip propagates through props.
   useEffect(() => {
     setStatus(source.reviewStatus ?? null);
   }, [source.reviewStatus]);
@@ -1278,16 +1395,14 @@ function SourceDecisionCell({
       setStatus(next);
       try {
         await submitSourceReview(slug, source.id, next);
-        router.refresh();
       } catch (e) {
-        // Revert optimistic state on failure.
         setStatus(source.reviewStatus ?? null);
         console.error('[source-review] submit failed', e);
       } finally {
         setSubmitting(false);
       }
     },
-    [submitting, status, slug, source.id, source.reviewStatus, router],
+    [submitting, status, slug, source.id, source.reviewStatus],
   );
 
   const reviewerHandle = source.reviewerEmail ? source.reviewerEmail.split('@')[0] : '';
@@ -1447,14 +1562,14 @@ function DraftPreview({
 }
 
 function Stepper({
-  current,
+  actualPhase,
+  viewedPhase,
   onPick,
 }: {
-  current: ArticleBacklogStatus;
-  onPick: (next: ArticleBacklogStatus) => void;
+  actualPhase: ArticleManagerPhase;
+  viewedPhase: ArticleManagerPhase;
+  onPick: (phase: ArticleManagerPhase) => void;
 }) {
-  const currentPhase = phaseFromStatus(current);
-
   return (
     <div
       style={{
@@ -1466,9 +1581,13 @@ function Stepper({
       }}
     >
       {PHASES.map((phase) => {
-        const isCurrent = phase === currentPhase;
-        const isCompleted = phase < currentPhase;
-        const isFuture = phase > currentPhase;
+        const isCurrent = phase === actualPhase;
+        const isCompleted = phase < actualPhase;
+        const isFuture = phase > actualPhase;
+        // The viewed-but-not-current cue: a 2px amber outline on whichever
+        // past chip the user is parked on. Lets them see "I'm looking at
+        // approval, even though the article is in editing".
+        const isViewed = phase === viewedPhase && viewedPhase !== actualPhase;
         const buttonStyle: CSSProperties = {
           ...stepButtonBase,
           background: isCurrent ? 'rgb(255, 248, 230)' : 'white',
@@ -1485,6 +1604,8 @@ function Stepper({
           fontWeight: isCurrent ? 600 : 400,
           cursor: isFuture ? 'not-allowed' : 'pointer',
           opacity: isFuture ? 0.6 : 1,
+          outline: isViewed ? '2px solid rgb(217, 119, 6)' : 'none',
+          outlineOffset: isViewed ? 2 : 0,
         };
         const circleStyle: CSSProperties = {
           ...circleBase,
@@ -1501,7 +1622,7 @@ function Stepper({
             type="button"
             onClick={() => {
               if (isFuture) return;
-              onPick(PHASE_TO_STATUS[phase]);
+              onPick(phase);
             }}
             style={buttonStyle}
             aria-current={isCurrent ? 'step' : undefined}
@@ -1528,6 +1649,7 @@ const PHASE_COPY: Record<ArticleManagerPhase, string> = {
 };
 
 function PhaseBody({
+  phase,
   status,
   sources,
   slug,
@@ -1535,6 +1657,14 @@ function PhaseBody({
   viewerEmail,
   onAdvance,
 }: {
+  /** The phase the user is *viewing* — drives which panel renders. May lag
+   *  behind `status` when the editor has chip-navigated to an earlier
+   *  phase to review/redo it. */
+  phase: ArticleManagerPhase;
+  /** The article's *real* status — drives the in-panel action gates
+   *  (`canRunLitSearch`, `canDraft`). A phase-1 view of a phase-5 article
+   *  shows the copy but no run button, because the lit-search route would
+   *  no-op anyway. */
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
   slug: string;
@@ -1542,14 +1672,18 @@ function PhaseBody({
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
 }) {
-  const phase = phaseFromStatus(status);
   const copy = PHASE_COPY[phase];
 
   if (phase === 1) {
+    const litEligible = canRunLitSearch(status, sources.length);
     return (
       <Stack space="m">
-        <Text color="secondary">{copy}</Text>
-        {canRunLitSearch(status, sources.length) ? (
+        <Text color="secondary">
+          {litEligible
+            ? copy
+            : `Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
+        </Text>
+        {litEligible ? (
           <Inline space="s" vAlignItems="center">
             <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
           </Inline>
@@ -2445,7 +2579,8 @@ function BacklogUpdateView({
     slug,
     article,
     sections,
-    currentStatus,
+    currentStatus: openerCurrentStatus,
+    currentBacklogRow,
     initialComments,
     initialNotes,
     categoryLookup,
@@ -2453,15 +2588,29 @@ function BacklogUpdateView({
     onStatusChange,
   } = opener;
 
+  // Live sub mirrors the new-article modal so cross-tab / async writes
+  // keep the stepper in sync.
+  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
+    'articleBacklog',
+    currentBacklogRow ? [currentBacklogRow] : [],
+    {
+      filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
+    },
+  );
+  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
   const [savingNotes, setSavingNotes] = useState(false);
   const notesDirty = pendingNotes !== notes;
 
-  async function pickStatus(next: ArticleBacklogStatus) {
-    await onStatusChange(next, notesDirty ? pendingNotes : undefined);
-    if (notesDirty) setNotes(pendingNotes);
-  }
+  // Stepper is purely visual here (no PhaseBody) — chip clicks just park
+  // viewedPhase locally. They never flip the persisted status.
+  const actualPhase = phaseFromStatus(currentStatus);
+  const [viewedPhase, setViewedPhase] = useState<ArticleManagerPhase>(actualPhase);
+  useEffect(() => {
+    setViewedPhase(actualPhase);
+  }, [actualPhase]);
 
   async function saveNotesOnly() {
     if (!notesDirty || savingNotes) return;
@@ -2520,7 +2669,11 @@ function BacklogUpdateView({
             }
           />
 
-          <Stepper current={currentStatus} onPick={pickStatus} />
+          <Stepper
+            actualPhase={actualPhase}
+            viewedPhase={viewedPhase}
+            onPick={setViewedPhase}
+          />
 
           <Stack space="xs">
             <Text size="s" weight="bold">

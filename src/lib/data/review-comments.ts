@@ -3,7 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
-import { createServerClient } from '@/lib/pb/server';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ReviewCommentRecord, ReviewRecordKind } from '@/lib/pb/types';
 
 async function userClient(): Promise<PocketBase> {
@@ -72,4 +72,24 @@ export async function addReviewComment(
 export async function deleteReviewComment(commentId: string): Promise<void> {
   const pb = await userClient();
   await pb.collection('reviewComments').delete(commentId);
+}
+
+/**
+ * Admin-auth bulk delete of every comment attached to one article.
+ * Used by the "Reset article" action so an editor can scrub the
+ * conversation regardless of who originally authored each comment
+ * (the per-row deleteRule blocks the user-auth path for foreign
+ * authors).
+ */
+export async function deleteReviewCommentsForArticleAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<number> {
+  if (!articleKey) return 0;
+  const pb = await createAdminClient();
+  const rows = await pb.collection<ReviewCommentRecord>('reviewComments').getFullList({
+    filter: `specialtySlug = "${slug}" && recordKind = "article" && recordKey = "${articleKey}"`,
+  });
+  await Promise.all(rows.map((r) => pb.collection('reviewComments').delete(r.id)));
+  return rows.length;
 }

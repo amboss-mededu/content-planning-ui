@@ -284,3 +284,22 @@ export async function bulkInsertArticleSourcesAsAdmin(
     });
   }
 }
+
+/**
+ * Wipe every `articleSources` row for a single article. Used by the
+ * "Reset article" action to scrub the literature-search results before
+ * the editor re-runs the pipeline. Scoped by `specialtySlug` so a stale
+ * articleKey collision across specialties can't widen the blast radius.
+ */
+export async function deleteArticleSourcesByArticleKeyAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<number> {
+  if (!articleKey) return 0;
+  const pb = await createAdminClient();
+  const rows = await pb.collection<ArticleSourceRecord>('articleSources').getFullList({
+    filter: `specialtySlug = "${slug}" && articleKey = "${articleKey}"`,
+  });
+  await Promise.all(rows.map((r) => pb.collection('articleSources').delete(r.id)));
+  return rows.length;
+}
