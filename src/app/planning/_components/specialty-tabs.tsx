@@ -16,7 +16,9 @@ const TABS = [
   // Single parent for the three consolidation surfaces. Lands on the
   // review screen by default; the in-page SegmentedControl (see
   // `consolidation-view-switcher.tsx`) flips between the three.
-  { label: '1st consolidation', segment: 'consolidation-review', numbered: true },
+  // If/when a 2nd consolidation surface lands, add it as its own
+  // top-level tab labelled "2nd consolidation".
+  { label: 'Consolidation', segment: 'consolidation-review', numbered: true },
   { label: 'Backlog', segment: 'backlog', numbered: true },
 ] as const;
 
