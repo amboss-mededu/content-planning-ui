@@ -30,7 +30,7 @@ export default async function SectionsPage({
   );
 }
 
-function projectSection(r: ConsolidatedSection): SectionRow {
+function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
   const codes = extractCodes(r.codes);
   // `exists` reflects whether the section already lives in AMBOSS today.
   // True → this proposal updates the existing section; false → it's a
@@ -41,9 +41,24 @@ function projectSection(r: ConsolidatedSection): SectionRow {
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
     id: r.id,
+    // Mirror the consolidation-review projection so per-row ✓ in the
+    // article-updates modal can resolve a stable key — without this,
+    // rows reach the modal with `sectionKey: undefined` and the
+    // mutation surfaces a "missing stable key" banner.
+    sectionKey:
+      r.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        sectionName: r.sectionName,
+        sectionId: r.sectionId,
+        category: r.category,
+      }),
     articleTitle: r.articleTitle,
     articleId: r.articleId,
     sectionName: r.sectionName,
+    sectionId: r.sectionId,
     updateType,
     category: r.category,
     codes,
@@ -128,7 +143,7 @@ async function SectionsData({ slug }: { slug: string }) {
     if (!key) return false;
     return reviewRecs[key]?.status === 'approved';
   });
-  const rows = approvedSections.map(projectSection);
+  const rows = approvedSections.map((r) => projectSection(slug, r));
 
   return (
     <SectionsView

@@ -127,6 +127,30 @@ export async function deleteConsolidatedSectionsForSpecialtyAsAdmin(
   await Promise.all(rows.map((r) => pb.collection('consolidatedSections').delete(r.id)));
 }
 
+/**
+ * Delete consolidated-section rows whose category is in `categories`.
+ * Mirrors deleteConsolidatedArticlesForCategoriesAsAdmin — fetches by
+ * `specialtySlug` and filters categories client-side to avoid PB's
+ * filter-parser 400 on category strings with `;`/`:`/`,`.
+ */
+export async function deleteConsolidatedSectionsForCategoriesAsAdmin(
+  slug: string,
+  categories: string[],
+): Promise<number> {
+  if (categories.length === 0) return 0;
+  const pb = await createAdminClient();
+  const set = new Set(categories);
+  const filter = pb.filter('specialtySlug = {:slug}', { slug });
+  const rows = await pb
+    .collection<ConsolidatedSectionRecord>('consolidatedSections')
+    .getFullList({ filter });
+  const toDelete = rows.filter((r) => r.category !== undefined && set.has(r.category));
+  await Promise.all(
+    toDelete.map((r) => pb.collection('consolidatedSections').delete(r.id)),
+  );
+  return toDelete.length;
+}
+
 export async function bulkInsertConsolidatedSectionsAsAdmin(
   slug: string,
   rows: Array<Record<string, unknown>>,
