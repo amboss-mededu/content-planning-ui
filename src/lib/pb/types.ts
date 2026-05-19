@@ -415,6 +415,10 @@ export interface PipelineRunRecord extends PbRecord {
   mappingInstructions?: string;
   mappingCheckIds: boolean;
   mappingFilter?: MappingFilter;
+  /** Set on per-category re-runs so the live UI can derive which
+   *  buckets are currently rebuilding from a single `pipelineRuns`
+   *  subscription. Null/undefined on full-specialty runs. */
+  targetCategories?: string[];
   /** PocketBase relation field — string ID of the user record. */
   createdByUserId?: string;
 }

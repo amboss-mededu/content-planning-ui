@@ -30,6 +30,7 @@ import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
 import { useConsolidationRerun } from './use-consolidation-rerun';
+import { useRerunningCategories } from './use-rerunning-categories';
 
 type CategoryBucket = {
   articles: ArticleRow[];
@@ -122,10 +123,22 @@ export function ConsolidationReviewView({
   // router refresh on success.
   const {
     rerun: startConsolidation,
-    isRunning: isCategoryConsolidating,
+    isRunning: isLocalCategoryRunning,
+    lastResult: lastRerunResult,
+    dismissLastResult: dismissLastRerunResult,
     error: perCategoryError,
     dismissError: dismissPerCategoryError,
   } = useConsolidationRerun(slug);
+  // Cross-tab live signal: any pipelineRuns row with status=running and
+  // targetCategories containing this bucket. Merged with the local
+  // in-flight set so the rail badge flips instantly on click (before PB
+  // realtime delivers the create event) and lingers until the server-side
+  // row flips out of "running" status.
+  const rebuildingCategories = useRerunningCategories(slug);
+  const isCategoryConsolidating = useCallback(
+    (cat: string) => isLocalCategoryRunning(cat) || rebuildingCategories.has(cat),
+    [isLocalCategoryRunning, rebuildingCategories],
+  );
   const consolidateError = perCategoryError ?? actionError;
   const dismissConsolidateError = useCallback(() => {
     dismissPerCategoryError();
@@ -515,6 +528,8 @@ export function ConsolidationReviewView({
           isResetting={isResetting}
           consolidateError={consolidateError}
           onDismissError={dismissConsolidateError}
+          lastResult={lastRerunResult}
+          onDismissLastResult={dismissLastRerunResult}
         />
         <div style={{ minWidth: 0 }}>
           {selectedCategory && selectedBucket ? (
@@ -715,6 +730,8 @@ function CategoryRail({
   isResetting,
   consolidateError,
   onDismissError,
+  lastResult,
+  onDismissLastResult,
 }: {
   categories: string[];
   counts: Record<
@@ -733,6 +750,12 @@ function CategoryRail({
   isResetting: boolean;
   consolidateError: string | null;
   onDismissError: () => void;
+  lastResult: {
+    category: string;
+    consolidatedArticles: number;
+    consolidatedSections: number;
+  } | null;
+  onDismissLastResult: () => void;
 }) {
   const hasOutput = categories.length > 0;
   return (
@@ -767,6 +790,38 @@ function CategoryRail({
             title="Dismiss"
           >
             {consolidateError}
+          </button>
+        ) : null}
+        {lastResult ? (
+          <button
+            type="button"
+            onClick={onDismissLastResult}
+            style={{
+              textAlign: 'left',
+              padding: '6px 8px',
+              border:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? '1px solid rgb(16, 185, 129)'
+                  : '1px solid rgb(217, 119, 6)',
+              borderRadius: 4,
+              background:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? 'rgb(220, 252, 231)'
+                  : 'rgb(255, 247, 219)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? 'rgb(6, 95, 70)'
+                  : 'rgb(120, 53, 15)',
+              fontSize: 12,
+            }}
+            title="Dismiss"
+          >
+            Updated · {lastResult.consolidatedArticles} article
+            {lastResult.consolidatedArticles === 1 ? '' : 's'} ·{' '}
+            {lastResult.consolidatedSections} section
+            {lastResult.consolidatedSections === 1 ? '' : 's'}
           </button>
         ) : null}
         {hasAnyMapping ? (
@@ -850,17 +905,23 @@ function CategoryRail({
                   {cat}
                 </Text>
                 <Inline space="xxs" vAlignItems="center">
-                  {allApproved && <Badge text="all approved" color="green" />}
-                  {!allApproved && hasOutput && (
-                    <Text size="xs" color="secondary">
-                      {approved}/{c.total} approved
-                    </Text>
+                  {isConsolidating ? (
+                    <Badge text="Rebuilding…" color="yellow" />
+                  ) : (
+                    <>
+                      {allApproved && <Badge text="all approved" color="green" />}
+                      {!allApproved && hasOutput && (
+                        <Text size="xs" color="secondary">
+                          {approved}/{c.total} approved
+                        </Text>
+                      )}
+                      {mapping && !mapping.ready ? (
+                        <Text size="xs" color="secondary">
+                          {mapping.mapped}/{mapping.total} mapped
+                        </Text>
+                      ) : null}
+                    </>
                   )}
-                  {mapping && !mapping.ready ? (
-                    <Text size="xs" color="secondary">
-                      {mapping.mapped}/{mapping.total} mapped
-                    </Text>
-                  ) : null}
                 </Inline>
               </button>
               {hasOutput && mapping?.ready ? (
@@ -870,7 +931,7 @@ function CategoryRail({
                   onClick={() => onStartConsolidation(cat)}
                   disabled={isConsolidating}
                 >
-                  {isConsolidating ? 'Consolidating…' : 'Re-run consolidation'}
+                  {isConsolidating ? 'Rebuilding…' : 'Re-run consolidation'}
                 </Button>
               ) : null}
             </div>
@@ -940,6 +1001,37 @@ function CategoryDetailPane({
     bucket.articles.filter((a) => a.id && articleReviews[a.id] !== 'approved').length +
     bucket.sections.filter((s) => s.id && sectionReviews[s.id] !== 'approved').length;
 
+  if (isConsolidating) {
+    return (
+      <Stack space="m">
+        <Inline space="s" vAlignItems="center">
+          <Text size="m" weight="bold">
+            {category}
+          </Text>
+          <Badge text="Rebuilding…" color="yellow" />
+        </Inline>
+        <div
+          style={{
+            padding: 24,
+            border: '1px dashed rgb(228, 228, 234)',
+            borderRadius: 6,
+            background: 'rgb(252, 252, 254)',
+          }}
+        >
+          <Stack space="xs">
+            <Text size="s" weight="bold">
+              Rebuilding consolidation for this category…
+            </Text>
+            <Text size="xs" color="secondary">
+              Previous output has been cleared. The new rows will appear here once the run
+              finishes (usually a few seconds).
+            </Text>
+          </Stack>
+        </div>
+      </Stack>
+    );
+  }
+
   return (
     <Stack space="m">
       <Inline space="s" vAlignItems="center">
@@ -957,7 +1049,7 @@ function CategoryDetailPane({
           onClick={() => onStartConsolidation(category)}
           disabled={isConsolidating}
         >
-          {isConsolidating ? 'Consolidating…' : 'Re-run consolidation'}
+          {isConsolidating ? 'Rebuilding…' : 'Re-run consolidation'}
         </Button>
       </Inline>
 

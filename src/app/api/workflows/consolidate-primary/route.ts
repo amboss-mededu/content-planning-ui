@@ -80,7 +80,10 @@ export async function POST(req: NextRequest) {
 
   const chain = body.chainSecondaries === true;
 
-  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
+  const { id: runId } = await createPipelineRun({
+    specialtySlug: slug,
+    targetCategories: categories,
+  });
   await initPipelineStage({ runId, stage: 'consolidate_primary' });
   if (chain) {
     // Pre-init the secondary stage rows so their workflow's markStageRunning
@@ -89,26 +92,42 @@ export async function POST(req: NextRequest) {
     await initPipelineStage({ runId, stage: 'consolidate_sections' });
   }
 
+  let result: {
+    stagingArticles: number;
+    stagingSections: number;
+    consolidatedArticles: number;
+    consolidatedSections: number;
+  } | null = null;
   if (chain) {
     // Synchronous chain: stubs are fast (no LLM calls today), and the
     // review page needs the final tables populated before we respond so
     // a router.refresh() on the client picks up the new rows. Switch to
     // fire-and-forget if a future LLM-backed runner makes this too slow.
     try {
-      await consolidatePrimaryWorkflow({ runId, specialtySlug: slug, categories });
+      const primaryStats = await consolidatePrimaryWorkflow({
+        runId,
+        specialtySlug: slug,
+        categories,
+      });
       // Forward `categories` so the secondaries' wipe-and-replace is
       // scoped to the same buckets — otherwise a single-category re-run
       // wipes every other category's consolidated output.
-      await consolidateArticlesSecondaryWorkflow({
+      const articlesStats = await consolidateArticlesSecondaryWorkflow({
         runId,
         specialtySlug: slug,
         categories,
       });
-      await consolidateSectionsSecondaryWorkflow({
+      const sectionsStats = await consolidateSectionsSecondaryWorkflow({
         runId,
         specialtySlug: slug,
         categories,
       });
+      result = {
+        stagingArticles: primaryStats.stagingArticles,
+        stagingSections: primaryStats.stagingSections,
+        consolidatedArticles: articlesStats.merged,
+        consolidatedSections: sectionsStats.merged,
+      };
     } catch (e) {
       console.error('[consolidate-primary] chained workflow failed', e);
       // The runners themselves already marked their stage failed and
@@ -134,6 +153,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     runId,
     specialty: slug,
+    result,
     categories: categories ?? null,
     mappedCodes: mapped.length,
     chained: chain,

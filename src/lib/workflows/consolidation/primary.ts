@@ -51,6 +51,15 @@ export type ConsolidatePrimaryInput = {
   categories?: string[] | null;
 };
 
+export type ConsolidatePrimaryStats = {
+  /** Source categories actually visited (each had ≥1 mapped code). */
+  categoriesProcessed: string[];
+  /** Rows written to `newArticleSuggestions`. */
+  stagingArticles: number;
+  /** Rows written to `articleUpdateSuggestions`. */
+  stagingSections: number;
+};
+
 function shouldAbort(status: string | null): boolean {
   return status === 'cancelled' || status === 'failed' || status === null;
 }
@@ -102,7 +111,7 @@ async function clearStagingForCategories(
 
 export async function consolidatePrimaryWorkflow(
   input: ConsolidatePrimaryInput,
-): Promise<void> {
+): Promise<ConsolidatePrimaryStats> {
   console.log('[pipeline] consolidatePrimaryWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
@@ -161,7 +170,11 @@ export async function consolidatePrimaryWorkflow(
           level: 'info',
           message: `Cancelled mid-run before category "${category}" (observed status=${status ?? 'missing'}).`,
         }).catch(() => {});
-        return;
+        return {
+          categoriesProcessed,
+          stagingArticles: totalArticles,
+          stagingSections: totalSections,
+        };
       }
 
       const newArticles = aggregateNewArticles(catCodes, category);
@@ -196,6 +209,11 @@ export async function consolidatePrimaryWorkflow(
     });
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
+    return {
+      categoriesProcessed,
+      stagingArticles: totalArticles,
+      stagingSections: totalSections,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[pipeline] consolidatePrimaryWorkflow failed', msg);
