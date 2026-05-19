@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
+import { computeSectionKey } from '@/lib/data/article-keys';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
@@ -108,7 +109,26 @@ async function SectionsData({ slug }: { slug: string }) {
     if (r.notes) initialNotesBySection[id] = r.notes;
   }
 
-  const rows = sectionRecs.map(projectSection);
+  // Only approved sections reach the article-updates surface.
+  // Approval happens on /consolidation-review; until that flips,
+  // the row shouldn't be visible here. Match the same fallback
+  // section-key computation the consolidation-review page uses
+  // (article title / id + section name / id + category).
+  const approvedSections = sectionRecs.filter((r) => {
+    const key =
+      r.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: r.articleTitle,
+        articleId: r.articleId,
+        sectionName: r.sectionName,
+        sectionId: r.sectionId,
+        category: r.category,
+      });
+    if (!key) return false;
+    return reviewRecs[key]?.status === 'approved';
+  });
+  const rows = approvedSections.map(projectSection);
 
   return (
     <SectionsView
