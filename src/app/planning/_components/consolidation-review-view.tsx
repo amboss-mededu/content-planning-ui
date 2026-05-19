@@ -12,6 +12,8 @@ import {
 } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
+  bulkApproveAndBacklogArticleReviews,
+  bulkApproveAndBacklogSectionReviews,
   bulkApproveArticleReviews,
   bulkApproveSectionReviews,
   bulkUnapproveArticleReviews,
@@ -275,6 +277,50 @@ export function ConsolidationReviewView({
     [slug, viewerEmail],
   );
 
+  const approveAndBacklogArticles = useCallback(
+    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      const now = Date.now();
+      setArticleReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) next[p.articleRecordId] = 'approved';
+        return next;
+      });
+      setArticleReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs)
+          next[p.articleRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        return next;
+      });
+      startTransition(async () => {
+        await bulkApproveAndBacklogArticleReviews(slug, pairs);
+      });
+    },
+    [slug, viewerEmail],
+  );
+
+  const approveAndBacklogSections = useCallback(
+    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      const now = Date.now();
+      setSectionReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) next[p.sectionRecordId] = 'approved';
+        return next;
+      });
+      setSectionReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs)
+          next[p.sectionRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
+        return next;
+      });
+      startTransition(async () => {
+        await bulkApproveAndBacklogSectionReviews(slug, pairs);
+      });
+    },
+    [slug, viewerEmail],
+  );
+
   const unapproveArticles = useCallback(
     (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
       if (pairs.length === 0) return;
@@ -532,6 +578,40 @@ export function ConsolidationReviewView({
                     sectionRecordId: s.id as string,
                   }));
                 approveSections(pairs);
+                setSelectedSectionIds(new Set());
+              }}
+              onApproveAndBacklogSelectedArticles={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.articles
+                  .filter(
+                    (a) =>
+                      a.id &&
+                      a.articleKey &&
+                      selectedArticleIds.has(a.id) &&
+                      articleReviews[a.id] !== 'approved',
+                  )
+                  .map((a) => ({
+                    articleKey: a.articleKey as string,
+                    articleRecordId: a.id as string,
+                  }));
+                approveAndBacklogArticles(pairs);
+                setSelectedArticleIds(new Set());
+              }}
+              onApproveAndBacklogSelectedSections={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.sections
+                  .filter(
+                    (s) =>
+                      s.id &&
+                      s.sectionKey &&
+                      selectedSectionIds.has(s.id) &&
+                      sectionReviews[s.id] !== 'approved',
+                  )
+                  .map((s) => ({
+                    sectionKey: s.sectionKey as string,
+                    sectionRecordId: s.id as string,
+                  }));
+                approveAndBacklogSections(pairs);
                 setSelectedSectionIds(new Set());
               }}
               onUnapproveSelectedArticles={() => {
@@ -853,6 +933,8 @@ function CategoryDetailPane({
   categoryLookup,
   onApproveSelectedArticles,
   onApproveSelectedSections,
+  onApproveAndBacklogSelectedArticles,
+  onApproveAndBacklogSelectedSections,
   onUnapproveSelectedArticles,
   onUnapproveSelectedSections,
   onUnapproveArticle,
@@ -876,6 +958,8 @@ function CategoryDetailPane({
   categoryLookup: CategoryLookup;
   onApproveSelectedArticles: () => void;
   onApproveSelectedSections: () => void;
+  onApproveAndBacklogSelectedArticles: () => void;
+  onApproveAndBacklogSelectedSections: () => void;
   onUnapproveSelectedArticles: () => void;
   onUnapproveSelectedSections: () => void;
   onUnapproveArticle: (id: string) => void;
@@ -934,6 +1018,7 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickArticle}
         onApproveSelected={onApproveSelectedArticles}
+        onApproveAndBacklogSelected={onApproveAndBacklogSelectedArticles}
         onUnapproveSelected={onUnapproveSelectedArticles}
         onUnapproveRow={onUnapproveArticle}
         categoryLookup={categoryLookup}
@@ -962,6 +1047,7 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickSection}
         onApproveSelected={onApproveSelectedSections}
+        onApproveAndBacklogSelected={onApproveAndBacklogSelectedSections}
         onUnapproveSelected={onUnapproveSelectedSections}
         onUnapproveRow={onUnapproveSection}
         categoryLookup={categoryLookup}
@@ -1029,6 +1115,7 @@ function ArticleSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onApproveAndBacklogSelected,
   onUnapproveSelected,
   onUnapproveRow,
   categoryLookup,
@@ -1040,6 +1127,7 @@ function ArticleSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onApproveAndBacklogSelected: () => void;
   onUnapproveSelected: () => void;
   onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
@@ -1051,6 +1139,9 @@ function ArticleSubTable({
   const selectedApprovedCount = Array.from(selectedIds).filter(
     (id) => reviews[id] === 'approved',
   ).length;
+  const selectedUnapprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] !== 'approved',
+  ).length;
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -1060,9 +1151,16 @@ function ArticleSubTable({
         <Button
           variant="secondary"
           onClick={onApproveSelected}
-          disabled={selectedIds.size === 0}
+          disabled={selectedUnapprovedCount === 0}
         >
-          {`Send to suggested new articles (${selectedIds.size})`}
+          {`Send to new articles (${selectedUnapprovedCount})`}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={onApproveAndBacklogSelected}
+          disabled={selectedUnapprovedCount === 0}
+        >
+          {`Send to backlog (${selectedUnapprovedCount})`}
         </Button>
         <Button
           variant="tertiary"
@@ -1165,6 +1263,7 @@ function SectionSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onApproveAndBacklogSelected,
   onUnapproveSelected,
   onUnapproveRow,
   categoryLookup,
@@ -1176,6 +1275,7 @@ function SectionSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onApproveAndBacklogSelected: () => void;
   onUnapproveSelected: () => void;
   onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
@@ -1186,6 +1286,9 @@ function SectionSubTable({
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
   const selectedApprovedCount = Array.from(selectedIds).filter(
     (id) => reviews[id] === 'approved',
+  ).length;
+  const selectedUnapprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] !== 'approved',
   ).length;
   // Band by parent-article title so all sections under one article
   // share a tint; the band flips on every article transition. Rows
@@ -1214,9 +1317,16 @@ function SectionSubTable({
         <Button
           variant="secondary"
           onClick={onApproveSelected}
-          disabled={selectedIds.size === 0}
+          disabled={selectedUnapprovedCount === 0}
         >
-          {`Send to article updates (${selectedIds.size})`}
+          {`Send to article updates (${selectedUnapprovedCount})`}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={onApproveAndBacklogSelected}
+          disabled={selectedUnapprovedCount === 0}
+        >
+          {`Send to backlog (${selectedUnapprovedCount})`}
         </Button>
         <Button
           variant="tertiary"
@@ -1243,8 +1353,8 @@ function SectionSubTable({
                   disabled={unapprovedRows.length === 0}
                 />
               </th>
-              <th style={thStyle}>Section</th>
               <th style={thStyle}>Parent article</th>
+              <th style={thStyle}>Section</th>
               <th style={thStyle}>Update type</th>
               <th style={thStyle}>Codes</th>
               <th style={thStyle}># Codes</th>
@@ -1288,10 +1398,10 @@ function SectionSubTable({
                     />
                   </td>
                   <td style={tdStyle}>
-                    <Text size="s">{r.sectionName ?? '—'}</Text>
+                    <Text size="s">{r.articleTitle ?? '—'}</Text>
                   </td>
                   <td style={tdStyle}>
-                    <Text size="s">{r.articleTitle ?? '—'}</Text>
+                    <Text size="s">{r.sectionName ?? '—'}</Text>
                   </td>
                   <td style={tdStyle}>
                     <Badge text={updateLabel} color={updateColor} />

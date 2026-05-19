@@ -25,7 +25,7 @@ export function ConsolidationViewSwitcher({ slug }: { slug: string }) {
 
   return (
     <SegmentedControl
-      label="1st consolidation view"
+      label="Consolidation view"
       isLabelHidden
       value={value}
       onChange={(v) => {

@@ -69,6 +69,9 @@ export async function submitArticleReview(
   notes?: string,
 ): Promise<void> {
   const user = await getCurrentUser();
+  // Approve only. Backlog creation is an explicit, separate action
+  // (see `bulkApproveAndBacklogArticleReviews`); approving here makes
+  // the row visible on /articles but doesn't queue it.
   await setArticleReview(
     slug,
     articleKey,
@@ -77,14 +80,6 @@ export async function submitArticleReview(
     user?.email ?? null,
     notes,
   );
-  if (status === 'approved') {
-    await ensureNewArticleBacklogRow(
-      slug,
-      articleKey,
-      articleRecordId,
-      user?.email ?? null,
-    );
-  }
   updateTag(`specialty:${slug}`);
 }
 
@@ -190,6 +185,30 @@ export async function bulkApproveArticleReviews(
       'approved',
       user?.email ?? null,
     );
+  }
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Approve + queue: a single click that approves the rows AND creates
+ * the corresponding `articleBacklog` row (`type='new'`). For when the
+ * editor knows the items are queue-ready and wants to skip the extra
+ * "Send to backlog" step on the suggested-articles view.
+ */
+export async function bulkApproveAndBacklogArticleReviews(
+  slug: string,
+  rows: Array<{ articleKey: string; articleRecordId: string }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const user = await getCurrentUser();
+  for (const r of rows) {
+    await setArticleReview(
+      slug,
+      r.articleKey,
+      r.articleRecordId,
+      'approved',
+      user?.email ?? null,
+    );
     await ensureNewArticleBacklogRow(
       slug,
       r.articleKey,
@@ -208,6 +227,8 @@ export async function submitSectionReview(
   notes?: string,
 ): Promise<void> {
   const user = await getCurrentUser();
+  // Approve only. Backlog creation for the parent article is handled
+  // explicitly by `bulkApproveAndBacklogSectionReviews`.
   await setSectionReview(
     slug,
     sectionKey,
@@ -216,21 +237,34 @@ export async function submitSectionReview(
     user?.email ?? null,
     notes,
   );
-  if (status === 'approved') {
-    const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
-    if (parentArticleId) {
-      await ensureUpdateBacklogRow(slug, parentArticleId, user?.email ?? null);
-    }
+  updateTag(`specialty:${slug}`);
+}
+
+export async function bulkApproveSectionReviews(
+  slug: string,
+  rows: Array<{ sectionKey: string; sectionRecordId: string }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const user = await getCurrentUser();
+  for (const r of rows) {
+    await setSectionReview(
+      slug,
+      r.sectionKey,
+      r.sectionRecordId,
+      'approved',
+      user?.email ?? null,
+    );
   }
   updateTag(`specialty:${slug}`);
 }
 
 /**
- * Bulk-approve a batch of consolidatedSections rows. Each approval also
- * triggers `ensureUpdateBacklogRow` for the section's parent article,
- * matching the single-row `submitSectionReview` semantics.
+ * Approve + queue for sections. For each row: approve, then ensure a
+ * `type='update'` `articleBacklog` row exists for the parent article
+ * (the section's `parentArticleId`). One backlog row covers all
+ * approved sections under the same parent.
  */
-export async function bulkApproveSectionReviews(
+export async function bulkApproveAndBacklogSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
 ): Promise<void> {
