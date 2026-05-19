@@ -51,7 +51,12 @@ export async function setConsolidationCategoryReview(
   notes?: string,
 ): Promise<void> {
   const pb = await userClient();
-  const filter = `specialtySlug = "${slug}" && category = "${category}"`;
+  // Parameterize: category values can contain `;`, `:`, `,`, all of which
+  // confuse PB's filter parser when interpolated as a literal string.
+  const filter = pb.filter('specialtySlug = {:slug} && category = {:cat}', {
+    slug,
+    cat: category,
+  });
 
   if (status === null) {
     try {

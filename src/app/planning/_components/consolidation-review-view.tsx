@@ -29,6 +29,7 @@ import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
+import { useConsolidationRerun } from './use-consolidation-rerun';
 
 type CategoryBucket = {
   articles: ArticleRow[];
@@ -113,12 +114,23 @@ export function ConsolidationReviewView({
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalOpener>(null);
   const [_pending, startTransition] = useTransition();
-  // Categories whose consolidation request is in flight. Drives the rail
-  // button's "Starting…" label so consecutive clicks don't fan out runs.
-  const [consolidatingSet, setConsolidatingSet] = useState<Set<string>>(new Set());
   const [isRunningAll, setIsRunningAll] = useState(false);
-  const [consolidateError, setConsolidateError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const router = useRouter();
+  // Per-category rerun is shared with the Category modal via this hook —
+  // both surfaces honor the same in-flight set, confirm dialog, and
+  // router refresh on success.
+  const {
+    rerun: startConsolidation,
+    isRunning: isCategoryConsolidating,
+    error: perCategoryError,
+    dismissError: dismissPerCategoryError,
+  } = useConsolidationRerun(slug);
+  const consolidateError = perCategoryError ?? actionError;
+  const dismissConsolidateError = useCallback(() => {
+    dismissPerCategoryError();
+    setActionError(null);
+  }, [dismissPerCategoryError]);
 
   // Group rows by category. Both 1st-pass collections carry a `category`
   // string; rows missing one bucket under "(uncategorized)" so they're
@@ -406,7 +418,7 @@ export function ConsolidationReviewView({
     ) {
       return;
     }
-    setConsolidateError(null);
+    setActionError(null);
     setIsRunningAll(true);
     try {
       const res = await fetch('/api/workflows/consolidate-primary', {
@@ -419,65 +431,16 @@ export function ConsolidationReviewView({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setConsolidateError(body?.error ?? `HTTP ${res.status} starting consolidation`);
+        setActionError(body?.error ?? `HTTP ${res.status} starting consolidation`);
         return;
       }
       router.refresh();
     } catch (e) {
-      setConsolidateError(e instanceof Error ? e.message : String(e));
+      setActionError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsRunningAll(false);
     }
   }, [slug, router, isRunningAll]);
-
-  // ----- Per-category consolidation trigger -----
-  const startConsolidation = useCallback(
-    async (category: string) => {
-      if (consolidatingSet.has(category)) return;
-      if (
-        typeof window !== 'undefined' &&
-        !window.confirm(
-          `Re-run consolidation for "${category}"? This will erase the current consolidation output for this category.`,
-        )
-      ) {
-        return;
-      }
-      setConsolidateError(null);
-      setConsolidatingSet((prev) => {
-        const next = new Set(prev);
-        next.add(category);
-        return next;
-      });
-      try {
-        const res = await fetch('/api/workflows/consolidate-primary', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            specialtySlug: slug,
-            categories: [category],
-            chainSecondaries: true,
-          }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setConsolidateError(
-            body?.error ?? `HTTP ${res.status} starting consolidation for ${category}`,
-          );
-          return;
-        }
-        router.refresh();
-      } catch (e) {
-        setConsolidateError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setConsolidatingSet((prev) => {
-          const next = new Set(prev);
-          next.delete(category);
-          return next;
-        });
-      }
-    },
-    [slug, router, consolidatingSet],
-  );
 
   // ----- Reset approvals -----
   const [isResetting, setIsResetting] = useState(false);
@@ -491,7 +454,7 @@ export function ConsolidationReviewView({
     ) {
       return;
     }
-    setConsolidateError(null);
+    setActionError(null);
     setIsResetting(true);
     try {
       const res = await fetch('/api/workflows/reset-approvals', {
@@ -501,12 +464,12 @@ export function ConsolidationReviewView({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setConsolidateError(body?.error ?? `HTTP ${res.status} resetting approvals`);
+        setActionError(body?.error ?? `HTTP ${res.status} resetting approvals`);
         return;
       }
       router.refresh();
     } catch (e) {
-      setConsolidateError(e instanceof Error ? e.message : String(e));
+      setActionError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsResetting(false);
     }
@@ -540,14 +503,14 @@ export function ConsolidationReviewView({
           hasAnyMapping={hasAnyMapping}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
-          consolidatingSet={consolidatingSet}
+          isCategoryConsolidating={isCategoryConsolidating}
           onStartConsolidation={startConsolidation}
           isRunningAll={isRunningAll}
           onStartConsolidationAll={startConsolidationAll}
           onResetApprovals={resetApprovals}
           isResetting={isResetting}
           consolidateError={consolidateError}
-          onDismissError={() => setConsolidateError(null)}
+          onDismissError={dismissConsolidateError}
         />
         <div style={{ minWidth: 0 }}>
           {selectedCategory && selectedBucket ? (
@@ -657,21 +620,17 @@ export function ConsolidationReviewView({
                 if (!selectedBucket) return;
                 const a = selectedBucket.articles.find((x) => x.id === id);
                 if (!a?.id || !a.articleKey) return;
-                unapproveArticles([
-                  { articleKey: a.articleKey, articleRecordId: a.id },
-                ]);
+                unapproveArticles([{ articleKey: a.articleKey, articleRecordId: a.id }]);
               }}
               onUnapproveSection={(id) => {
                 if (!selectedBucket) return;
                 const s = selectedBucket.sections.find((x) => x.id === id);
                 if (!s?.id || !s.sectionKey) return;
-                unapproveSections([
-                  { sectionKey: s.sectionKey, sectionRecordId: s.id },
-                ]);
+                unapproveSections([{ sectionKey: s.sectionKey, sectionRecordId: s.id }]);
               }}
               onApproveAll={approveAllInCategory}
               onStartConsolidation={startConsolidation}
-              isConsolidating={consolidatingSet.has(selectedCategory)}
+              isConsolidating={isCategoryConsolidating(selectedCategory)}
               onRowClickArticle={(id) => setModal({ kind: 'article', startAtId: id })}
               onRowClickSection={(id) => setModal({ kind: 'section', startAtId: id })}
             />
@@ -744,7 +703,7 @@ function CategoryRail({
   hasAnyMapping,
   selectedCategory,
   onSelect,
-  consolidatingSet,
+  isCategoryConsolidating,
   onStartConsolidation,
   isRunningAll,
   onStartConsolidationAll,
@@ -762,7 +721,7 @@ function CategoryRail({
   hasAnyMapping: boolean;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
-  consolidatingSet: Set<string>;
+  isCategoryConsolidating: (cat: string) => boolean;
   onStartConsolidation: (cat: string) => void;
   isRunningAll: boolean;
   onStartConsolidationAll: () => void;
@@ -858,7 +817,7 @@ function CategoryRail({
             width: '100%',
           };
           const mapping = mappingByCategory[cat];
-          const isConsolidating = consolidatingSet.has(cat);
+          const isConsolidating = isCategoryConsolidating(cat);
           const hasOutput = c.total > 0;
           // Two siblings inside a plain non-interactive container:
           //   1) the category-select button (label + status badges)
@@ -887,9 +846,7 @@ function CategoryRail({
                   {cat}
                 </Text>
                 <Inline space="xxs" vAlignItems="center">
-                  {allApproved && (
-                    <Badge text="all approved" color="green" />
-                  )}
+                  {allApproved && <Badge text="all approved" color="green" />}
                   {!allApproved && hasOutput && (
                     <Text size="xs" color="secondary">
                       {approved}/{c.total} approved

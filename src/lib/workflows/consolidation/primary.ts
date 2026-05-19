@@ -83,26 +83,21 @@ async function clearStagingForCategories(
 ): Promise<number> {
   if (categories.length === 0) return 0;
   const pb = await createAdminClient();
-  // Use parametrized filters via pb.filter — manual `"${value}"` interpolation
-  // breaks when a category name contains `;` or `,` (PB's filter parser treats
-  // them as separators even inside double quotes). Pattern mirrors
-  // src/lib/data/pipeline.ts:159.
-  const params: Record<string, string> = { slug };
-  const orClauses = categories
-    .map((c, i) => {
-      params[`c${i}`] = c;
-      return `category = {:c${i}}`;
-    })
-    .join(' || ');
-  const filter = pb.filter(
-    `specialtySlug = {:slug} && (${orClauses})`,
-    params,
-  );
+  // Filter only by `specialtySlug` server-side and match `category`
+  // client-side. PocketBase's filter parser rejects 400 on category
+  // values that mix `;`, `:`, and `,` (e.g. `"I.B Clinical Sciences:
+  // Anesthesia Procedures, Methods, and Techniques; I.B.5 …"`) even
+  // when passed through `pb.filter()` parameterization — those values
+  // still surface as separators in the server-side parse. The extra
+  // in-memory pass is bounded by a single specialty's staging rows.
+  const set = new Set(categories);
+  const filter = pb.filter('specialtySlug = {:slug}', { slug });
   const rows = await pb
     .collection<ArticleSuggestionRecord>(collection)
     .getFullList({ filter });
-  await Promise.all(rows.map((r) => pb.collection(collection).delete(r.id)));
-  return rows.length;
+  const toDelete = rows.filter((r) => r.category !== undefined && set.has(r.category));
+  await Promise.all(toDelete.map((r) => pb.collection(collection).delete(r.id)));
+  return toDelete.length;
 }
 
 export async function consolidatePrimaryWorkflow(
