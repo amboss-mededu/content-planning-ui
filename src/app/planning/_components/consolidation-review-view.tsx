@@ -759,7 +759,7 @@ function CategoryDetailPane({
 
       <Inline space="xs" vAlignItems="center">
         <Button variant="primary" onClick={onApproveAll} disabled={unapprovedCount === 0}>
-          {`Send all to backlog (${unapprovedCount})`}
+          {`Approve all (${unapprovedCount})`}
         </Button>
         {flagged ? (
           <Button variant="tertiary" onClick={() => onToggleFlag(false)}>
