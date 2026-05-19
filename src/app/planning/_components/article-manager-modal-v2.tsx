@@ -28,6 +28,8 @@ import type {
 } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
+  bulkApproveAndBacklogArticleReviews,
+  bulkApproveAndBacklogSectionReviews,
   getLatestDraftForArticle,
   resetArticle,
   resetArticleReview,
@@ -290,6 +292,8 @@ function ReviewManagerView({
       else if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'a' || e.key === 'A' || e.key === 'y' || e.key === 'Y') {
         decide('approved');
+      } else if (e.key === 'b' || e.key === 'B') {
+        decideAndBacklog();
       } else if (e.key === 'r' || e.key === 'R' || e.key === 'n' || e.key === 'N') {
         decide('rejected');
       } else if (e.key === 'Escape') onClose();
@@ -328,6 +332,41 @@ function ReviewManagerView({
       await submitArticleReview(slug, articleKey, rowId, status, notesValue);
     } catch (err) {
       console.error('submitArticleReview failed', err);
+      const revertedReviews = { ...reviews };
+      const revertedReviewers = { ...reviewers };
+      delete revertedReviews[rowId];
+      delete revertedReviewers[rowId];
+      setReviews(revertedReviews);
+      setReviewers(revertedReviewers);
+      onReviewsChange(revertedReviews);
+      onReviewersChange(revertedReviewers);
+    } finally {
+      setSubmitting(false);
+      if (index < total - 1) goNext();
+    }
+  }
+
+  async function decideAndBacklog() {
+    if (!current) return;
+    const rowId = current.id;
+    const articleKey = current.articleKey ?? '';
+    if (!articleKey) return;
+    setSubmitting(true);
+    const next: ReviewMap = { ...reviews, [rowId]: 'approved' };
+    const nextReviewers: ReviewerMap = {
+      ...reviewers,
+      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+    };
+    setReviews(next);
+    setReviewers(nextReviewers);
+    onReviewsChange(next);
+    onReviewersChange(nextReviewers);
+    try {
+      await bulkApproveAndBacklogArticleReviews(slug, [
+        { articleKey, articleRecordId: rowId },
+      ]);
+    } catch (err) {
+      console.error('bulkApproveAndBacklogArticleReviews failed', err);
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
       delete revertedReviews[rowId];
@@ -563,6 +602,13 @@ function ReviewManagerView({
             disabled={submitting}
           >
             Approve (A)
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => decideAndBacklog()}
+            disabled={submitting}
+          >
+            Approve to backlog (B)
           </Button>
         </div>
       </div>
@@ -1946,6 +1992,8 @@ function UpdateReviewView({
       else if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'a' || e.key === 'A' || e.key === 'y' || e.key === 'Y') {
         decide('approved');
+      } else if (e.key === 'b' || e.key === 'B') {
+        decideAndBacklog();
       } else if (e.key === 'r' || e.key === 'R' || e.key === 'n' || e.key === 'N') {
         decide('rejected');
       } else if (e.key === 'Escape') onClose();
@@ -2009,6 +2057,48 @@ function UpdateReviewView({
     }
   }
 
+  /**
+   * Approve + create the parent article's `articleBacklog` row (`type='update'`)
+   * in one click. Mirrors `setRowStatus('approved', ...)` plus the
+   * backlog ensure step — used by the "Approve to backlog" button in
+   * the update review modal so editors don't have to bounce to the
+   * consolidation-review screen to queue the article.
+   */
+  async function setRowStatusAndBacklog(rowId: string) {
+    const sectionKey = sectionKeyOf(rowId);
+    if (!sectionKey) {
+      console.error('setRowStatusAndBacklog: row has no sectionKey');
+      return;
+    }
+    setSubmitting(true);
+    const next: ReviewMap = { ...reviews, [rowId]: 'approved' };
+    const nextReviewers: ReviewerMap = {
+      ...reviewers,
+      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+    };
+    setReviews(next);
+    setReviewers(nextReviewers);
+    onReviewsChange(next);
+    onReviewersChange(nextReviewers);
+    try {
+      await bulkApproveAndBacklogSectionReviews(slug, [
+        { sectionKey, sectionRecordId: rowId },
+      ]);
+    } catch (err) {
+      console.error('bulkApproveAndBacklogSectionReviews failed', err);
+      const revertedReviews = { ...reviews };
+      const revertedReviewers = { ...reviewers };
+      delete revertedReviews[rowId];
+      delete revertedReviewers[rowId];
+      setReviews(revertedReviews);
+      setReviewers(revertedReviewers);
+      onReviewsChange(revertedReviews);
+      onReviewersChange(revertedReviewers);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function clearRowStatus(rowId: string) {
     const sectionKey = sectionKeyOf(rowId);
     if (!sectionKey) return;
@@ -2044,6 +2134,12 @@ function UpdateReviewView({
     const rowId = current.id;
     const notesValue = notesById[rowId] ?? '';
     await setRowStatus(rowId, status, notesValue);
+    if (index < total - 1) goNext();
+  }
+
+  async function decideAndBacklog() {
+    if (!current) return;
+    await setRowStatusAndBacklog(current.id);
     if (index < total - 1) goNext();
   }
 
@@ -2301,6 +2397,13 @@ function UpdateReviewView({
                 disabled={submitting}
               >
                 Approve (A)
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => decideAndBacklog()}
+                disabled={submitting}
+              >
+                Approve to backlog (B)
               </Button>
             </>
           ) : (
