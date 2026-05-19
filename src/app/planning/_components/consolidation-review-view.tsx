@@ -333,9 +333,13 @@ export function ConsolidationReviewView({
       });
       startTransition(async () => {
         await bulkApproveAndBacklogSectionReviews(slug, pairs);
+        // Re-render server surfaces (my-backlog, specialty backlog) so
+        // their `articleBacklog` reads pick up the new `type='update'`
+        // row created by the server action.
+        router.refresh();
       });
     },
-    [slug, viewerEmail],
+    [slug, viewerEmail, router],
   );
 
   const unapproveArticles = useCallback(

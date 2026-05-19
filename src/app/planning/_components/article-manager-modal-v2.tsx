@@ -1915,6 +1915,7 @@ function UpdateReviewView({
     onReviewersChange,
   } = opener;
 
+  const router = useRouter();
   const sorted = useMemo(() => sortSectionsForReview(sections), [sections]);
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
@@ -1929,6 +1930,7 @@ function UpdateReviewView({
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;
   });
   const [submitting, setSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'section' | 'article'>(
     initialViewMode ?? 'section',
   );
@@ -2027,9 +2029,13 @@ function UpdateReviewView({
   async function setRowStatus(rowId: string, status: ReviewStatus, notes?: string) {
     const sectionKey = sectionKeyOf(rowId);
     if (!sectionKey) {
-      console.error('setRowStatus: row has no sectionKey — cannot persist review');
+      // Surface as a UI banner — silently bailing here is what made the
+      // per-row ✓/✗ appear broken when a section row landed without a
+      // computed sectionKey (older fixture data or a partial re-run).
+      setReviewError("Couldn't approve: section is missing its stable key.");
       return;
     }
+    setReviewError(null);
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: status };
     const nextReviewers: ReviewerMap = {
@@ -2042,8 +2048,12 @@ function UpdateReviewView({
     onReviewersChange(nextReviewers);
     try {
       await submitSectionReview(slug, sectionKey, rowId, status, notes);
+      // Server-rendered surfaces (my-backlog, specialty backlog,
+      // consolidation review) read sectionReviews on the server, so
+      // they need an explicit refresh to reflect the new approval.
+      router.refresh();
     } catch (err) {
-      console.error('submitSectionReview failed', err);
+      setReviewError(err instanceof Error ? err.message : String(err));
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
       delete revertedReviews[rowId];
@@ -2067,9 +2077,10 @@ function UpdateReviewView({
   async function setRowStatusAndBacklog(rowId: string) {
     const sectionKey = sectionKeyOf(rowId);
     if (!sectionKey) {
-      console.error('setRowStatusAndBacklog: row has no sectionKey');
+      setReviewError("Couldn't approve to backlog: section is missing its stable key.");
       return;
     }
+    setReviewError(null);
     setSubmitting(true);
     const next: ReviewMap = { ...reviews, [rowId]: 'approved' };
     const nextReviewers: ReviewerMap = {
@@ -2084,8 +2095,9 @@ function UpdateReviewView({
       await bulkApproveAndBacklogSectionReviews(slug, [
         { sectionKey, sectionRecordId: rowId },
       ]);
+      router.refresh();
     } catch (err) {
-      console.error('bulkApproveAndBacklogSectionReviews failed', err);
+      setReviewError(err instanceof Error ? err.message : String(err));
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
       delete revertedReviews[rowId];
@@ -2102,6 +2114,7 @@ function UpdateReviewView({
   async function clearRowStatus(rowId: string) {
     const sectionKey = sectionKeyOf(rowId);
     if (!sectionKey) return;
+    setReviewError(null);
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
@@ -2113,8 +2126,9 @@ function UpdateReviewView({
     onReviewersChange(nextReviewers);
     try {
       await resetSectionReview(slug, sectionKey, rowId);
+      router.refresh();
     } catch (err) {
-      console.error('resetSectionReview failed', err);
+      setReviewError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -2230,6 +2244,27 @@ function UpdateReviewView({
               ]}
             />
           </Inline>
+
+          {reviewError ? (
+            <button
+              type="button"
+              onClick={() => setReviewError(null)}
+              style={{
+                textAlign: 'left',
+                padding: '6px 8px',
+                border: '1px solid rgb(220, 38, 38)',
+                borderRadius: 4,
+                background: 'rgb(254, 226, 226)',
+                cursor: 'pointer',
+                font: 'inherit',
+                color: 'rgb(127, 29, 29)',
+                fontSize: 12,
+              }}
+              title="Dismiss"
+            >
+              {reviewError}
+            </button>
+          ) : null}
 
           {viewMode === 'section' ? (
             <>
