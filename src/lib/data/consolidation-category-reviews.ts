@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
-import { createServerClient } from '@/lib/pb/server';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   ConsolidationCategoryReviewRecord,
   ConsolidationCategoryReviewStatus,
@@ -87,4 +87,21 @@ export async function setConsolidationCategoryReview(
     }
     throw e;
   }
+}
+
+/**
+ * Wipe every `consolidationCategoryReviews` row for a specialty. Used
+ * by the specialty-level reset path. The collection isn't written to
+ * from the UI anymore (since pt 2), but historical rows can linger.
+ */
+export async function deleteConsolidationCategoryReviewsForSpecialtyAsAdmin(
+  slug: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<ConsolidationCategoryReviewRecord>('consolidationCategoryReviews')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(
+    rows.map((r) => pb.collection('consolidationCategoryReviews').delete(r.id)),
+  );
 }

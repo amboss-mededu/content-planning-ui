@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
-import { createServerClient } from '@/lib/pb/server';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleReviewStatus, SectionReviewRecord } from '@/lib/pb/types';
 
 async function userClient(): Promise<PocketBase> {
@@ -89,4 +89,18 @@ export async function clearSectionReview(
     if (e instanceof ClientResponseError && e.status === 404) return;
     throw e;
   }
+}
+
+/**
+ * Wipe every `sectionReviews` row for a specialty. Used by the
+ * specialty-level reset path.
+ */
+export async function deleteSectionReviewsForSpecialtyAsAdmin(
+  slug: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<SectionReviewRecord>('sectionReviews')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(rows.map((r) => pb.collection('sectionReviews').delete(r.id)));
 }
