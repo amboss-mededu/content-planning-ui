@@ -44,6 +44,7 @@ export type PipelineRunRow = {
   mappingInstructions: string | null;
   mappingCheckIds: boolean;
   mappingFilter: MappingFilterRef | null;
+  targetCategories: string[] | null;
 };
 
 export type PipelineStageRow = {
@@ -112,6 +113,7 @@ function toRun(r: PipelineRunRecord): PipelineRunRow {
     mappingInstructions: r.mappingInstructions ?? null,
     mappingCheckIds: r.mappingCheckIds,
     mappingFilter: r.mappingFilter ?? null,
+    targetCategories: r.targetCategories ?? null,
   };
 }
 
@@ -420,6 +422,10 @@ export async function createPipelineRun(args: {
   specialtySlug: string;
   workflowRunId?: string;
   createdByUserId?: string;
+  /** Per-category re-run scope — written to `pipelineRuns.targetCategories`
+   *  so live subscribers can derive which buckets are rebuilding. Omit
+   *  for full-specialty runs. */
+  targetCategories?: string[] | null;
 }): Promise<{ id: string }> {
   const pb = await userClient();
   const now = Date.now();
@@ -431,6 +437,7 @@ export async function createPipelineRun(args: {
     updatedAt: now,
     mappingCheckIds: true,
     createdByUserId: args.createdByUserId,
+    targetCategories: args.targetCategories ?? undefined,
   });
   return { id: created.id };
 }
