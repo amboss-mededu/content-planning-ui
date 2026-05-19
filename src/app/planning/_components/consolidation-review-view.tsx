@@ -379,6 +379,39 @@ export function ConsolidationReviewView({
     [slug, router, consolidatingSet],
   );
 
+  // ----- Reset approvals -----
+  const [isResetting, setIsResetting] = useState(false);
+  const resetApprovals = useCallback(async () => {
+    if (isResetting) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Reset approvals for this specialty? This removes all approvals, backlog assignments, sources, and writing drafts. The mapping and 1st consolidation are preserved.',
+      )
+    ) {
+      return;
+    }
+    setConsolidateError(null);
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/workflows/reset-approvals', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ specialtySlug: slug }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsolidateError(body?.error ?? `HTTP ${res.status} resetting approvals`);
+        return;
+      }
+      router.refresh();
+    } catch (e) {
+      setConsolidateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsResetting(false);
+    }
+  }, [slug, router, isResetting]);
+
   // ----- Modal close -----
   const closeModal = useCallback(() => setModal(null), []);
 
@@ -410,6 +443,8 @@ export function ConsolidationReviewView({
           onStartConsolidation={startConsolidation}
           isRunningAll={isRunningAll}
           onStartConsolidationAll={startConsolidationAll}
+          onResetApprovals={resetApprovals}
+          isResetting={isResetting}
           consolidateError={consolidateError}
           onDismissError={() => setConsolidateError(null)}
         />
@@ -528,6 +563,8 @@ function CategoryRail({
   onStartConsolidation,
   isRunningAll,
   onStartConsolidationAll,
+  onResetApprovals,
+  isResetting,
   consolidateError,
   onDismissError,
 }: {
@@ -544,6 +581,8 @@ function CategoryRail({
   onStartConsolidation: (cat: string) => void;
   isRunningAll: boolean;
   onStartConsolidationAll: () => void;
+  onResetApprovals: () => void;
+  isResetting: boolean;
   consolidateError: string | null;
   onDismissError: () => void;
 }) {
@@ -594,6 +633,16 @@ function CategoryRail({
               : hasOutput
                 ? 'Re-run all consolidation'
                 : 'Run consolidation for all categories'}
+          </Button>
+        ) : null}
+        {hasOutput ? (
+          <Button
+            variant="tertiary"
+            fullWidth
+            onClick={onResetApprovals}
+            disabled={isResetting}
+          >
+            {isResetting ? 'Resetting…' : 'Reset approvals'}
           </Button>
         ) : null}
         {categories.length === 0 && (
