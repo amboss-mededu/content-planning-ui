@@ -5,14 +5,14 @@ import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
 import { listLatestWritingRunsForArticles } from '@/lib/data/article-writing';
-import { listNewArticleSuggestions } from '@/lib/data/articles';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import { listAssignableUsers } from '@/lib/data/users';
 import type { ArticleBacklogRecord, ArticleSourceRecord } from '@/lib/pb/types';
-import type { ConsolidatedSection, NewArticleSuggestion } from '@/lib/types';
+import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
 import { type BacklogRow, BacklogView } from '../../_components/backlog-view';
 import {
   type CategoryLookup,
@@ -36,14 +36,16 @@ export default async function BacklogPage({
 }
 
 /**
- * Project a `newArticleSuggestions` row (the 2nd-pass deduped output —
- * what the consolidation-review surface approves) into a backlog row.
- * Both surfaces read this same collection so the review→backlog flow
- * lives in one ID space, joined by `articleKey`.
+ * Project a `consolidatedArticles` row (the 1st-consolidation output
+ * the editor approves on the consolidation-review screen) into a
+ * backlog row. The review-pass and the backlog read the same
+ * collection so the approve→backlog flow lives in one ID space,
+ * joined by `articleKey` (with the `category` fed into the fallback
+ * key formula since 1st-pass rows carry a category).
  */
 function projectNewArticle(
   slug: string,
-  r: NewArticleSuggestion,
+  r: ConsolidatedArticle,
   sourcesByKey: Record<string, ArticleSourceRecord[]>,
 ): BacklogRow {
   const articleKey =
@@ -52,6 +54,7 @@ function projectNewArticle(
       specialtySlug: slug,
       articleTitle: r.articleTitle,
       articleId: r.articleId,
+      category: r.category,
     });
   const sources = sourcesByKey[articleKey] ?? [];
   return {
@@ -123,7 +126,7 @@ async function BacklogData({ slug }: { slug: string }) {
     user,
     writingRunsByArticle,
   ] = await Promise.all([
-    listNewArticleSuggestions(slug),
+    listConsolidatedArticles(slug),
     listArticleReviews(slug),
     listConsolidatedSections(slug),
     listSectionReviews(slug),
@@ -139,11 +142,10 @@ async function BacklogData({ slug }: { slug: string }) {
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
-  // type='new' rows: every newArticleSuggestions (2nd-pass deduped
-  // output) whose review is approved. Both the review-pass and the
-  // backlog read this collection — articleReviews.articleKey resolves
-  // directly against newArticleSuggestions.articleKey, no cross-
-  // collection join needed.
+  // type='new' rows: every consolidatedArticles row (1st-consolidation
+  // output) whose review is approved. Joined by `articleKey` against
+  // articleReviews — the consolidation-review screen approves into
+  // the same key space.
   const newRows: BacklogRow[] = [];
   for (const r of articleRecs) {
     const key =
@@ -152,6 +154,7 @@ async function BacklogData({ slug }: { slug: string }) {
         specialtySlug: slug,
         articleTitle: r.articleTitle,
         articleId: r.articleId,
+        category: r.category,
       });
     if (!key) continue;
     if (reviewRecs[key]?.status !== 'approved') continue;
