@@ -19,6 +19,7 @@ import {
 } from './article-manager-modal-v2';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
+import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { type Column, DataTable } from './data-table';
 
 /**
@@ -505,6 +506,7 @@ export function SectionsView({
 
   return (
     <Stack space="m">
+      <ConsolidationViewSwitcher slug={slug} />
       <Inline space="s" vAlignItems="bottom">
         <SegmentedControl
           label="Grouping"
