@@ -197,6 +197,7 @@ function buildColumns(categoryLookup: CategoryLookup): Column<SectionRow>[] {
 
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 /**
  * One row per parent article, aggregating its section update suggestions.
@@ -465,8 +466,41 @@ export function SectionsView({
   const filtered = useMemo(() => {
     let out = rows;
     if (article) out = out.filter((r) => r.articleTitle === article);
+    // Stable-sort by parent article title so the per-article zebra
+    // bands below render as contiguous groups. Falls back to the
+    // original index for sections within the same article.
+    out = [...out]
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => {
+        const ta = a.r.articleTitle ?? '';
+        const tb = b.r.articleTitle ?? '';
+        if (ta < tb) return -1;
+        if (ta > tb) return 1;
+        return a.i - b.i;
+      })
+      .map(({ r }) => r);
     return out;
   }, [rows, article]);
+
+  // Map each row to a 0/1 band based on its parent article title — the
+  // band flips on every article transition in the sorted `filtered`
+  // list so editors can spot all sections under one article as a
+  // single visual cluster.
+  const bandByRowId = useMemo(() => {
+    const out = new Map<string, 0 | 1>();
+    let band: 0 | 1 = 0;
+    let lastTitle: string | null = null;
+    for (const r of filtered) {
+      if (!r.id) continue;
+      const title = r.articleTitle ?? '';
+      if (lastTitle !== null && title !== lastTitle) {
+        band = band === 0 ? 1 : 0;
+      }
+      out.set(r.id, band);
+      lastTitle = title;
+    }
+    return out;
+  }, [filtered]);
 
   // Aggregate the *filtered* sections so the article view honours the
   // toolbar filters — e.g. filtering to "new" shows only articles that
@@ -501,7 +535,7 @@ export function SectionsView({
     const s = reviews[r.id];
     if (s === 'approved') return { background: APPROVED_TINT };
     if (s === 'rejected') return { background: REJECTED_TINT };
-    return undefined;
+    return bandByRowId.get(r.id) === 1 ? { background: ZEBRA_TINT } : undefined;
   };
 
   return (
