@@ -2137,64 +2137,64 @@ function Header<T>({
 function PlainBody<T>(props: BodyProps<T>) {
   const { rows, columns, getRowKey, widths } = props;
   return (
-    <div
-      style={{
-        // Both axes scroll inside the wrapper; combined with `position: sticky`
-        // below this anchors the table region right under the 104px fixed nav,
-        // so the sticky <th> inside ends up pinned to the top of the window.
-        overflow: 'auto',
-        maxHeight: 'calc(100vh - 120px)',
-        border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
-        borderRadius: 6,
-        position: 'sticky',
-        top: 104,
-        // Pin the wrapper to the parent's available width. Without this,
-        // a sticky element with overflow:auto can compute an intrinsic
-        // width that doesn't match its parent in some browsers — the
-        // first column clips left or the horizontal scrollbar stops
-        // appearing.
-        width: '100%',
-      }}
-    >
-      <table
+    // Outer: `position: sticky` only — pins the table region right under
+    // the 104px fixed nav as the page scrolls. NO overflow here.
+    // Inner: takes the scroll role with `overflow: auto`. Splitting the
+    // two responsibilities is intentional — combining sticky + overflow
+    // on one element produced layout glitches in some browsers (first
+    // column clipped, no horizontal scrollbar).
+    <div style={{ position: 'sticky', top: 104, width: '100%' }}>
+      <div
         style={{
-          borderCollapse: 'collapse',
-          fontSize: 14,
-          // Fixed layout makes <col>/<th> widths binding instead of advisory,
-          // so drag-to-resize actually shrinks/grows the column. With auto
-          // layout the browser re-distributes width based on content min-size,
-          // which silently undoes the resize.
-          tableLayout: 'fixed',
-          // `max-content` so the table is exactly the sum of its column
-          // widths — combined with `min-width: 100%` it still fills the
-          // container when the columns are narrower, and the parent's
-          // overflow-x scrolls when they're wider. Using `width: 100%` here
-          // would make the browser scale column widths down to fit, which
-          // collapses small columns and overlaps headers.
-          width: 'max-content',
-          minWidth: '100%',
+          overflow: 'auto',
+          maxHeight: 'calc(100vh - 120px)',
+          border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
+          borderRadius: 6,
+          width: '100%',
         }}
       >
-        <ColGroup columns={columns} widths={widths} />
-        <Header {...props} />
-        <tbody>
-          {rows.map((row, i) => {
-            const style = props.getRowStyle?.(row, i);
-            const rowStyle = props.onRowClick
-              ? { ...(style ?? {}), cursor: 'pointer' as const }
-              : style;
-            return (
-              <tr
-                key={getRowKey(row, i)}
-                style={rowStyle}
-                onClick={props.onRowClick ? () => props.onRowClick?.(row, i) : undefined}
-              >
-                <TableCells row={row} columns={columns} rowIndex={i} />
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+        <table
+          style={{
+            borderCollapse: 'collapse',
+            fontSize: 14,
+            // Fixed layout makes <col>/<th> widths binding instead of advisory,
+            // so drag-to-resize actually shrinks/grows the column. With auto
+            // layout the browser re-distributes width based on content min-size,
+            // which silently undoes the resize.
+            tableLayout: 'fixed',
+            // `max-content` so the table is exactly the sum of its column
+            // widths — combined with `min-width: 100%` it still fills the
+            // container when the columns are narrower, and the parent's
+            // overflow-x scrolls when they're wider. Using `width: 100%` here
+            // would make the browser scale column widths down to fit, which
+            // collapses small columns and overlaps headers.
+            width: 'max-content',
+            minWidth: '100%',
+          }}
+        >
+          <ColGroup columns={columns} widths={widths} />
+          <Header {...props} />
+          <tbody>
+            {rows.map((row, i) => {
+              const style = props.getRowStyle?.(row, i);
+              const rowStyle = props.onRowClick
+                ? { ...(style ?? {}), cursor: 'pointer' as const }
+                : style;
+              return (
+                <tr
+                  key={getRowKey(row, i)}
+                  style={rowStyle}
+                  onClick={
+                    props.onRowClick ? () => props.onRowClick?.(row, i) : undefined
+                  }
+                >
+                  <TableCells row={row} columns={columns} rowIndex={i} />
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2226,85 +2226,87 @@ function VirtualizedBody<T>(props: BodyProps<T>) {
   const naturalHeight = virtualizer.getTotalSize() + VIRTUALIZED_HEADER_PX;
 
   return (
-    <div
-      ref={parentRef}
-      style={{
-        // `contain: strict` (below) implies `contain: size`, which tells the
-        // browser to derive the box's height from layout rules alone — child
-        // intrinsic size is ignored. With only `maxHeight` set, that
-        // collapses the scroll container to 0 effective height, the
-        // virtualizer measures clientHeight=0, and zero rows render. Pinning
-        // an explicit `height` (via min()) keeps the containment bound while
-        // still letting short lists size to content.
-        height: `min(${naturalHeight}px, calc(100vh - 120px))`,
-        overflow: 'auto',
-        border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
-        borderRadius: 6,
-        contain: 'strict',
-        position: 'sticky',
-        top: 104,
-        // Without explicit width, `contain: size` + `position: sticky`
-        // can leave the wrapper smaller than its parent's available
-        // width in some browsers — first columns get clipped left and
-        // the horizontal scrollbar disappears. Pin to 100% so the
-        // wrapper always fills the parent.
-        width: '100%',
-      }}
-    >
-      <table
+    // Outer: `position: sticky` only — pins the table region under the
+    // 104px fixed nav as the page scrolls. NO overflow / contain here.
+    // Inner: takes the scroll role + `contain: strict` for the
+    // virtualizer's height measurement. Splitting the responsibilities
+    // is intentional — combining sticky + overflow + contain on one
+    // element produced layout glitches where the first column clipped
+    // and the horizontal scrollbar didn't appear.
+    <div style={{ position: 'sticky', top: 104, width: '100%' }}>
+      <div
+        ref={parentRef}
         style={{
-          borderCollapse: 'collapse',
-          fontSize: 14,
-          // Fixed layout makes <col>/<th> widths binding instead of advisory,
-          // so drag-to-resize actually shrinks/grows the column. With auto
-          // layout the browser re-distributes width based on content min-size,
-          // which silently undoes the resize.
-          tableLayout: 'fixed',
-          // `max-content` so the table is exactly the sum of its column
-          // widths — combined with `min-width: 100%` it still fills the
-          // container when the columns are narrower, and the parent's
-          // overflow-x scrolls when they're wider. Using `width: 100%` here
-          // would make the browser scale column widths down to fit, which
-          // collapses small columns and overlaps headers.
-          width: 'max-content',
-          minWidth: '100%',
+          // `contain: strict` (below) implies `contain: size`, which tells the
+          // browser to derive the box's height from layout rules alone — child
+          // intrinsic size is ignored. With only `maxHeight` set, that
+          // collapses the scroll container to 0 effective height, the
+          // virtualizer measures clientHeight=0, and zero rows render. Pinning
+          // an explicit `height` (via min()) keeps the containment bound while
+          // still letting short lists size to content.
+          height: `min(${naturalHeight}px, calc(100vh - 120px))`,
+          overflow: 'auto',
+          border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.1))',
+          borderRadius: 6,
+          contain: 'strict',
+          width: '100%',
         }}
       >
-        <ColGroup columns={columns} widths={widths} />
-        <Header {...props} />
-        <tbody>
-          {paddingTop > 0 ? (
-            <tr style={{ height: paddingTop }}>
-              <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
-            </tr>
-          ) : null}
-          {items.map((vi) => {
-            const row = rows[vi.index];
-            const style = props.getRowStyle?.(row, vi.index);
-            const rowStyle = props.onRowClick
-              ? { ...(style ?? {}), cursor: 'pointer' as const }
-              : style;
-            return (
-              <tr
-                key={getRowKey(row, vi.index)}
-                data-index={vi.index}
-                ref={virtualizer.measureElement}
-                style={rowStyle}
-                onClick={
-                  props.onRowClick ? () => props.onRowClick?.(row, vi.index) : undefined
-                }
-              >
-                <TableCells row={row} columns={columns} rowIndex={vi.index} />
+        <table
+          style={{
+            borderCollapse: 'collapse',
+            fontSize: 14,
+            // Fixed layout makes <col>/<th> widths binding instead of advisory,
+            // so drag-to-resize actually shrinks/grows the column. With auto
+            // layout the browser re-distributes width based on content min-size,
+            // which silently undoes the resize.
+            tableLayout: 'fixed',
+            // `max-content` so the table is exactly the sum of its column
+            // widths — combined with `min-width: 100%` it still fills the
+            // container when the columns are narrower, and the parent's
+            // overflow-x scrolls when they're wider. Using `width: 100%` here
+            // would make the browser scale column widths down to fit, which
+            // collapses small columns and overlaps headers.
+            width: 'max-content',
+            minWidth: '100%',
+          }}
+        >
+          <ColGroup columns={columns} widths={widths} />
+          <Header {...props} />
+          <tbody>
+            {paddingTop > 0 ? (
+              <tr style={{ height: paddingTop }}>
+                <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
               </tr>
-            );
-          })}
-          {paddingBottom > 0 ? (
-            <tr style={{ height: paddingBottom }}>
-              <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+            ) : null}
+            {items.map((vi) => {
+              const row = rows[vi.index];
+              const style = props.getRowStyle?.(row, vi.index);
+              const rowStyle = props.onRowClick
+                ? { ...(style ?? {}), cursor: 'pointer' as const }
+                : style;
+              return (
+                <tr
+                  key={getRowKey(row, vi.index)}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  style={rowStyle}
+                  onClick={
+                    props.onRowClick ? () => props.onRowClick?.(row, vi.index) : undefined
+                  }
+                >
+                  <TableCells row={row} columns={columns} rowIndex={vi.index} />
+                </tr>
+              );
+            })}
+            {paddingBottom > 0 ? (
+              <tr style={{ height: paddingBottom }}>
+                <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
