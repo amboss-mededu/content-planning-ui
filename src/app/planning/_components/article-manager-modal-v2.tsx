@@ -2754,8 +2754,12 @@ function ApprovedSectionsTable({
           </tr>
         </thead>
         <tbody>
-          {sections.map((s) => (
-            <tr key={s.id ?? s.sectionName}>
+          {sections.map((s, i) => (
+            // Stable key precedence: sectionKey is content-derived so it
+            // varies even when two sections share `sectionName`. Falls back
+            // to PB id, then array index — never to sectionName, which is
+            // not unique (e.g. two articles with a "Diagnosis" section).
+            <tr key={s.sectionKey ?? s.id ?? `row-${i}`}>
               <td style={sectionCellStyle}>{s.sectionName ?? '—'}</td>
               <td style={sectionCellStyle}>
                 {s.updateType === 'new' ? (
