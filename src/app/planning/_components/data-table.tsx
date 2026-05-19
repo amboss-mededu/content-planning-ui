@@ -271,14 +271,24 @@ export function DataTable<T>({
       return next;
     });
 
-  // Persisted-state plumbing. `hydrated` flips to true after the load effect
-  // runs so the save effect doesn't immediately overwrite stored state with
-  // the empty defaults. Sets are serialized as arrays for JSON storage.
-  const hydrated = useRef(false);
+  // Persisted-state plumbing. `hydrated` flips to true after the load
+  // effect runs. State (not a ref) so the persist effect re-runs with
+  // the loaded values — a ref version had a race where the persist
+  // effect's first run used the closure's still-empty initial state
+  // and overwrote the saved widths/filters with `{}` on every remount.
+  const [hydrated, setHydrated] = useState(false);
+  // Derived-state reset: if storageKey changes (e.g. /sections toggling
+  // between section and article view), reset `hydrated` SYNCHRONOUSLY
+  // during render so the persist effect doesn't fire one tick with the
+  // old state values keyed under the new storageKey.
+  const lastStorageKey = useRef<string | undefined>(storageKey);
+  if (lastStorageKey.current !== storageKey) {
+    lastStorageKey.current = storageKey;
+    setHydrated(false);
+  }
   useEffect(() => {
-    hydrated.current = false;
     if (!storageKey || typeof window === 'undefined') {
-      hydrated.current = true;
+      setHydrated(true);
       return;
     }
     try {
@@ -315,11 +325,11 @@ export function DataTable<T>({
     } catch {
       // Corrupted entry — fall back to defaults silently rather than crashing.
     }
-    hydrated.current = true;
+    setHydrated(true);
   }, [storageKey]);
 
   useEffect(() => {
-    if (!storageKey || !hydrated.current || typeof window === 'undefined') return;
+    if (!storageKey || !hydrated || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(
         storageKey,
@@ -337,7 +347,16 @@ export function DataTable<T>({
       // QuotaExceeded or storage disabled — non-fatal; user just loses
       // persistence for this session.
     }
-  }, [storageKey, sort, numFilters, stringFilters, textFilters, hidden, widths]);
+  }, [
+    storageKey,
+    hydrated,
+    sort,
+    numFilters,
+    stringFilters,
+    textFilters,
+    hidden,
+    widths,
+  ]);
 
   const filteredRows = useMemo(() => {
     const numEntries = Object.entries(numFilters).filter(
@@ -2129,6 +2148,12 @@ function PlainBody<T>(props: BodyProps<T>) {
         borderRadius: 6,
         position: 'sticky',
         top: 104,
+        // Pin the wrapper to the parent's available width. Without this,
+        // a sticky element with overflow:auto can compute an intrinsic
+        // width that doesn't match its parent in some browsers — the
+        // first column clips left or the horizontal scrollbar stops
+        // appearing.
+        width: '100%',
       }}
     >
       <table
@@ -2218,6 +2243,12 @@ function VirtualizedBody<T>(props: BodyProps<T>) {
         contain: 'strict',
         position: 'sticky',
         top: 104,
+        // Without explicit width, `contain: size` + `position: sticky`
+        // can leave the wrapper smaller than its parent's available
+        // width in some browsers — first columns get clipped left and
+        // the horizontal scrollbar disappears. Pin to 100% so the
+        // wrapper always fills the parent.
+        width: '100%',
       }}
     >
       <table
