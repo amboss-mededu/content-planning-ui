@@ -95,6 +95,7 @@ function PreviousTitlesCell({
 
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 function buildColumns(
   categoryLookup: CategoryLookup,
@@ -270,13 +271,15 @@ export function ArticlesView({
   // pass to whatever's currently filtered.
   const [visibleRows, setVisibleRows] = useState<ArticleRow[]>([]);
 
-  // Tint applies to rows that have a recorded review status.
-  const getRowStyle = (r: ArticleRow) => {
-    if (!r.id) return undefined;
-    const s = reviews[r.id];
-    if (s === 'approved') return { background: APPROVED_TINT };
-    if (s === 'rejected') return { background: REJECTED_TINT };
-    return undefined;
+  // Approval tints take precedence; otherwise stripe by row index so
+  // the table reads as bands instead of an undifferentiated grid.
+  const getRowStyle = (r: ArticleRow, i: number) => {
+    if (r.id) {
+      const s = reviews[r.id];
+      if (s === 'approved') return { background: APPROVED_TINT };
+      if (s === 'rejected') return { background: REJECTED_TINT };
+    }
+    return i % 2 === 1 ? { background: ZEBRA_TINT } : undefined;
   };
 
   const activeRows = consolidated;

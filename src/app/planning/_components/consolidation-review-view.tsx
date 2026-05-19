@@ -39,6 +39,7 @@ const UNCATEGORIZED = '(uncategorized)';
 // approval state reads identically across screens.
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 type ModalOpener =
   | { kind: 'article'; startAtId: string }
@@ -1097,12 +1098,13 @@ function ArticleSubTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {rows.map((r, i) => {
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[rowId];
+              const tint = rowTint(status);
               const rowStyle: CSSProperties = {
-                ...rowTint(status),
+                ...(tint ?? (i % 2 === 1 ? { background: ZEBRA_TINT } : undefined)),
                 cursor: 'pointer',
               };
               return (
@@ -1185,6 +1187,24 @@ function SectionSubTable({
   const selectedApprovedCount = Array.from(selectedIds).filter(
     (id) => reviews[id] === 'approved',
   ).length;
+  // Band by parent-article title so all sections under one article
+  // share a tint; the band flips on every article transition. Rows
+  // are scoped per-category here, so sections sharing a title sit
+  // together naturally.
+  const bandByRowId = new Map<string, 0 | 1>();
+  {
+    let band: 0 | 1 = 0;
+    let lastTitle: string | null = null;
+    for (const r of rows) {
+      if (!r.id) continue;
+      const title = r.articleTitle ?? '';
+      if (lastTitle !== null && title !== lastTitle) {
+        band = band === 0 ? 1 : 0;
+      }
+      bandByRowId.set(r.id, band);
+      lastTitle = title;
+    }
+  }
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -1238,8 +1258,10 @@ function SectionSubTable({
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[rowId];
+              const tint = rowTint(status);
+              const band = bandByRowId.get(rowId);
               const rowStyle: CSSProperties = {
-                ...rowTint(status),
+                ...(tint ?? (band === 1 ? { background: ZEBRA_TINT } : undefined)),
                 cursor: 'pointer',
               };
               const updateLabel =
