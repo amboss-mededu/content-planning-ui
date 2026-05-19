@@ -192,6 +192,7 @@ export function DataTable<T>({
   leadingNote,
   countAddendum,
   storageKey,
+  leftActions,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -227,6 +228,11 @@ export function DataTable<T>({
    *  Without it the table behaves the same as before: state is in-memory
    *  only and resets on navigation. */
   storageKey?: string;
+  /** Optional content rendered at the left edge of the toolbar action
+   *  row (before the Columns / Reset sort / Clear filters buttons).
+   *  Callers use this to inject view-toggle buttons or other table-
+   *  scoped controls without duplicating the toolbar layout. */
+  leftActions?: ReactNode;
 }) {
   const [sort, setSort] = useState<SortState>(null);
   const [numFilters, setNumFilters] = useState<Record<string, NumericFilter | null>>({});
@@ -564,6 +570,7 @@ export function DataTable<T>({
           );
         })()}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {leftActions}
           <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleHidden} />
           <Button
             variant="tertiary"
