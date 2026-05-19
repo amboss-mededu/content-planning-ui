@@ -302,35 +302,35 @@ export function ArticlesView({
 
   return (
     <Stack space="xl">
-      <ConsolidationViewSwitcher slug={slug} />
-      <Stack space="m">
-        <Inline space="s" vAlignItems="bottom">
+      <Inline space="s" vAlignItems="center">
+        <ConsolidationViewSwitcher slug={slug} />
+        <Button
+          variant="primary"
+          onClick={() => {
+            setReviewArticles(visibleRows);
+            setReviewStartAtId(undefined);
+            setReviewOpen(true);
+          }}
+          disabled={visibleRows.length === 0}
+        >
+          {visibleRows.length === activeRows.length || activeRows.length === 0
+            ? 'Start review'
+            : `Review ${visibleRows.length.toLocaleString()} filtered`}
+        </Button>
+        {visibleRows.length !== activeRows.length && activeRows.length > 0 && (
           <Button
-            variant="primary"
+            variant="tertiary"
             onClick={() => {
-              setReviewArticles(visibleRows);
+              setReviewArticles(activeRows);
               setReviewStartAtId(undefined);
               setReviewOpen(true);
             }}
-            disabled={visibleRows.length === 0}
           >
-            {visibleRows.length === activeRows.length || activeRows.length === 0
-              ? 'Start review'
-              : `Review ${visibleRows.length.toLocaleString()} filtered`}
+            Review all {activeRows.length.toLocaleString()}
           </Button>
-          {visibleRows.length !== activeRows.length && activeRows.length > 0 && (
-            <Button
-              variant="tertiary"
-              onClick={() => {
-                setReviewArticles(activeRows);
-                setReviewStartAtId(undefined);
-                setReviewOpen(true);
-              }}
-            >
-              Review all {activeRows.length.toLocaleString()}
-            </Button>
-          )}
-        </Inline>
+        )}
+      </Inline>
+      <Stack space="m">
         <DataTable
           rows={activeRows}
           columns={columns}
