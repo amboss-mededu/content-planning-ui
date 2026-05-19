@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { getBrowserClient } from '@/lib/pb/browser';
 import type { PipelineRunRecord } from '@/lib/pb/types';
 
+// Maximum age of a `status='running'` row that we'll still treat as
+// in-flight. Anything older is a stale row from a crashed/aborted run
+// whose terminal status never landed — without this guard the UI's
+// "Rebuilding…" placeholder would hide every consolidation forever
+// after one bad run. Sized at 10 minutes: well over the chained stubs'
+// actual runtime (seconds) and over the worst-case LLM run we expect.
+const RUNNING_RECENCY_MS = 10 * 60 * 1000;
+
 /**
  * Live view of which categories currently have an in-flight per-category
  * re-run, derived from running `pipelineRuns` rows whose `targetCategories`
@@ -76,7 +84,11 @@ export function useRerunningCategories(slug: string): Set<string> {
 
   return useMemo(() => {
     const out = new Set<string>();
+    const cutoff = Date.now() - RUNNING_RECENCY_MS;
     for (const run of runs) {
+      // Drop stale "running" rows — see RUNNING_RECENCY_MS.
+      const startedAt = typeof run.startedAt === 'number' ? run.startedAt : 0;
+      if (startedAt > 0 && startedAt < cutoff) continue;
       const targets = run.targetCategories;
       if (!Array.isArray(targets)) continue;
       for (const cat of targets) {

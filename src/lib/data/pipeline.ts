@@ -429,16 +429,24 @@ export async function createPipelineRun(args: {
 }): Promise<{ id: string }> {
   const pb = await userClient();
   const now = Date.now();
-  const created = await pb.collection<PipelineRunRecord>('pipelineRuns').create({
+  // Build the payload conditionally so optional fields are NEVER sent as
+  // undefined. PocketBase's create() validates the payload against the
+  // collection schema; an unrecognized field or an unexpected null can
+  // surface as "Failed to create record." with no further detail, which
+  // had me chasing a phantom JSON-column bug.
+  const payload: Record<string, unknown> = {
     specialtySlug: args.specialtySlug,
     status: 'running',
-    workflowRunId: args.workflowRunId,
     startedAt: now,
     updatedAt: now,
     mappingCheckIds: true,
-    createdByUserId: args.createdByUserId,
-    targetCategories: args.targetCategories ?? undefined,
-  });
+  };
+  if (args.workflowRunId !== undefined) payload.workflowRunId = args.workflowRunId;
+  if (args.createdByUserId !== undefined) payload.createdByUserId = args.createdByUserId;
+  if (args.targetCategories && args.targetCategories.length > 0) {
+    payload.targetCategories = args.targetCategories;
+  }
+  const created = await pb.collection<PipelineRunRecord>('pipelineRuns').create(payload);
   return { id: created.id };
 }
 

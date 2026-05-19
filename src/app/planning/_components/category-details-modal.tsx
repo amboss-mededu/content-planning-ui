@@ -10,7 +10,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
 import { listBucketCodes } from '../[specialty]/actions';
 import { useConsolidationRerun } from './use-consolidation-rerun';
@@ -132,6 +132,21 @@ export function CategoryDetailsModal({
     isRunning(bucket.consolidationCategory) ||
     rebuildingCategories.has(bucket.consolidationCategory);
 
+  // The workflow filters codes by source `category`, but this modal is
+  // keyed on `consolidationCategory`. Translate by reading the bucket's
+  // codes (already fetched for the modal body) and extracting their
+  // distinct source categories. Without this, the re-run from the
+  // Categories tab finds zero codes and silently produces zero rows.
+  const sourceCategoriesInBucket = useMemo(() => {
+    if (!codes) return [];
+    const set = new Set<string>();
+    for (const c of codes) {
+      if (c.category) set.add(c.category);
+    }
+    return Array.from(set);
+  }, [codes]);
+  const codesNotLoaded = codes === null;
+
   useEffect(() => {
     let cancelled = false;
     setCodes(null);
@@ -240,9 +255,11 @@ export function CategoryDetailsModal({
           </Button>
           <Button
             variant="secondary"
-            disabled={!canRerun || isRerunning}
+            disabled={!canRerun || isRerunning || codesNotLoaded}
             onClick={() => {
-              void rerun(bucket.consolidationCategory);
+              void rerun(bucket.consolidationCategory, {
+                additionalCategories: sourceCategoriesInBucket,
+              });
             }}
           >
             {isRerunning ? 'Rebuilding…' : 'Re-run consolidation'}

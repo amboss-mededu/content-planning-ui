@@ -8,6 +8,14 @@ type Options = {
   confirm?: boolean;
   /** Forward chainSecondaries to the workflow route. Defaults to true. */
   chainSecondaries?: boolean;
+  /** Extra categories to include in the workflow's `categories` filter
+   *  beyond the primary one. The Category modal uses this to translate
+   *  a `consolidationCategory` bucket into the source categories its
+   *  codes actually carry — the workflow filters codes by source
+   *  `category`, so passing just the bucket name silently produces 0
+   *  staging rows. The primary category still drives the in-flight Set
+   *  key, confirm message, and "Rebuilding…" badge for the bucket. */
+  additionalCategories?: string[];
 };
 
 export type RerunResult = {
@@ -48,7 +56,11 @@ export function useConsolidationRerun(slug: string) {
 
   const rerun = useCallback(
     async (category: string, options?: Options) => {
-      const { confirm = true, chainSecondaries = true } = options ?? {};
+      const {
+        confirm = true,
+        chainSecondaries = true,
+        additionalCategories,
+      } = options ?? {};
       if (inFlight.current.has(category)) return;
       if (
         confirm &&
@@ -64,12 +76,17 @@ export function useConsolidationRerun(slug: string) {
       inFlight.current.add(category);
       bump();
       try {
+        // Dedupe in case the caller already included the primary
+        // category in the additional list.
+        const categories = Array.from(
+          new Set([category, ...(additionalCategories ?? [])]),
+        );
         const res = await fetch('/api/workflows/consolidate-primary', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             specialtySlug: slug,
-            categories: [category],
+            categories,
             chainSecondaries,
           }),
         });
