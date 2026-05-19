@@ -83,12 +83,24 @@ async function clearStagingForCategories(
 ): Promise<number> {
   if (categories.length === 0) return 0;
   const pb = await createAdminClient();
-  const catFilter = categories
-    .map((c) => `category = "${c.replace(/"/g, '\\"')}"`)
+  // Use parametrized filters via pb.filter — manual `"${value}"` interpolation
+  // breaks when a category name contains `;` or `,` (PB's filter parser treats
+  // them as separators even inside double quotes). Pattern mirrors
+  // src/lib/data/pipeline.ts:159.
+  const params: Record<string, string> = { slug };
+  const orClauses = categories
+    .map((c, i) => {
+      params[`c${i}`] = c;
+      return `category = {:c${i}}`;
+    })
     .join(' || ');
+  const filter = pb.filter(
+    `specialtySlug = {:slug} && (${orClauses})`,
+    params,
+  );
   const rows = await pb
     .collection<ArticleSuggestionRecord>(collection)
-    .getFullList({ filter: `specialtySlug = "${slug}" && (${catFilter})` });
+    .getFullList({ filter });
   await Promise.all(rows.map((r) => pb.collection(collection).delete(r.id)));
   return rows.length;
 }
