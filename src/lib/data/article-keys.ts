@@ -24,7 +24,8 @@
  *     upd::<articleId>
  *   sectionKey
  *     sec::<specialtySlug>::<normalize(articleTitle)>::<normalize(sectionName)>
- *     sec-upd::<articleId>::<sectionId>
+ *     sec-upd::<normalize(category)>::<articleId>::<sectionId>
+ *     (category-less rows fall back to `sec-upd::<articleId>::<sectionId>`.)
  *
  * `normalize` is aggressive on purpose — the LLM rephrases titles
  * across consolidation runs (extra punctuation, parenthesised acronyms,
@@ -103,11 +104,21 @@ export function computeArticleKey(args: {
 /**
  * Compute the stable key for a section row.
  *
- * Same precedence: if both `articleId` and `sectionId` are present,
- * we're updating a known CMS section — use those directly. Otherwise
- * derive from the parent article title + the section name (scoped to
- * the specialty so two specialties can have the same "Definition"
- * section under articles that share a title).
+ * Precedence: if both `articleId` and `sectionId` are present, we're
+ * updating a known CMS section — use those directly. Otherwise derive
+ * from the parent article title + the section name (scoped to the
+ * specialty so two specialties can have the same "Definition" section
+ * under articles that share a title).
+ *
+ * Why `category` is part of the key: the consolidation pipeline emits
+ * the same parent article + section name pair under different
+ * categories when the section spans multiple board sub-specialties
+ * (e.g. "The leg, ankle, and foot / Bones and joints" appears under
+ * both "I.A.1 Anatomy" and "II.B.1 Regional Anesthesia" in the
+ * anesthesiology fixture). Each is a distinct review target —
+ * collapsing them into one sectionKey makes approvals indistinguishable
+ * and causes one approve-click to flip the row in every category at
+ * once. Matches the same protection in `computeArticleKey`.
  */
 export function computeSectionKey(args: {
   specialtySlug: string;
@@ -119,14 +130,19 @@ export function computeSectionKey(args: {
 }): string {
   const articleId = args.articleId?.trim();
   const sectionId = args.sectionId?.trim();
-  if (articleId && sectionId) return `sec-upd::${articleId}::${sectionId}`;
+  const category = args.category?.trim();
+  if (articleId && sectionId) {
+    if (category) {
+      return `sec-upd::${normalizeForKey(category)}::${articleId}::${sectionId}`;
+    }
+    return `sec-upd::${articleId}::${sectionId}`;
+  }
 
   const articleTitle = args.articleTitle?.trim();
   const sectionName = args.sectionName?.trim();
   const slug = args.specialtySlug.trim();
   if (!articleTitle || !sectionName || !slug) return EMPTY_KEY;
 
-  const category = args.category?.trim();
   if (category) {
     return `sec::${slug}::${normalizeForKey(category)}::${normalizeForKey(articleTitle)}::${normalizeForKey(sectionName)}`;
   }
