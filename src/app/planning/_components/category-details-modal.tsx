@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
 import { listBucketCodes } from '../[specialty]/actions';
+import { useConsolidationRerun } from './use-consolidation-rerun';
 
 type CategoryStatus = 'not-ready' | 'ready' | 'consolidated';
 
@@ -110,6 +111,18 @@ export function CategoryDetailsModal({
   const router = useRouter();
   const [codes, setCodes] = useState<BucketCode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const {
+    rerun,
+    isRunning,
+    error: rerunError,
+    dismissError: dismissRerunError,
+  } = useConsolidationRerun(slug);
+  const status = deriveStatus(bucket);
+  // Re-run only makes sense once the category is mappable and has been
+  // through consolidation at least once (otherwise editors should use the
+  // initial run path from the consolidation review screen).
+  const canRerun = status === 'consolidated' || status === 'ready';
+  const isRerunning = isRunning(bucket.consolidationCategory);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,7 +200,28 @@ export function CategoryDetailsModal({
           </Stack>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {rerunError ? (
+          <button
+            type="button"
+            onClick={dismissRerunError}
+            style={{
+              textAlign: 'left',
+              padding: '6px 8px',
+              border: '1px solid rgb(220, 38, 38)',
+              borderRadius: 4,
+              background: 'rgb(254, 226, 226)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color: 'rgb(127, 29, 29)',
+              fontSize: 12,
+            }}
+            title="Dismiss"
+          >
+            {rerunError}
+          </button>
+        ) : null}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button
             variant="secondary"
             onClick={() => {
@@ -195,6 +229,15 @@ export function CategoryDetailsModal({
             }}
           >
             Drill into mapping view
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!canRerun || isRerunning}
+            onClick={() => {
+              void rerun(bucket.consolidationCategory);
+            }}
+          >
+            {isRerunning ? 'Re-running…' : 'Re-run consolidation'}
           </Button>
         </div>
       </div>
