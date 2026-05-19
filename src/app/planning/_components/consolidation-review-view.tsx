@@ -25,7 +25,7 @@ import {
   type ReviewMap,
 } from './article-manager-modal-v2';
 import type { ArticleRow } from './articles-view';
-import { CodeChipList } from './code-chip';
+import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
@@ -36,6 +36,11 @@ type CategoryBucket = {
 };
 
 const UNCATEGORIZED = '(uncategorized)';
+
+// Switch from per-code chips to category-grouped chips once a row's code
+// count makes the flat list too dense to scan. Editors hover a group chip
+// to see the per-code metadata table.
+const GROUPED_CODES_THRESHOLD = 15;
 
 // Tints reused from the New Articles / Article Updates tables so a row's
 // approval state reads identically across screens.
@@ -1220,7 +1225,14 @@ function ArticleSubTable({
                     <Text size="s">{r.articleTitle ?? '—'}</Text>
                   </td>
                   <td style={tdStyle}>
-                    <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />
+                    {r.codes.length >= GROUPED_CODES_THRESHOLD ? (
+                      <CategoryGroupedCodeList
+                        codes={r.codes}
+                        categoryLookup={categoryLookup}
+                      />
+                    ) : (
+                      <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />
+                    )}
                   </td>
                   <td style={numTdStyle}>{r.numCodes}</td>
                   <td style={numTdStyle}>{r.overallImportance ?? '—'}</td>
@@ -1407,7 +1419,14 @@ function SectionSubTable({
                     <Badge text={updateLabel} color={updateColor} />
                   </td>
                   <td style={tdStyle}>
-                    <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />
+                    {r.codes.length >= GROUPED_CODES_THRESHOLD ? (
+                      <CategoryGroupedCodeList
+                        codes={r.codes}
+                        categoryLookup={categoryLookup}
+                      />
+                    ) : (
+                      <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />
+                    )}
                   </td>
                   <td style={numTdStyle}>{r.numCodes}</td>
                   <td style={numTdStyle}>{r.overallImportance ?? '—'}</td>
