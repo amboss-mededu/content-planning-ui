@@ -412,7 +412,6 @@ export function SectionsView({
   const columns = useMemo(() => buildColumns(categoryLookup), [categoryLookup]);
   const groupColumns = useMemo(() => buildGroupColumns(categoryLookup), [categoryLookup]);
   const params = useSearchParams();
-  const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
   const [article, setArticle] = useState<string>(() => params.get('article') ?? '');
   // Whether the table renders one row per parent article (default — the
   // editor-friendly view) or one row per section. The `?grouping=section`
@@ -435,24 +434,21 @@ export function SectionsView({
     'section' | 'article' | undefined
   >();
   // Visible row set after DataTable's column-level filters + sort,
-  // intersected with the toolbar `kind` and `article` filters above.
-  // Drives the review modal so editors can scope to whatever's
-  // currently visible.
+  // intersected with the toolbar `article` filter above. Drives the
+  // review modal so editors can scope to whatever's currently visible.
   const [visibleRows, setVisibleRows] = useState<SectionRow[]>([]);
 
   useEffect(() => {
     const p = new URLSearchParams();
-    if (kind) p.set('kind', kind);
     if (article) p.set('article', article);
     if (grouping === 'section') p.set('grouping', 'section');
     const qs = p.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
-  }, [kind, article, grouping]);
+  }, [article, grouping]);
 
-  // Article options come from the full row set so the dropdown is stable
-  // when the kind filter changes. Counts are per-article totals across
-  // all kinds.
+  // Article options come from the full row set. Counts are per-article
+  // totals across the visible review state.
   const articleOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows) {
@@ -467,11 +463,9 @@ export function SectionsView({
 
   const filtered = useMemo(() => {
     let out = rows;
-    if (kind === 'new') out = out.filter((r) => r.updateType === 'new');
-    else if (kind === 'update') out = out.filter((r) => r.updateType === 'update');
     if (article) out = out.filter((r) => r.articleTitle === article);
     return out;
-  }, [rows, kind, article]);
+  }, [rows, article]);
 
   // Aggregate the *filtered* sections so the article view honours the
   // toolbar filters — e.g. filtering to "new" shows only articles that
@@ -522,19 +516,6 @@ export function SectionsView({
             { name: 'grouping', value: 'section', label: 'By section' },
           ]}
         />
-        <div className="filter-cell">
-          <Select
-            name="kind"
-            label="Update Type"
-            value={kind}
-            options={[
-              { value: '', label: 'All' },
-              { value: 'new', label: 'New sections' },
-              { value: 'update', label: 'Section updates' },
-            ]}
-            onChange={(e) => setKind(e.target.value)}
-          />
-        </div>
         {grouping === 'section' && (
           <div className="filter-cell">
             <Select
