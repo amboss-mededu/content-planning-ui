@@ -18,7 +18,11 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
-import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
+import {
+  createPipelineRun,
+  initPipelineStage,
+  updatePipelineRun,
+} from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { consolidateArticlesSecondaryWorkflow } from '@/lib/workflows/consolidation/articles-secondary';
 import { consolidatePrimaryWorkflow } from '@/lib/workflows/consolidation/primary';
@@ -84,12 +88,30 @@ export async function POST(req: NextRequest) {
     specialtySlug: slug,
     targetCategories: categories,
   });
-  await initPipelineStage({ runId, stage: 'consolidate_primary' });
-  if (chain) {
-    // Pre-init the secondary stage rows so their workflow's markStageRunning
-    // calls find a row to update. Single run carries all three stages.
-    await initPipelineStage({ runId, stage: 'consolidate_articles' });
-    await initPipelineStage({ runId, stage: 'consolidate_sections' });
+  // Init stages and run the chain inside a single try so an early
+  // failure (e.g. PB validation rejecting a stage create) doesn't leave
+  // the just-created pipelineRuns row stuck on `status='running'` — a
+  // stale row hides every targeted category in the review UI via the
+  // useRerunningCategories live subscription.
+  try {
+    await initPipelineStage({ runId, stage: 'consolidate_primary' });
+    if (chain) {
+      // Pre-init the secondary stage rows so their workflow's markStageRunning
+      // calls find a row to update. Single run carries all three stages.
+      await initPipelineStage({ runId, stage: 'consolidate_articles' });
+      await initPipelineStage({ runId, stage: 'consolidate_sections' });
+    }
+  } catch (e) {
+    console.error('[consolidate-primary] init failed', e);
+    await updatePipelineRun(runId, {
+      status: 'failed',
+      finishedAt: Date.now(),
+      error: e instanceof Error ? e.message : String(e),
+    }).catch(() => {});
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
   }
 
   let result: {
