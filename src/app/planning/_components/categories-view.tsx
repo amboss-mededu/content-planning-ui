@@ -8,6 +8,7 @@ import type {
 } from '@/lib/data/categories';
 import { CategoryDetailsModal } from './category-details-modal';
 import { type Column, DataTable } from './data-table';
+import { useRerunningCategories } from './use-rerunning-categories';
 
 type ChipTone = 'amber' | 'red' | 'none';
 
@@ -82,6 +83,7 @@ export function CategoriesView({
 }) {
   const [mode, setMode] = useState<ViewMode>('consolidation');
   const [openBucket, setOpenBucket] = useState<CategoryOrchestration | null>(null);
+  const rebuildingCategories = useRerunningCategories(slug);
 
   const columns: Column<CategoryOrchestration>[] = [
     {
@@ -161,6 +163,9 @@ export function CategoriesView({
       description:
         'Not ready → some codes still unmapped. Ready for consolidation → all included codes mapped, awaiting consolidation. Consolidated → at least one consolidated output article cites a code from this bucket.',
       render: (r) => {
+        if (rebuildingCategories.has(r.consolidationCategory)) {
+          return <Badge text="Rebuilding…" color="yellow" />;
+        }
         const status = deriveStatus(r);
         if (status === 'consolidated') {
           return <Badge text="Consolidated" color="green" icon="check" />;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Options = {
   /** Show window.confirm before firing. Defaults to true. */
@@ -9,6 +9,16 @@ type Options = {
   /** Forward chainSecondaries to the workflow route. Defaults to true. */
   chainSecondaries?: boolean;
 };
+
+export type RerunResult = {
+  category: string;
+  stagingArticles: number;
+  stagingSections: number;
+  consolidatedArticles: number;
+  consolidatedSections: number;
+};
+
+const LAST_RESULT_TTL_MS = 8000;
 
 /**
  * Trigger a per-category consolidation re-run via the workflow route, with
@@ -24,8 +34,17 @@ export function useConsolidationRerun(slug: string) {
   const inFlight = useRef<Set<string>>(new Set());
   const [, forceRender] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<RerunResult | null>(null);
 
   const bump = useCallback(() => forceRender((n) => n + 1), []);
+
+  // Auto-dismiss the success banner so it doesn't linger after the
+  // editor has acknowledged the count. Reset on every new lastResult.
+  useEffect(() => {
+    if (!lastResult) return;
+    const id = window.setTimeout(() => setLastResult(null), LAST_RESULT_TTL_MS);
+    return () => window.clearTimeout(id);
+  }, [lastResult]);
 
   const rerun = useCallback(
     async (category: string, options?: Options) => {
@@ -41,6 +60,7 @@ export function useConsolidationRerun(slug: string) {
         return;
       }
       setError(null);
+      setLastResult(null);
       inFlight.current.add(category);
       bump();
       try {
@@ -53,12 +73,29 @@ export function useConsolidationRerun(slug: string) {
             chainSecondaries,
           }),
         });
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          result?: {
+            stagingArticles?: number;
+            stagingSections?: number;
+            consolidatedArticles?: number;
+            consolidatedSections?: number;
+          } | null;
+        };
         if (!res.ok) {
           setError(
             body.error ?? `HTTP ${res.status} starting consolidation for ${category}`,
           );
           return;
+        }
+        if (body.result) {
+          setLastResult({
+            category,
+            stagingArticles: body.result.stagingArticles ?? 0,
+            stagingSections: body.result.stagingSections ?? 0,
+            consolidatedArticles: body.result.consolidatedArticles ?? 0,
+            consolidatedSections: body.result.consolidatedSections ?? 0,
+          });
         }
         router.refresh();
       } catch (e) {
@@ -74,6 +111,7 @@ export function useConsolidationRerun(slug: string) {
   const isRunning = useCallback((category: string) => inFlight.current.has(category), []);
 
   const dismissError = useCallback(() => setError(null), []);
+  const dismissLastResult = useCallback(() => setLastResult(null), []);
 
-  return { rerun, isRunning, error, dismissError };
+  return { rerun, isRunning, error, dismissError, lastResult, dismissLastResult };
 }

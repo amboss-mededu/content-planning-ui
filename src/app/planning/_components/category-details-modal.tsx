@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
 import { listBucketCodes } from '../[specialty]/actions';
 import { useConsolidationRerun } from './use-consolidation-rerun';
+import { useRerunningCategories } from './use-rerunning-categories';
 
 type CategoryStatus = 'not-ready' | 'ready' | 'consolidated';
 
@@ -117,12 +118,19 @@ export function CategoryDetailsModal({
     error: rerunError,
     dismissError: dismissRerunError,
   } = useConsolidationRerun(slug);
+  // Live cross-tab signal so the modal shows "Rebuilding…" if the run was
+  // started from the consolidation review screen — not just from this
+  // modal. The local in-flight `isRunning` covers the optimistic case
+  // before PB's realtime delivers the create event.
+  const rebuildingCategories = useRerunningCategories(slug);
   const status = deriveStatus(bucket);
   // Re-run only makes sense once the category is mappable and has been
   // through consolidation at least once (otherwise editors should use the
   // initial run path from the consolidation review screen).
   const canRerun = status === 'consolidated' || status === 'ready';
-  const isRerunning = isRunning(bucket.consolidationCategory);
+  const isRerunning =
+    isRunning(bucket.consolidationCategory) ||
+    rebuildingCategories.has(bucket.consolidationCategory);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,7 +245,7 @@ export function CategoryDetailsModal({
               void rerun(bucket.consolidationCategory);
             }}
           >
-            {isRerunning ? 'Re-running…' : 'Re-run consolidation'}
+            {isRerunning ? 'Rebuilding…' : 'Re-run consolidation'}
           </Button>
         </div>
       </div>
