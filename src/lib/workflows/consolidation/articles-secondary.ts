@@ -50,9 +50,13 @@ function avg(values: number[]): number | undefined {
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
 
+export type ConsolidateArticlesSecondaryStats = {
+  merged: number;
+};
+
 export async function consolidateArticlesSecondaryWorkflow(
   input: ConsolidateArticlesSecondaryInput,
-): Promise<void> {
+): Promise<ConsolidateArticlesSecondaryStats> {
   console.log('[pipeline] consolidateArticlesSecondaryWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
@@ -85,7 +89,7 @@ export async function consolidateArticlesSecondaryWorkflow(
       });
       await updatePipelineRunStatus(input.runId, 'completed');
       await revalidateSpecialtyCache(input.specialtySlug);
-      return;
+      return { merged: 0 };
     }
 
     // Dedupe across categories. Group key is the lowercased title; we
@@ -174,6 +178,7 @@ export async function consolidateArticlesSecondaryWorkflow(
     });
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
+    return { merged: finalRows.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[pipeline] consolidateArticlesSecondaryWorkflow failed', msg);

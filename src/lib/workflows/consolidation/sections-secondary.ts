@@ -48,9 +48,13 @@ function avg(values: number[]): number | undefined {
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
 
+export type ConsolidateSectionsSecondaryStats = {
+  merged: number;
+};
+
 export async function consolidateSectionsSecondaryWorkflow(
   input: ConsolidateSectionsSecondaryInput,
-): Promise<void> {
+): Promise<ConsolidateSectionsSecondaryStats> {
   console.log('[pipeline] consolidateSectionsSecondaryWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
@@ -83,7 +87,7 @@ export async function consolidateSectionsSecondaryWorkflow(
       });
       await updatePipelineRunStatus(input.runId, 'completed');
       await revalidateSpecialtyCache(input.specialtySlug);
-      return;
+      return { merged: 0 };
     }
 
     type Bucket = {
@@ -190,6 +194,7 @@ export async function consolidateSectionsSecondaryWorkflow(
     });
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
+    return { merged: finalRows.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[pipeline] consolidateSectionsSecondaryWorkflow failed', msg);
