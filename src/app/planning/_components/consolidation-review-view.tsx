@@ -14,6 +14,8 @@ import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   bulkApproveArticleReviews,
   bulkApproveSectionReviews,
+  bulkUnapproveArticleReviews,
+  bulkUnapproveSectionReviews,
 } from '../[specialty]/actions';
 import {
   ArticleManagerModalV2,
@@ -271,6 +273,51 @@ export function ConsolidationReviewView({
     [slug, viewerEmail],
   );
 
+  const unapproveArticles = useCallback(
+    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      // Clear status optimistically (drops the row out of /articles
+      // visibility-gating on the next refresh).
+      setArticleReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.articleRecordId];
+        return next;
+      });
+      setArticleReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.articleRecordId];
+        return next;
+      });
+      startTransition(async () => {
+        await bulkUnapproveArticleReviews(
+          slug,
+          pairs.map((p) => ({ articleKey: p.articleKey })),
+        );
+      });
+    },
+    [slug],
+  );
+
+  const unapproveSections = useCallback(
+    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      setSectionReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.sectionRecordId];
+        return next;
+      });
+      setSectionReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.sectionRecordId];
+        return next;
+      });
+      startTransition(async () => {
+        await bulkUnapproveSectionReviews(slug, pairs);
+      });
+    },
+    [slug],
+  );
+
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
     const articlePairs = selectedBucket.articles
@@ -483,6 +530,56 @@ export function ConsolidationReviewView({
                   }));
                 approveSections(pairs);
                 setSelectedSectionIds(new Set());
+              }}
+              onUnapproveSelectedArticles={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.articles
+                  .filter(
+                    (a) =>
+                      a.id &&
+                      a.articleKey &&
+                      selectedArticleIds.has(a.id) &&
+                      articleReviews[a.id] === 'approved',
+                  )
+                  .map((a) => ({
+                    articleKey: a.articleKey as string,
+                    articleRecordId: a.id as string,
+                  }));
+                unapproveArticles(pairs);
+                setSelectedArticleIds(new Set());
+              }}
+              onUnapproveSelectedSections={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.sections
+                  .filter(
+                    (s) =>
+                      s.id &&
+                      s.sectionKey &&
+                      selectedSectionIds.has(s.id) &&
+                      sectionReviews[s.id] === 'approved',
+                  )
+                  .map((s) => ({
+                    sectionKey: s.sectionKey as string,
+                    sectionRecordId: s.id as string,
+                  }));
+                unapproveSections(pairs);
+                setSelectedSectionIds(new Set());
+              }}
+              onUnapproveArticle={(id) => {
+                if (!selectedBucket) return;
+                const a = selectedBucket.articles.find((x) => x.id === id);
+                if (!a?.id || !a.articleKey) return;
+                unapproveArticles([
+                  { articleKey: a.articleKey, articleRecordId: a.id },
+                ]);
+              }}
+              onUnapproveSection={(id) => {
+                if (!selectedBucket) return;
+                const s = selectedBucket.sections.find((x) => x.id === id);
+                if (!s?.id || !s.sectionKey) return;
+                unapproveSections([
+                  { sectionKey: s.sectionKey, sectionRecordId: s.id },
+                ]);
               }}
               onApproveAll={approveAllInCategory}
               onStartConsolidation={startConsolidation}
@@ -753,6 +850,10 @@ function CategoryDetailPane({
   categoryLookup,
   onApproveSelectedArticles,
   onApproveSelectedSections,
+  onUnapproveSelectedArticles,
+  onUnapproveSelectedSections,
+  onUnapproveArticle,
+  onUnapproveSection,
   onApproveAll,
   onStartConsolidation,
   isConsolidating,
@@ -772,6 +873,10 @@ function CategoryDetailPane({
   categoryLookup: CategoryLookup;
   onApproveSelectedArticles: () => void;
   onApproveSelectedSections: () => void;
+  onUnapproveSelectedArticles: () => void;
+  onUnapproveSelectedSections: () => void;
+  onUnapproveArticle: (id: string) => void;
+  onUnapproveSection: (id: string) => void;
   onApproveAll: () => void;
   onStartConsolidation: (cat: string) => void;
   isConsolidating: boolean;
@@ -826,6 +931,8 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickArticle}
         onApproveSelected={onApproveSelectedArticles}
+        onUnapproveSelected={onUnapproveSelectedArticles}
+        onUnapproveRow={onUnapproveArticle}
         categoryLookup={categoryLookup}
       />
 
@@ -852,6 +959,8 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickSection}
         onApproveSelected={onApproveSelectedSections}
+        onUnapproveSelected={onUnapproveSelectedSections}
+        onUnapproveRow={onUnapproveSection}
         categoryLookup={categoryLookup}
       />
     </Stack>
@@ -882,6 +991,16 @@ const tdStyle: CSSProperties = {
 };
 const numTdStyle: CSSProperties = { ...tdStyle, textAlign: 'center', width: 70 };
 const checkboxTdStyle: CSSProperties = { ...tdStyle, width: 36, textAlign: 'center' };
+const inlineUnapproveBtnStyle: CSSProperties = {
+  padding: '2px 6px',
+  border: '1px solid rgb(228, 228, 234)',
+  borderRadius: 4,
+  background: 'white',
+  cursor: 'pointer',
+  font: 'inherit',
+  fontSize: 11,
+  color: 'rgb(80, 80, 90)',
+};
 
 function rowTint(status: 'approved' | 'rejected' | undefined): CSSProperties | undefined {
   if (status === 'approved') return { background: APPROVED_TINT };
@@ -907,6 +1026,8 @@ function ArticleSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onUnapproveSelected,
+  onUnapproveRow,
   categoryLookup,
 }: {
   rows: ArticleRow[];
@@ -916,12 +1037,17 @@ function ArticleSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onUnapproveSelected: () => void;
+  onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
   const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const selectedApprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] === 'approved',
+  ).length;
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -934,6 +1060,13 @@ function ArticleSubTable({
           disabled={selectedIds.size === 0}
         >
           {`Send to suggested new articles (${selectedIds.size})`}
+        </Button>
+        <Button
+          variant="tertiary"
+          onClick={onUnapproveSelected}
+          disabled={selectedApprovedCount === 0}
+        >
+          {`Unapprove selected (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -993,7 +1126,22 @@ function ArticleSubTable({
                     {r.overallCoverage ?? r.existingAmbossCoverage ?? '—'}
                   </td>
                   <td style={tdStyle}>
-                    <StatusBadge status={status} />
+                    <Inline space="xxs" vAlignItems="center">
+                      <StatusBadge status={status} />
+                      {status === 'approved' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnapproveRow(rowId);
+                          }}
+                          style={inlineUnapproveBtnStyle}
+                          title="Unapprove this article"
+                        >
+                          Unapprove
+                        </button>
+                      ) : null}
+                    </Inline>
                   </td>
                 </tr>
               );
@@ -1013,6 +1161,8 @@ function SectionSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onUnapproveSelected,
+  onUnapproveRow,
   categoryLookup,
 }: {
   rows: SectionRow[];
@@ -1022,12 +1172,17 @@ function SectionSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onUnapproveSelected: () => void;
+  onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
   const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const selectedApprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] === 'approved',
+  ).length;
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -1040,6 +1195,13 @@ function SectionSubTable({
           disabled={selectedIds.size === 0}
         >
           {`Send to article updates (${selectedIds.size})`}
+        </Button>
+        <Button
+          variant="tertiary"
+          onClick={onUnapproveSelected}
+          disabled={selectedApprovedCount === 0}
+        >
+          {`Unapprove selected (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -1117,7 +1279,22 @@ function SectionSubTable({
                   <td style={numTdStyle}>{r.overallImportance ?? '—'}</td>
                   <td style={numTdStyle}>{r.overallCoverage ?? '—'}</td>
                   <td style={tdStyle}>
-                    <StatusBadge status={status} />
+                    <Inline space="xxs" vAlignItems="center">
+                      <StatusBadge status={status} />
+                      {status === 'approved' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnapproveRow(rowId);
+                          }}
+                          style={inlineUnapproveBtnStyle}
+                          title="Unapprove this section"
+                        >
+                          Unapprove
+                        </button>
+                      ) : null}
+                    </Inline>
                   </td>
                 </tr>
               );

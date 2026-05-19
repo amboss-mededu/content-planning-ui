@@ -254,6 +254,53 @@ export async function bulkApproveSectionReviews(
   updateTag(`specialty:${slug}`);
 }
 
+/**
+ * Bulk-unapprove a batch of new-article rows. For each row: drop the
+ * `articleReviews` row and remove the corresponding `articleBacklog`
+ * entry. Mirrors the approve path's pairing but in reverse.
+ */
+export async function bulkUnapproveArticleReviews(
+  slug: string,
+  rows: Array<{ articleKey: string }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  for (const r of rows) {
+    await clearArticleReview(slug, r.articleKey);
+    await clearArticleBacklog(slug, r.articleKey);
+  }
+  updateTag(`specialty:${slug}`);
+}
+
+/**
+ * Bulk-unapprove a batch of section rows. For each row, mirror the
+ * single-row `resetSectionReview` logic: clear the review, then drop
+ * the parent article's `articleBacklog` (`type='update'`) row only if
+ * no other approved siblings remain under the same parent.
+ */
+export async function bulkUnapproveSectionReviews(
+  slug: string,
+  rows: Array<{ sectionKey: string; sectionRecordId: string }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  for (const r of rows) {
+    const parentArticleId = await getConsolidatedSectionParentArticleId(
+      r.sectionRecordId,
+    );
+    await clearSectionReview(slug, r.sectionKey);
+    if (parentArticleId) {
+      const stillHasApproved = await hasOtherApprovedSectionsForParent(
+        slug,
+        parentArticleId,
+        r.sectionRecordId,
+      );
+      if (!stillHasApproved) {
+        await clearUpdateBacklogRow(slug, parentArticleId);
+      }
+    }
+  }
+  updateTag(`specialty:${slug}`);
+}
+
 export async function resetSectionReview(
   slug: string,
   sectionKey: string,
