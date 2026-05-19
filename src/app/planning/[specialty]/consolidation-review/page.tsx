@@ -4,7 +4,6 @@ import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
-import { listConsolidationCategoryReviews } from '@/lib/data/consolidation-category-reviews';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
@@ -115,7 +114,6 @@ async function ConsolidationReviewData({
     codeRecs,
     articleReviewRecs,
     sectionReviewRecs,
-    categoryReviewRecs,
     commentsByArticle,
     commentsBySection,
     user,
@@ -125,7 +123,6 @@ async function ConsolidationReviewData({
     listCodes(slug),
     listArticleReviews(slug),
     listSectionReviews(slug),
-    listConsolidationCategoryReviews(slug),
     listReviewComments(slug, 'article'),
     listReviewComments(slug, 'section'),
     getCurrentUser(),
@@ -213,18 +210,12 @@ async function ConsolidationReviewData({
     }
   }
 
-  const flaggedCategories = new Set<string>();
-  for (const [cat, r] of Object.entries(categoryReviewRecs)) {
-    if (r.status === 'flagged-for-rerun') flaggedCategories.add(cat);
-  }
-
   return (
     <ConsolidationReviewView
       slug={slug}
       initialCategory={initialCategory}
       articles={articles}
       sections={sections}
-      flaggedCategories={Array.from(flaggedCategories)}
       mappingByCategory={mappingByCategory}
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
