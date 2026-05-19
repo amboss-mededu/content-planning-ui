@@ -196,4 +196,24 @@ describe('computeSectionKey', () => {
     });
     expect(cardiac).not.toBe(vascular);
   });
+
+  it('same CMS section in two categories yields distinct sec-upd keys', () => {
+    // Real-world repro: "The leg, ankle, and foot / Bones and joints"
+    // appears under both Anatomy and Regional Anesthesia in the
+    // anesthesiology fixture. Without category in the sec-upd key,
+    // approving one category's row flips both.
+    const anatomy = computeSectionKey({
+      specialtySlug: 'anesthesiology',
+      articleId: 'p60LNS',
+      sectionId: 's-bones-joints',
+      category: 'I.A.1 Anatomy',
+    });
+    const regional = computeSectionKey({
+      specialtySlug: 'anesthesiology',
+      articleId: 'p60LNS',
+      sectionId: 's-bones-joints',
+      category: 'II.B.1 Regional Anesthesia',
+    });
+    expect(anatomy).not.toBe(regional);
+  });
 });
