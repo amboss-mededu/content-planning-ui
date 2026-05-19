@@ -96,8 +96,19 @@ export async function POST(req: NextRequest) {
     // fire-and-forget if a future LLM-backed runner makes this too slow.
     try {
       await consolidatePrimaryWorkflow({ runId, specialtySlug: slug, categories });
-      await consolidateArticlesSecondaryWorkflow({ runId, specialtySlug: slug });
-      await consolidateSectionsSecondaryWorkflow({ runId, specialtySlug: slug });
+      // Forward `categories` so the secondaries' wipe-and-replace is
+      // scoped to the same buckets — otherwise a single-category re-run
+      // wipes every other category's consolidated output.
+      await consolidateArticlesSecondaryWorkflow({
+        runId,
+        specialtySlug: slug,
+        categories,
+      });
+      await consolidateSectionsSecondaryWorkflow({
+        runId,
+        specialtySlug: slug,
+        categories,
+      });
     } catch (e) {
       console.error('[consolidate-primary] chained workflow failed', e);
       // The runners themselves already marked their stage failed and

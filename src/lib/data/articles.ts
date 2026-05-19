@@ -178,6 +178,34 @@ export async function deleteConsolidatedArticlesForSpecialtyAsAdmin(
   await clearForSpecialty('consolidatedArticles', slug);
 }
 
+/**
+ * Delete consolidated-article rows whose category is in `categories`.
+ * Used by the per-category re-run path so the secondary stage only
+ * touches the buckets actually being rebuilt.
+ *
+ * Fetches by `specialtySlug` and filters categories client-side — the
+ * same pattern `clearStagingForCategories` uses, because PB's filter
+ * parser rejects 400 on category values that mix `;`, `:`, `,` even
+ * through `pb.filter()` parameterization.
+ */
+export async function deleteConsolidatedArticlesForCategoriesAsAdmin(
+  slug: string,
+  categories: string[],
+): Promise<number> {
+  if (categories.length === 0) return 0;
+  const pb = await createAdminClient();
+  const set = new Set(categories);
+  const filter = pb.filter('specialtySlug = {:slug}', { slug });
+  const rows = await pb
+    .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+    .getFullList({ filter });
+  const toDelete = rows.filter((r) => r.category !== undefined && set.has(r.category));
+  await Promise.all(
+    toDelete.map((r) => pb.collection('consolidatedArticles').delete(r.id)),
+  );
+  return toDelete.length;
+}
+
 export async function deleteNewArticleSuggestionsForSpecialtyAsAdmin(
   slug: string,
 ): Promise<void> {

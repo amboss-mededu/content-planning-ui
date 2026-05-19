@@ -13,6 +13,7 @@
 
 import {
   bulkInsertConsolidatedArticlesAsAdmin,
+  deleteConsolidatedArticlesForCategoriesAsAdmin,
   deleteConsolidatedArticlesForSpecialtyAsAdmin,
   listNewArticleSuggestionsAsAdmin,
 } from '@/lib/data/articles';
@@ -29,6 +30,12 @@ import { revalidateSpecialtyCache } from '../lib/revalidate';
 export type ConsolidateArticlesSecondaryInput = {
   runId: string;
   specialtySlug: string;
+  /** When set, secondary only re-aggregates these categories' staging
+   *  rows and only replaces consolidated rows whose category is in this
+   *  set. Other categories' consolidated rows stay intact. Null/undefined
+   *  preserves the existing specialty-wide wipe-and-replace, used by
+   *  the run-all path. */
+  categories?: string[] | null;
 };
 
 function extractCodeList(raw: unknown): string[] {
@@ -54,7 +61,15 @@ export async function consolidateArticlesSecondaryWorkflow(
   try {
     await markStageRunning(input.runId, 'consolidate_articles');
 
-    const staging = await listNewArticleSuggestionsAsAdmin(input.specialtySlug);
+    const allStaging = await listNewArticleSuggestionsAsAdmin(input.specialtySlug);
+    const categorySet =
+      input.categories && input.categories.length > 0 ? new Set(input.categories) : null;
+    const staging = categorySet
+      ? allStaging.filter((r) => {
+          const cat = (r as unknown as { category?: string }).category;
+          return cat !== undefined && categorySet.has(cat);
+        })
+      : allStaging;
 
     if (staging.length === 0) {
       await logEvent({
@@ -113,9 +128,18 @@ export async function consolidateArticlesSecondaryWorkflow(
     }
 
     // Wipe-and-replace: secondary owns the final table, so a re-run
-    // replaces every row. The reset cascade already does this when the
-    // stage is reset, but in-stage re-runs land here too.
-    await deleteConsolidatedArticlesForSpecialtyAsAdmin(input.specialtySlug);
+    // replaces every row. When the call is scoped to specific categories
+    // (per-category re-run), restrict the wipe to those buckets only —
+    // otherwise a single-category re-run takes the entire specialty's
+    // consolidated output down with it.
+    if (categorySet) {
+      await deleteConsolidatedArticlesForCategoriesAsAdmin(
+        input.specialtySlug,
+        Array.from(categorySet),
+      );
+    } else {
+      await deleteConsolidatedArticlesForSpecialtyAsAdmin(input.specialtySlug);
+    }
 
     const finalRows = Array.from(groups.values()).map((g) => {
       const categories = Array.from(g.categories);

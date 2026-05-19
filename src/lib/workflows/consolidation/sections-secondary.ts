@@ -14,6 +14,7 @@
 import { listArticleUpdateSuggestionsAsAdmin } from '@/lib/data/articles';
 import {
   bulkInsertConsolidatedSectionsAsAdmin,
+  deleteConsolidatedSectionsForCategoriesAsAdmin,
   deleteConsolidatedSectionsForSpecialtyAsAdmin,
 } from '@/lib/data/sections';
 import type { ArticleSuggestionRecord } from '@/lib/pb/types';
@@ -29,6 +30,10 @@ import { revalidateSpecialtyCache } from '../lib/revalidate';
 export type ConsolidateSectionsSecondaryInput = {
   runId: string;
   specialtySlug: string;
+  /** When set, secondary only re-aggregates these categories' staging
+   *  rows and only replaces consolidated rows whose category is in this
+   *  set. See ConsolidateArticlesSecondaryInput for the rationale. */
+  categories?: string[] | null;
 };
 
 function extractCodeList(raw: unknown): string[] {
@@ -54,7 +59,15 @@ export async function consolidateSectionsSecondaryWorkflow(
   try {
     await markStageRunning(input.runId, 'consolidate_sections');
 
-    const staging = await listArticleUpdateSuggestionsAsAdmin(input.specialtySlug);
+    const allStaging = await listArticleUpdateSuggestionsAsAdmin(input.specialtySlug);
+    const categorySet =
+      input.categories && input.categories.length > 0 ? new Set(input.categories) : null;
+    const staging = categorySet
+      ? allStaging.filter((r) => {
+          const cat = (r as unknown as { category?: string }).category;
+          return cat !== undefined && categorySet.has(cat);
+        })
+      : allStaging;
 
     if (staging.length === 0) {
       await logEvent({
@@ -131,7 +144,17 @@ export async function consolidateSectionsSecondaryWorkflow(
       }
     }
 
-    await deleteConsolidatedSectionsForSpecialtyAsAdmin(input.specialtySlug);
+    // Per-category re-run: scope the wipe to the same buckets the
+    // staging filter selected, so other categories' consolidated rows
+    // survive a single-category re-run.
+    if (categorySet) {
+      await deleteConsolidatedSectionsForCategoriesAsAdmin(
+        input.specialtySlug,
+        Array.from(categorySet),
+      );
+    } else {
+      await deleteConsolidatedSectionsForSpecialtyAsAdmin(input.specialtySlug);
+    }
 
     const finalRows = Array.from(groups.values()).map((g) => ({
       articleTitle: g.articleTitle,
