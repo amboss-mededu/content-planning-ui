@@ -285,6 +285,7 @@ export interface ArticleSuggestionRecord extends PbRecord {
   specialtySlug: string;
   /** Stable, content-derived identifier — see `article-keys.ts`. */
   articleKey?: string;
+  category?: string;
   assignedEditor?: string;
   editorInTheLoopReview?: string;
   newArticle?: boolean;
