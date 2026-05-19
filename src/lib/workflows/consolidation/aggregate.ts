@@ -16,6 +16,7 @@ import type { NewArticle, SectionUpdate } from '@/lib/pb/types';
 export type MappedCodeWithSuggestions = {
   code: string;
   category: string | null;
+  consolidationCategory: string | null;
   description: string | null;
   newArticlesNeeded: NewArticle[];
   existingArticleUpdates: SectionUpdate[];

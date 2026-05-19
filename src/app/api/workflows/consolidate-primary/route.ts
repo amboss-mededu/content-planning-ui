@@ -4,7 +4,8 @@
  * POST /api/workflows/consolidate-primary
  *   body: {
  *     specialtySlug: string;
- *     categories?: string[];  // optional filter; omit for all mapped categories
+ *     consolidationCategories?: string[]; // optional bucket filter; omit for all buckets
+ *     categories?: string[]; // optional legacy/source-category filter
  *   }
  *
  * The runner is an LLM stub today — see `consolidation/prompts.ts`. It
@@ -26,17 +27,29 @@ import {
 import { getSpecialty } from '@/lib/data/specialties';
 import { consolidateArticlesSecondaryWorkflow } from '@/lib/workflows/consolidation/articles-secondary';
 import { consolidatePrimaryWorkflow } from '@/lib/workflows/consolidation/primary';
+import { resetConsolidationScope } from '@/lib/workflows/consolidation/reset-scope';
 import { consolidateSectionsSecondaryWorkflow } from '@/lib/workflows/consolidation/sections-secondary';
+import type { ModelSpec } from '@/lib/workflows/lib/llm';
+import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
+import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 
 type Body = {
   specialtySlug?: string;
+  consolidationCategories?: unknown;
   categories?: unknown;
+  model?: unknown;
   /** When true, the route waits for primary to finish then runs the two
    *  secondary stages in sequence on the same runId before responding.
    *  Used by the per-category "Start consolidation" button on the review
    *  page so one click produces end-to-end output. The pipeline-page
    *  start buttons leave this off and fire each stage individually. */
   chainSecondaries?: boolean;
+};
+
+const DEFAULT_CONSOLIDATION_MODEL: ModelSpec = {
+  provider: 'google',
+  model: 'gemini-3.1-pro-preview',
+  reasoning: 'high',
 };
 
 function stringArray(raw: unknown): string[] | undefined {
@@ -65,18 +78,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }
 
-  const categories = stringArray(body.categories) ?? null;
+  const consolidationCategories = stringArray(body.consolidationCategories) ?? null;
+  const sourceCategories = stringArray(body.categories) ?? null;
+  const modelParse = body.model
+    ? parseModelSpec(body.model)
+    : { ok: true as const, spec: DEFAULT_CONSOLIDATION_MODEL };
+  if (!modelParse.ok) {
+    return NextResponse.json({ error: `model: ${modelParse.error}` }, { status: 400 });
+  }
+  const model = modelParse.spec;
 
   // Readiness check: every targeted category must have all its codes
   // mapped, otherwise primary consolidation would silently skip the
   // unmapped rows (since the aggregator only sees `mappedAt > 0`).
-  const mapped = await listMappedCodesWithSuggestionsAsAdmin(slug, categories);
+  const mapped = await listMappedCodesWithSuggestionsAsAdmin(
+    slug,
+    consolidationCategories,
+    sourceCategories,
+  );
   if (mapped.length === 0) {
     return NextResponse.json(
       {
-        error: categories
-          ? 'No mapped codes match the selected categories.'
-          : 'No mapped codes for this specialty. Run code mapping first.',
+        error:
+          consolidationCategories || sourceCategories
+            ? 'No mapped codes match the selected categories.'
+            : 'No mapped codes for this specialty. Run code mapping first.',
       },
       { status: 409 },
     );
@@ -84,9 +110,21 @@ export async function POST(req: NextRequest) {
 
   const chain = body.chainSecondaries === true;
 
+  const apiKeys = await resolveApiKeysForRun([model.provider]);
+  if (!apiKeys[model.provider]) {
+    return NextResponse.json(
+      {
+        error: `No API key configured for ${model.provider}.`,
+        code: 'MISSING_API_KEY',
+        provider: model.provider,
+      },
+      { status: 409 },
+    );
+  }
+
   const { id: runId } = await createPipelineRun({
     specialtySlug: slug,
-    targetCategories: categories,
+    targetCategories: consolidationCategories,
   });
   // Init stages and run the chain inside a single try so an early
   // failure (e.g. PB validation rejecting a stage create) doesn't leave
@@ -126,23 +164,30 @@ export async function POST(req: NextRequest) {
     // a router.refresh() on the client picks up the new rows. Switch to
     // fire-and-forget if a future LLM-backed runner makes this too slow.
     try {
+      await resetConsolidationScope({
+        specialtySlug: slug,
+        consolidationCategories,
+      });
       const primaryStats = await consolidatePrimaryWorkflow({
         runId,
         specialtySlug: slug,
-        categories,
+        consolidationCategories,
+        sourceCategories,
+        model,
+        apiKeys,
       });
-      // Forward `categories` so the secondaries' wipe-and-replace is
-      // scoped to the same buckets — otherwise a single-category re-run
-      // wipes every other category's consolidated output.
+      // Forward `consolidationCategories` so the secondaries'
+      // wipe-and-replace is scoped to the same buckets — otherwise a
+      // single-category re-run wipes every other category's consolidated output.
       const articlesStats = await consolidateArticlesSecondaryWorkflow({
         runId,
         specialtySlug: slug,
-        categories,
+        categories: consolidationCategories,
       });
       const sectionsStats = await consolidateSectionsSecondaryWorkflow({
         runId,
         specialtySlug: slug,
-        categories,
+        categories: consolidationCategories,
       });
       result = {
         stagingArticles: primaryStats.stagingArticles,
@@ -150,22 +195,46 @@ export async function POST(req: NextRequest) {
         consolidatedArticles: articlesStats.merged,
         consolidatedSections: sectionsStats.merged,
       };
+      console.log('[consolidate-primary] chained workflow result', {
+        runId,
+        specialtySlug: slug,
+        consolidationCategories,
+        sourceCategories,
+        ...result,
+      });
     } catch (e) {
       console.error('[consolidate-primary] chained workflow failed', e);
-      // The runners themselves already marked their stage failed and
-      // flipped the run status. Surface as 500 so the UI shows an error.
+      await updatePipelineRun(runId, {
+        status: 'failed',
+        finishedAt: Date.now(),
+        error: e instanceof Error ? e.message : String(e),
+      }).catch(() => {});
       return NextResponse.json(
         { error: e instanceof Error ? e.message : String(e) },
         { status: 500 },
       );
     }
   } else {
-    void consolidatePrimaryWorkflow({
-      runId,
-      specialtySlug: slug,
-      categories,
-    }).catch((e) => {
+    void (async () => {
+      await resetConsolidationScope({
+        specialtySlug: slug,
+        consolidationCategories,
+      });
+      await consolidatePrimaryWorkflow({
+        runId,
+        specialtySlug: slug,
+        consolidationCategories,
+        sourceCategories,
+        model,
+        apiKeys,
+      });
+    })().catch((e) => {
       console.error('[consolidate-primary] workflow unhandled rejection', e);
+      void updatePipelineRun(runId, {
+        status: 'failed',
+        finishedAt: Date.now(),
+        error: e instanceof Error ? e.message : String(e),
+      }).catch(() => {});
     });
   }
 
@@ -176,7 +245,8 @@ export async function POST(req: NextRequest) {
     runId,
     specialty: slug,
     result,
-    categories: categories ?? null,
+    consolidationCategories: consolidationCategories ?? null,
+    categories: sourceCategories ?? null,
     mappedCodes: mapped.length,
     chained: chain,
   });

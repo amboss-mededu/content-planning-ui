@@ -8,8 +8,14 @@ import type {
   ArticleSuggestionRecord,
   CodeCategoryRecord,
   CodeRecord,
+  ConsolidatedArticleRecord,
+  ConsolidatedSectionRecord,
 } from '@/lib/pb/types';
 import type { CodeCategory } from '@/lib/types';
+import {
+  type BucketCodeStatus,
+  deriveBucketStats,
+} from '@/lib/workflows/consolidation/buckets';
 
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
@@ -104,24 +110,10 @@ export async function deleteCategoriesForSpecialtyAsAdmin(slug: string): Promise
  * pipeline produced, how many of its codes are properly carried through?"
  * (vs. the source-ontology category, which is the upstream input grouping.)
  *
- * Per-code status (included / excluded / ignored) is derived from the
- * source-ontology `codeCategories` records, since those are the rows that
- * own the includedArticleCodes / excludedArticleCodes / totallyIgnoredCodes
- * arrays. Aggregating those statuses by consolidationCategory is what makes
- * this a useful QC view.
- *
- * # Orphan = codes in the bucket whose code-string is in none of the four
- * arrays of any source codeCategories record — pipeline never saw them.
- *
- * "Consolidated" signal: a bucket counts as consolidated iff at least one
- * of its codes has a status entry (included / excluded / ignored) in any
- * `codeCategories` record — i.e. `hasAnyStatusInfo`. Consolidation writes
- * these decision arrays alongside the suggestion/output rows, but the
- * decision arrays are the more reliable signal: xlsx fixtures often ship
- * `codeCategories` populated for every source category while the
- * `newArticleSuggestions` / `consolidatedArticles` output rows only cover
- * a subset. Earlier output-row checks produced false negatives for
- * imported specialties.
+ * Current final output rows are the source of truth for included codes.
+ * `codeCategories` decision arrays are supplemental only for explicit
+ * excluded/ignored decisions after current output exists. Before then,
+ * consolidation stats are not applicable and render as dashes in the UI.
  */
 export type CategoryOrchestration = {
   consolidationCategory: string;
@@ -131,10 +123,10 @@ export type CategoryOrchestration = {
   isUnbucketed: boolean;
   source?: string;
   numCodes: number;
-  numIncludedCodes: number;
-  numExcludedCodes: number;
-  numTotallyIgnoredCodes: number;
-  numOrphanCodes: number;
+  numIncludedCodes: number | null;
+  numExcludedCodes: number | null;
+  numTotallyIgnoredCodes: number | null;
+  numOrphanCodes: number | null;
   /** True iff at least one code in the bucket has a status from a source
    *  `codeCategories` record. False = no category-side data to QC against;
    *  consolidation columns are 0 across the board and the bucket is wholly
@@ -144,12 +136,8 @@ export type CategoryOrchestration = {
    *  reached a yes/no verdict on AMBOSS coverage for them. Drives the
    *  mapping-progress + status columns. */
   numMappedCodes: number;
-  /** True when at least one code in this bucket has a status entry in some
-   *  `codeCategories` record (included / excluded / ignored arrays).
-   *  Equivalent to `hasAnyStatusInfo`. Output rows
-   *  (newArticleSuggestions / consolidatedArticles) aren't a reliable
-   *  signal — xlsx fixtures can ship decision arrays without the
-   *  corresponding output rows. */
+  /** True when current consolidated article/section output exists for
+   *  this consolidation bucket. */
   hasConsolidatedOutput: boolean;
 };
 
@@ -172,44 +160,27 @@ function modal(values: Array<string | undefined | null>): string | undefined {
   return best;
 }
 
-type CodeStatus = 'included' | 'excluded' | 'ignored';
-
 export async function listCategoryOrchestration(
   slug: string,
 ): Promise<CategoryOrchestration[]> {
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows] = await Promise.all([
+  const [codes, categoryRows, articleRows, sectionRows] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ConsolidatedSectionRecord>('consolidatedSections')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
-
-  // Build a per-code status lookup from the source-category records.
-  // Priority: included > excluded > ignored. A code that appears in
-  // multiple arrays (e.g. both included-article and included-section, or
-  // pathologically in conflicting buckets) gets the strongest status only.
-  const statusByCode = new Map<string, CodeStatus>();
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.includedArticleCodes) ?? [])
-      statusByCode.set(c, 'included');
-    for (const c of castStringArray(rec.includedSectionCodes) ?? [])
-      statusByCode.set(c, 'included');
-  }
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.excludedArticleCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
-    for (const c of castStringArray(rec.excludedSectionCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
-  }
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.totallyIgnoredCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'ignored');
-  }
+  const outputRows = [...articleRows, ...sectionRows];
 
   // Group codes by consolidationCategory. Codes with no consolidationCategory
   // share an "(unbucketed)" row. A Set keys by code-string so duplicates in
@@ -223,7 +194,7 @@ export async function listCategoryOrchestration(
   };
   const byBucket = new Map<string, Bucket>();
   for (const r of codes) {
-    const raw = r.consolidationCategory;
+    const raw = r.consolidationCategory?.trim();
     const isUnbucketed = !raw;
     const key = raw ?? UNBUCKETED_LABEL;
     const entry = byBucket.get(key) ?? {
@@ -241,49 +212,25 @@ export async function listCategoryOrchestration(
 
   const out: CategoryOrchestration[] = [];
   for (const bucket of byBucket.values()) {
-    let included = 0;
-    let excluded = 0;
-    let ignored = 0;
-    let orphan = 0;
-    let anyStatus = false;
-    for (const c of bucket.codes) {
-      const s = statusByCode.get(c);
-      if (s === 'included') {
-        included++;
-        anyStatus = true;
-      } else if (s === 'excluded') {
-        excluded++;
-        anyStatus = true;
-      } else if (s === 'ignored') {
-        ignored++;
-        anyStatus = true;
-      } else {
-        orphan++;
-      }
-    }
-
-    // "Consolidated" iff any code in this bucket has a status entry in a
-    // `codeCategories` record (included / excluded / ignored) — i.e.
-    // anyStatus is true. That's the same signal as `hasAnyStatusInfo`
-    // and it's the most reliable across both live-pipeline output and
-    // xlsx-imported fixtures, where output rows
-    // (newArticleSuggestions / consolidatedArticles) can be partial or
-    // entirely absent for some source categories even when consolidation
-    // decisions were recorded.
-    const hasConsolidatedOutput = anyStatus;
+    const stats = deriveBucketStats({
+      bucket: bucket.key,
+      codes: bucket.codes,
+      outputRows,
+      decisionRows: categoryRows,
+    });
 
     out.push({
       consolidationCategory: bucket.key,
       isUnbucketed: bucket.isUnbucketed,
       source: modal(bucket.sources),
       numCodes: bucket.codes.size,
-      numIncludedCodes: included,
-      numExcludedCodes: excluded,
-      numTotallyIgnoredCodes: ignored,
-      numOrphanCodes: orphan,
-      hasAnyStatusInfo: anyStatus,
+      numIncludedCodes: stats.numIncludedCodes,
+      numExcludedCodes: stats.numExcludedCodes,
+      numTotallyIgnoredCodes: stats.numTotallyIgnoredCodes,
+      numOrphanCodes: stats.numOrphanCodes,
+      hasAnyStatusInfo: stats.hasAnyStatusInfo,
       numMappedCodes: bucket.mappedCodes.size,
-      hasConsolidatedOutput,
+      hasConsolidatedOutput: stats.hasConsolidatedOutput,
     });
   }
 
@@ -303,13 +250,13 @@ export type BucketCode = {
   description?: string;
   source?: string;
   category?: string;
-  status: 'included' | 'excluded' | 'ignored' | 'orphan';
+  status: BucketCodeStatus;
   mapped: boolean;
 };
 
 /**
  * Codes belonging to a single consolidationCategory bucket, each annotated
- * with its per-code status (included / excluded / ignored / orphan) and
+ * with its per-code status (included / excluded / ignored / orphan / pending) and
  * mapping verdict. Same per-code status derivation as
  * `listCategoryOrchestration`, just unaggregated. Used by the bucket-detail
  * modal on the categories page.
@@ -324,37 +271,33 @@ export async function listBucketCodes(
   await connection();
   const pb = await userClient();
 
-  const [codes, categoryRows] = await Promise.all([
+  const [codes, categoryRows, articleRows, sectionRows] = await Promise.all([
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
     pb
       .collection<CodeCategoryRecord>('codeCategories')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    pb
+      .collection<ConsolidatedSectionRecord>('consolidatedSections')
+      .getFullList({ filter: `specialtySlug = "${slug}"` }),
   ]);
-
-  const statusByCode = new Map<string, CodeStatus>();
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.includedArticleCodes) ?? [])
-      statusByCode.set(c, 'included');
-    for (const c of castStringArray(rec.includedSectionCodes) ?? [])
-      statusByCode.set(c, 'included');
-  }
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.excludedArticleCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
-    for (const c of castStringArray(rec.excludedSectionCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'excluded');
-  }
-  for (const rec of categoryRows) {
-    for (const c of castStringArray(rec.totallyIgnoredCodes) ?? [])
-      if (!statusByCode.has(c)) statusByCode.set(c, 'ignored');
-  }
-
   const wantUnbucketed = bucket === UNBUCKETED_LABEL;
   const matched = codes.filter((c) =>
-    wantUnbucketed ? !c.consolidationCategory : c.consolidationCategory === bucket,
+    wantUnbucketed
+      ? !c.consolidationCategory?.trim()
+      : c.consolidationCategory?.trim() === bucket,
   );
+  const bucketCodes = new Set(matched.map((c) => c.code));
+  const stats = deriveBucketStats({
+    bucket,
+    codes: bucketCodes,
+    outputRows: [...articleRows, ...sectionRows],
+    decisionRows: categoryRows,
+  });
 
   // De-dupe on code-string to mirror the bucket-level aggregation; pick the
   // first occurrence's metadata.
@@ -368,7 +311,7 @@ export async function listBucketCodes(
       description: r.description ?? undefined,
       source: r.source ?? undefined,
       category: r.category ?? undefined,
-      status: statusByCode.get(r.code) ?? 'orphan',
+      status: stats.statusByCode.get(r.code) ?? 'pending',
       mapped: (r.mappedAt ?? 0) > 0,
     });
   }

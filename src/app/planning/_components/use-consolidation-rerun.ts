@@ -2,19 +2,19 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { readSpecForStage } from '../[specialty]/pipeline/_components/model-selection-storage';
 
-type Options = {
+export type ConsolidationRerunOptions = {
   /** Show window.confirm before firing. Defaults to true. */
   confirm?: boolean;
   /** Forward chainSecondaries to the workflow route. Defaults to true. */
   chainSecondaries?: boolean;
-  /** Extra categories to include in the workflow's `categories` filter
-   *  beyond the primary one. The Category modal uses this to translate
-   *  a `consolidationCategory` bucket into the source categories its
-   *  codes actually carry — the workflow filters codes by source
-   *  `category`, so passing just the bucket name silently produces 0
-   *  staging rows. The primary category still drives the in-flight Set
-   *  key, confirm message, and "Rebuilding…" badge for the bucket. */
+  /** Current-output signal for copy. Defaults to true for legacy callers. */
+  hasOutput?: boolean;
+  /** Source categories represented by this consolidation bucket. The
+   *  workflow writes/reset scopes by consolidation bucket, but the
+   *  mapped-code read also accepts source-category scopes for compatibility
+   *  with imported data and older mapping runs. */
   additionalCategories?: string[];
 };
 
@@ -55,19 +55,22 @@ export function useConsolidationRerun(slug: string) {
   }, [lastResult]);
 
   const rerun = useCallback(
-    async (category: string, options?: Options) => {
+    async (category: string, options?: ConsolidationRerunOptions) => {
       const {
         confirm = true,
         chainSecondaries = true,
+        hasOutput = true,
         additionalCategories,
       } = options ?? {};
       if (inFlight.current.has(category)) return;
+      const verb = hasOutput ? 'Re-run' : 'Run';
+      const consequence = hasOutput
+        ? ' This will erase the current consolidation output for this category.'
+        : '';
       if (
         confirm &&
         typeof window !== 'undefined' &&
-        !window.confirm(
-          `Re-run consolidation for "${category}"? This will erase the current consolidation output for this category.`,
-        )
+        !window.confirm(`${verb} consolidation for "${category}"?${consequence}`)
       ) {
         return;
       }
@@ -76,18 +79,15 @@ export function useConsolidationRerun(slug: string) {
       inFlight.current.add(category);
       bump();
       try {
-        // Dedupe in case the caller already included the primary
-        // category in the additional list.
-        const categories = Array.from(
-          new Set([category, ...(additionalCategories ?? [])]),
-        );
         const res = await fetch('/api/workflows/consolidate-primary', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             specialtySlug: slug,
-            categories,
+            consolidationCategories: [category],
+            categories: Array.from(new Set([category, ...(additionalCategories ?? [])])),
             chainSecondaries,
+            model: readSpecForStage(slug, 'consolidate_primary'),
           }),
         });
         const body = (await res.json().catch(() => ({}))) as {
@@ -106,13 +106,22 @@ export function useConsolidationRerun(slug: string) {
           return;
         }
         if (body.result) {
-          setLastResult({
+          const nextResult = {
             category,
             stagingArticles: body.result.stagingArticles ?? 0,
             stagingSections: body.result.stagingSections ?? 0,
             consolidatedArticles: body.result.consolidatedArticles ?? 0,
             consolidatedSections: body.result.consolidatedSections ?? 0,
-          });
+          };
+          setLastResult(nextResult);
+          if (nextResult.consolidatedArticles + nextResult.consolidatedSections === 0) {
+            const stagingTotal = nextResult.stagingArticles + nextResult.stagingSections;
+            setError(
+              stagingTotal === 0
+                ? `Consolidation ran for "${category}", but produced 0 candidates. The mapped codes in this bucket do not currently have new-article or section-update suggestions to consolidate.`
+                : `Consolidation ran for "${category}" and produced ${stagingTotal} staging candidate${stagingTotal === 1 ? '' : 's'}, but 0 final rows. Check the primary staging rows for this bucket.`,
+            );
+          }
         }
         router.refresh();
       } catch (e) {

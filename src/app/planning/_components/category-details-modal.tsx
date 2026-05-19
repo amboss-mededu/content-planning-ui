@@ -12,7 +12,9 @@ import {
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
+import { getConsolidationActionLabel } from '@/lib/workflows/consolidation/buckets';
 import { listBucketCodes } from '../[specialty]/actions';
+import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { useConsolidationRerun } from './use-consolidation-rerun';
 import { useRerunningCategories } from './use-rerunning-categories';
 
@@ -25,7 +27,16 @@ function deriveStatus(r: CategoryOrchestration): CategoryStatus {
   return r.hasConsolidatedOutput ? 'consolidated' : 'ready';
 }
 
-function StatusBadge({ bucket }: { bucket: CategoryOrchestration }) {
+function StatusBadge({
+  bucket,
+  isRerunning,
+}: {
+  bucket: CategoryOrchestration;
+  isRerunning: boolean;
+}) {
+  if (isRerunning) {
+    return <ConsolidationProgressBadge />;
+  }
   const status = deriveStatus(bucket);
   if (status === 'consolidated') {
     return <Badge text="Consolidated" color="green" icon="check" />;
@@ -40,11 +51,12 @@ function CodeStatusBadge({ status }: { status: BucketCode['status'] }) {
   if (status === 'included') return <Badge text="included" color="green" />;
   if (status === 'excluded') return <Badge text="excluded" color="gray" />;
   if (status === 'ignored') return <Badge text="ignored" color="yellow" />;
+  if (status === 'pending') return <Badge text="not consolidated" color="gray" />;
   return <Badge text="orphan" color="red" />;
 }
 
 function MappingCounts({ bucket }: { bucket: CategoryOrchestration }) {
-  const rows: Array<{ label: string; value: number }> = [
+  const rows: Array<{ label: string; value: number | null }> = [
     { label: '# Codes', value: bucket.numCodes },
     { label: '# Mapped', value: bucket.numMappedCodes },
     { label: '# Included', value: bucket.numIncludedCodes },
@@ -59,7 +71,7 @@ function MappingCounts({ bucket }: { bucket: CategoryOrchestration }) {
           <Text size="s" weight="bold">
             {r.label}:
           </Text>
-          <Text size="s">{r.value}</Text>
+          <Text size="s">{r.value === null ? '—' : r.value}</Text>
         </Inline>
       ))}
     </Stack>
@@ -103,10 +115,12 @@ function CodesList({ codes }: { codes: BucketCode[] }) {
 export function CategoryDetailsModal({
   bucket,
   slug,
+  onRunningChange,
   onClose,
 }: {
   bucket: CategoryOrchestration;
   slug: string;
+  onRunningChange?: (category: string, running: boolean) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -117,6 +131,8 @@ export function CategoryDetailsModal({
     isRunning,
     error: rerunError,
     dismissError: dismissRerunError,
+    lastResult,
+    dismissLastResult,
   } = useConsolidationRerun(slug);
   // Live cross-tab signal so the modal shows "Rebuilding…" if the run was
   // started from the consolidation review screen — not just from this
@@ -124,19 +140,18 @@ export function CategoryDetailsModal({
   // before PB's realtime delivers the create event.
   const rebuildingCategories = useRerunningCategories(slug);
   const status = deriveStatus(bucket);
-  // Re-run only makes sense once the category is mappable and has been
-  // through consolidation at least once (otherwise editors should use the
-  // initial run path from the consolidation review screen).
   const canRerun = status === 'consolidated' || status === 'ready';
   const isRerunning =
     isRunning(bucket.consolidationCategory) ||
     rebuildingCategories.has(bucket.consolidationCategory);
 
-  // The workflow filters codes by source `category`, but this modal is
-  // keyed on `consolidationCategory`. Translate by reading the bucket's
-  // codes (already fetched for the modal body) and extracting their
-  // distinct source categories. Without this, the re-run from the
-  // Categories tab finds zero codes and silently produces zero rows.
+  useEffect(() => {
+    onRunningChange?.(bucket.consolidationCategory, isRerunning);
+    return () => {
+      onRunningChange?.(bucket.consolidationCategory, false);
+    };
+  }, [bucket.consolidationCategory, isRerunning, onRunningChange]);
+
   const sourceCategoriesInBucket = useMemo(() => {
     if (!codes) return [];
     const set = new Set<string>();
@@ -188,7 +203,7 @@ export function CategoryDetailsModal({
           <Text size="s" weight="bold">
             Status:
           </Text>
-          <StatusBadge bucket={bucket} />
+          <StatusBadge bucket={bucket} isRerunning={isRerunning} />
         </Inline>
 
         <MappingCounts bucket={bucket} />
@@ -243,6 +258,42 @@ export function CategoryDetailsModal({
             {rerunError}
           </button>
         ) : null}
+        {lastResult ? (
+          <button
+            type="button"
+            onClick={dismissLastResult}
+            style={{
+              textAlign: 'left',
+              padding: '6px 8px',
+              border:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? '1px solid rgb(16, 185, 129)'
+                  : '1px solid rgb(217, 119, 6)',
+              borderRadius: 4,
+              background:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? 'rgb(220, 252, 231)'
+                  : 'rgb(255, 247, 219)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color:
+                lastResult.consolidatedArticles + lastResult.consolidatedSections > 0
+                  ? 'rgb(6, 95, 70)'
+                  : 'rgb(120, 53, 15)',
+              fontSize: 12,
+            }}
+            title="Dismiss"
+          >
+            Result · {lastResult.stagingArticles} primary article candidate
+            {lastResult.stagingArticles === 1 ? '' : 's'} · {lastResult.stagingSections}{' '}
+            primary section candidate
+            {lastResult.stagingSections === 1 ? '' : 's'} ·{' '}
+            {lastResult.consolidatedArticles} final article
+            {lastResult.consolidatedArticles === 1 ? '' : 's'} ·{' '}
+            {lastResult.consolidatedSections} final section
+            {lastResult.consolidatedSections === 1 ? '' : 's'}
+          </button>
+        ) : null}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button
@@ -258,11 +309,15 @@ export function CategoryDetailsModal({
             disabled={!canRerun || isRerunning || codesNotLoaded}
             onClick={() => {
               void rerun(bucket.consolidationCategory, {
+                hasOutput: bucket.hasConsolidatedOutput,
                 additionalCategories: sourceCategoriesInBucket,
               });
             }}
           >
-            {isRerunning ? 'Rebuilding…' : 'Re-run consolidation'}
+            {getConsolidationActionLabel({
+              hasOutput: bucket.hasConsolidatedOutput,
+              isConsolidating: isRerunning,
+            })}
           </Button>
         </div>
       </div>

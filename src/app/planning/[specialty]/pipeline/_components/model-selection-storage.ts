@@ -86,17 +86,17 @@ export const DEFAULT_MODELS: Record<string, ModelSpec> = {
   consolidate_primary: {
     provider: 'google',
     model: 'gemini-3.1-pro-preview',
-    reasoning: 'auto',
+    reasoning: 'high',
   },
   consolidate_articles: {
     provider: 'google',
     model: 'gemini-3.1-pro-preview',
-    reasoning: 'auto',
+    reasoning: 'high',
   },
   consolidate_sections: {
     provider: 'google',
     model: 'gemini-3.1-pro-preview',
-    reasoning: 'auto',
+    reasoning: 'high',
   },
   write_article: {
     provider: 'google',

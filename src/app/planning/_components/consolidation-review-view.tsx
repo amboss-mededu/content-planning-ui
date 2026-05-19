@@ -12,6 +12,10 @@ import {
 } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
+  deriveReviewCategories,
+  getConsolidationActionLabel,
+} from '@/lib/workflows/consolidation/buckets';
+import {
   bulkApproveAndBacklogArticleReviews,
   bulkApproveAndBacklogSectionReviews,
   bulkApproveArticleReviews,
@@ -29,7 +33,10 @@ import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
-import { useConsolidationRerun } from './use-consolidation-rerun';
+import {
+  type ConsolidationRerunOptions,
+  useConsolidationRerun,
+} from './use-consolidation-rerun';
 import { useRerunningCategories } from './use-rerunning-categories';
 
 type CategoryBucket = {
@@ -169,16 +176,12 @@ export function ConsolidationReviewView({
     return m;
   }, [articles, sections]);
 
-  // Rail categories = only those that have produced consolidated output
-  // (articles or sections in `grouped`). Codes-table categories that
-  // contributed nothing don't appear — once consolidation has run, an
-  // empty category means "produced nothing", not "still pending". The
-  // specialty-level "Run consolidation for all categories" button at
-  // the top of the rail covers the bootstrap case where `grouped` is
-  // empty and there's no entry point yet.
+  // Rail categories are keyed by codes.consolidationCategory. Existing
+  // output is only detail for those buckets; it is not the source of
+  // truth for the rail, so a ready bucket that produced zero rows stays visible.
   const categories = useMemo(
-    () => Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)),
-    [grouped],
+    () => deriveReviewCategories(mappingByCategory),
+    [mappingByCategory],
   );
 
   // Specialty-level "any mapping at all?" — controls whether the
@@ -195,11 +198,11 @@ export function ConsolidationReviewView({
   // Resolve to the first category if the URL value doesn't exist (yet) in
   // `grouped` — e.g. on hard reload of a stale URL after a re-run.
   const selectedCategory = useMemo(() => {
-    if (selectedCategoryRaw && grouped.has(selectedCategoryRaw)) {
+    if (selectedCategoryRaw && categories.includes(selectedCategoryRaw)) {
       return selectedCategoryRaw;
     }
     return categories[0] ?? null;
-  }, [selectedCategoryRaw, grouped, categories]);
+  }, [selectedCategoryRaw, categories]);
 
   // Sync URL ← selectedCategory without triggering navigation. Same
   // pattern as articles-view.tsx — keeps the URL bookmarkable while
@@ -430,7 +433,9 @@ export function ConsolidationReviewView({
     if (
       typeof window !== 'undefined' &&
       !window.confirm(
-        'Re-run consolidation for all categories? This will erase all current consolidation output.',
+        hasAnyMapping
+          ? 'Run consolidation for all categories? This will reset current consolidation output where it exists.'
+          : 'Run consolidation for all categories?',
       )
     ) {
       return;
@@ -457,7 +462,7 @@ export function ConsolidationReviewView({
     } finally {
       setIsRunningAll(false);
     }
-  }, [slug, router, isRunningAll]);
+  }, [slug, router, isRunningAll, hasAnyMapping]);
 
   // ----- Reset approvals -----
   const [isResetting, setIsResetting] = useState(false);
@@ -650,6 +655,9 @@ export function ConsolidationReviewView({
               onApproveAll={approveAllInCategory}
               onStartConsolidation={startConsolidation}
               isConsolidating={isCategoryConsolidating(selectedCategory)}
+              hasOutput={
+                selectedBucket.articles.length + selectedBucket.sections.length > 0
+              }
               onRowClickArticle={(id) => setModal({ kind: 'article', startAtId: id })}
               onRowClickSection={(id) => setModal({ kind: 'section', startAtId: id })}
             />
@@ -743,7 +751,7 @@ function CategoryRail({
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
   isCategoryConsolidating: (cat: string) => boolean;
-  onStartConsolidation: (cat: string) => void;
+  onStartConsolidation: (cat: string, options?: ConsolidationRerunOptions) => void;
   isRunningAll: boolean;
   onStartConsolidationAll: () => void;
   onResetApprovals: () => void;
@@ -757,7 +765,7 @@ function CategoryRail({
   } | null;
   onDismissLastResult: () => void;
 }) {
-  const hasOutput = categories.length > 0;
+  const hasOutput = Object.values(counts).some((c) => c.total > 0);
   return (
     <div
       style={{
@@ -924,14 +932,14 @@ function CategoryRail({
                   )}
                 </Inline>
               </button>
-              {hasOutput && mapping?.ready ? (
+              {mapping?.ready ? (
                 <Button
                   variant="tertiary"
                   fullWidth
-                  onClick={() => onStartConsolidation(cat)}
+                  onClick={() => onStartConsolidation(cat, { hasOutput })}
                   disabled={isConsolidating}
                 >
-                  {isConsolidating ? 'Rebuilding…' : 'Re-run consolidation'}
+                  {getConsolidationActionLabel({ hasOutput, isConsolidating })}
                 </Button>
               ) : null}
             </div>
@@ -969,6 +977,7 @@ function CategoryDetailPane({
   onApproveAll,
   onStartConsolidation,
   isConsolidating,
+  hasOutput,
   onRowClickArticle,
   onRowClickSection,
 }: {
@@ -992,8 +1001,9 @@ function CategoryDetailPane({
   onUnapproveArticle: (id: string) => void;
   onUnapproveSection: (id: string) => void;
   onApproveAll: () => void;
-  onStartConsolidation: (cat: string) => void;
+  onStartConsolidation: (cat: string, options?: ConsolidationRerunOptions) => void;
   isConsolidating: boolean;
+  hasOutput: boolean;
   onRowClickArticle: (id: string) => void;
   onRowClickSection: (id: string) => void;
 }) {
@@ -1046,10 +1056,10 @@ function CategoryDetailPane({
         </Button>
         <Button
           variant="tertiary"
-          onClick={() => onStartConsolidation(category)}
+          onClick={() => onStartConsolidation(category, { hasOutput })}
           disabled={isConsolidating}
         >
-          {isConsolidating ? 'Rebuilding…' : 'Re-run consolidation'}
+          {getConsolidationActionLabel({ hasOutput, isConsolidating })}
         </Button>
       </Inline>
 

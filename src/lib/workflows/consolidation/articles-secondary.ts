@@ -17,7 +17,8 @@ import {
   deleteConsolidatedArticlesForSpecialtyAsAdmin,
   listNewArticleSuggestionsAsAdmin,
 } from '@/lib/data/articles';
-import type { ArticleSuggestionRecord } from '@/lib/pb/types';
+import { createAdminClient } from '@/lib/pb/server';
+import type { ArticleSuggestionRecord, CodeRecord } from '@/lib/pb/types';
 import {
   markStageCompleted,
   markStageFailed,
@@ -50,6 +51,31 @@ function avg(values: number[]): number | undefined {
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
 
+async function codeCategoryLookup(slug: string): Promise<Map<string, string>> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  const out = new Map<string, string>();
+  for (const row of rows) {
+    const category = row.consolidationCategory?.trim();
+    if (category) out.set(row.code, category);
+  }
+  return out;
+}
+
+function categoriesForCodes(
+  rawCodes: unknown,
+  codeToCategory: Map<string, string>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const code of extractCodeList(rawCodes)) {
+    const category = codeToCategory.get(code);
+    if (category) out.add(category);
+  }
+  return out;
+}
+
 export type ConsolidateArticlesSecondaryStats = {
   merged: number;
 };
@@ -65,15 +91,34 @@ export async function consolidateArticlesSecondaryWorkflow(
   try {
     await markStageRunning(input.runId, 'consolidate_articles');
 
-    const allStaging = await listNewArticleSuggestionsAsAdmin(input.specialtySlug);
+    const [allStaging, codeToCategory] = await Promise.all([
+      listNewArticleSuggestionsAsAdmin(input.specialtySlug),
+      codeCategoryLookup(input.specialtySlug),
+    ]);
     const categorySet =
-      input.categories && input.categories.length > 0 ? new Set(input.categories) : null;
+      input.categories && input.categories.length > 0
+        ? new Set(input.categories.map((category) => category.trim()))
+        : null;
     const staging = categorySet
       ? allStaging.filter((r) => {
           const cat = (r as unknown as { category?: string }).category;
-          return cat !== undefined && categorySet.has(cat);
+          if (cat !== undefined && categorySet.has(cat.trim())) return true;
+          const rowCategories = categoriesForCodes(r.codes, codeToCategory);
+          return Array.from(rowCategories).some((category) => categorySet.has(category));
         })
       : allStaging;
+
+    // Wipe-and-replace belongs to the secondary stage even when the new
+    // primary output is empty. Otherwise a zero-output rerun would leave
+    // stale final rows visible and make the bucket look consolidated.
+    if (categorySet) {
+      await deleteConsolidatedArticlesForCategoriesAsAdmin(
+        input.specialtySlug,
+        Array.from(categorySet),
+      );
+    } else {
+      await deleteConsolidatedArticlesForSpecialtyAsAdmin(input.specialtySlug);
+    }
 
     if (staging.length === 0) {
       await logEvent({
@@ -115,6 +160,9 @@ export async function consolidateArticlesSecondaryWorkflow(
       if (existing) {
         if (row.specialtyName) existing.categories.add(row.specialtyName);
         for (const c of codes) existing.codes.add(c);
+        for (const c of categoriesForCodes(row.codes, codeToCategory)) {
+          existing.categories.add(c);
+        }
         if (importance !== null) existing.importances.push(importance);
       } else {
         groups.set(key, {
@@ -129,20 +177,11 @@ export async function consolidateArticlesSecondaryWorkflow(
       const rec = row as unknown as Record<string, unknown>;
       const recordCategory = typeof rec.category === 'string' ? rec.category : null;
       if (g && recordCategory) g.categories.add(recordCategory);
-    }
-
-    // Wipe-and-replace: secondary owns the final table, so a re-run
-    // replaces every row. When the call is scoped to specific categories
-    // (per-category re-run), restrict the wipe to those buckets only —
-    // otherwise a single-category re-run takes the entire specialty's
-    // consolidated output down with it.
-    if (categorySet) {
-      await deleteConsolidatedArticlesForCategoriesAsAdmin(
-        input.specialtySlug,
-        Array.from(categorySet),
-      );
-    } else {
-      await deleteConsolidatedArticlesForSpecialtyAsAdmin(input.specialtySlug);
+      if (g) {
+        for (const c of categoriesForCodes(row.codes, codeToCategory)) {
+          g.categories.add(c);
+        }
+      }
     }
 
     const finalRows = Array.from(groups.values()).map((g) => {

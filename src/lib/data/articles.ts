@@ -194,12 +194,14 @@ export async function deleteConsolidatedArticlesForCategoriesAsAdmin(
 ): Promise<number> {
   if (categories.length === 0) return 0;
   const pb = await createAdminClient();
-  const set = new Set(categories);
+  const set = new Set(categories.map((category) => category.trim()));
   const filter = pb.filter('specialtySlug = {:slug}', { slug });
   const rows = await pb
     .collection<ConsolidatedArticleRecord>('consolidatedArticles')
     .getFullList({ filter });
-  const toDelete = rows.filter((r) => r.category !== undefined && set.has(r.category));
+  const toDelete = rows.filter(
+    (r) => r.category !== undefined && set.has(r.category.trim()),
+  );
   await Promise.all(
     toDelete.map((r) => pb.collection('consolidatedArticles').delete(r.id)),
   );

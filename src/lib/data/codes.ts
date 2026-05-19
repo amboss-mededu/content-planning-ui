@@ -12,6 +12,7 @@ import type {
   NewArticle,
   SectionUpdate,
 } from '@/lib/pb/types';
+import { filterCodesByConsolidationCategories } from '@/lib/workflows/consolidation/buckets';
 
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
@@ -192,11 +193,13 @@ export async function listUnmappedCodesAsAdmin(
  */
 export async function listMappedCodesWithSuggestionsAsAdmin(
   slug: string,
-  categories?: string[] | null,
+  consolidationCategories?: string[] | null,
+  sourceCategories?: string[] | null,
 ): Promise<
   Array<{
     code: string;
     category: string | null;
+    consolidationCategory: string | null;
     description: string | null;
     newArticlesNeeded: NewArticle[];
     existingArticleUpdates: SectionUpdate[];
@@ -206,12 +209,29 @@ export async function listMappedCodesWithSuggestionsAsAdmin(
   const rows = await pb.collection<CodeRecord>('codes').getFullList({
     filter: `specialtySlug = "${slug}" && mappedAt > 0`,
   });
-  const catSet = categories?.length ? new Set(categories) : null;
-  return rows
-    .filter((r) => (catSet ? r.category != null && catSet.has(r.category) : true))
+  const sourceSet = sourceCategories?.length ? new Set(sourceCategories) : null;
+  const byBucket = filterCodesByConsolidationCategories(rows, consolidationCategories);
+  const bySource = sourceSet
+    ? rows.filter((row) => row.category != null && sourceSet.has(row.category))
+    : [];
+  const selected = consolidationCategories?.length
+    ? byBucket.length > 0
+      ? byBucket
+      : bySource
+    : sourceSet
+      ? bySource
+      : byBucket;
+  const seen = new Set<string>();
+  return selected
+    .filter((r) => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    })
     .map((r) => ({
       code: r.code,
       category: r.category ?? null,
+      consolidationCategory: r.consolidationCategory ?? null,
       description: r.description ?? null,
       newArticlesNeeded: Array.isArray(r.newArticlesNeeded) ? r.newArticlesNeeded : [],
       existingArticleUpdates: Array.isArray(r.existingArticleUpdates)

@@ -8,11 +8,13 @@ import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
+import { deriveConsolidationMappingByCategory } from '@/lib/workflows/consolidation/buckets';
 import type { ReviewerMap, ReviewMap } from '../../_components/article-manager-modal-v2';
 import type { ArticleRow } from '../../_components/articles-view';
 import {
   buildTitleOriginLookup,
   type CategoryLookup,
+  type EmbeddedCode,
   extractCodes,
   type TitleOriginLookup,
 } from '../../_components/code-utils';
@@ -45,8 +47,29 @@ export default async function ConsolidationReviewPage({
   );
 }
 
-function projectArticle(slug: string, r: ConsolidatedArticle): ArticleRow {
-  const codes = extractCodes(r.codes);
+type CodeMetadataLookup = Record<
+  string,
+  { description?: string; category?: string | undefined } | undefined
+>;
+
+function enrichCodes(codes: EmbeddedCode[], lookup: CodeMetadataLookup): EmbeddedCode[] {
+  return codes.map((code) => {
+    const metadata = lookup[code.code];
+    if (!metadata) return code;
+    return {
+      ...code,
+      description: code.description ?? metadata.description,
+      category: code.category ?? metadata.category,
+    };
+  });
+}
+
+function projectArticle(
+  slug: string,
+  r: ConsolidatedArticle,
+  codeMetadataLookup: CodeMetadataLookup,
+): ArticleRow {
+  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup);
   return {
     id: r.id,
     articleKey:
@@ -70,8 +93,12 @@ function projectArticle(slug: string, r: ConsolidatedArticle): ArticleRow {
   };
 }
 
-function projectSection(slug: string, r: ConsolidatedSection): SectionRow {
-  const codes = extractCodes(r.codes);
+function projectSection(
+  slug: string,
+  r: ConsolidatedSection,
+  codeMetadataLookup: CodeMetadataLookup,
+): SectionRow {
+  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup);
   const updateType: 'new' | 'update' | null =
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
@@ -129,27 +156,19 @@ async function ConsolidationReviewData({
   ]);
 
   const categoryLookup: CategoryLookup = {};
-  for (const c of codeRecs) categoryLookup[c.code] = c.category;
-
-  // Per-category mapping readiness. Computed from the same `codeRecs` we
-  // already fetched — no extra query. Drives the "ready for consolidation"
-  // chip in the rail and (in a follow-up branch) the per-category
-  // consolidation trigger button.
-  const mappingByCategory: Record<
-    string,
-    { mapped: number; total: number; ready: boolean }
-  > = {};
+  const codeMetadataLookup: CodeMetadataLookup = {};
   for (const c of codeRecs) {
-    const cat = c.category ?? '(uncategorized)';
-    const entry = mappingByCategory[cat] ?? { mapped: 0, total: 0, ready: false };
-    entry.total += 1;
-    if ((c.mappedAt ?? 0) > 0) entry.mapped += 1;
-    mappingByCategory[cat] = entry;
+    categoryLookup[c.code] = c.category;
+    codeMetadataLookup[c.code] = {
+      description: c.description,
+      category: c.category,
+    };
   }
-  for (const cat of Object.keys(mappingByCategory)) {
-    const e = mappingByCategory[cat];
-    e.ready = e.total > 0 && e.mapped === e.total;
-  }
+
+  // Review buckets are keyed by codes.consolidationCategory, not the
+  // source ontology category. Unbucketed codes are excluded from this
+  // review rail because there is no user-facing consolidation bucket to run.
+  const mappingByCategory = deriveConsolidationMappingByCategory(codeRecs);
 
   // Modal drill-in needs the same lineage map the New Articles tab uses
   // so previous-title chips annotate correctly. Built from the 1st-pass
@@ -159,8 +178,8 @@ async function ConsolidationReviewData({
     sectionRecs,
   );
 
-  const articles = articleRecs.map((r) => projectArticle(slug, r));
-  const sections = sectionRecs.map((r) => projectSection(slug, r));
+  const articles = articleRecs.map((r) => projectArticle(slug, r, codeMetadataLookup));
+  const sections = sectionRecs.map((r) => projectSection(slug, r, codeMetadataLookup));
 
   // The data layer returns reviews keyed by articleKey / sectionKey
   // (stable across consolidation re-runs). The downstream view + modal

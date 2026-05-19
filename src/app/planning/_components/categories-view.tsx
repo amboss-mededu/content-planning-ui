@@ -1,12 +1,13 @@
 'use client';
 
 import { Badge, SegmentedControl, Stack, Text, Tooltip } from '@amboss/design-system';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useCallback, useState } from 'react';
 import type {
   CategoryOrchestration,
   SourceCategoryProgress,
 } from '@/lib/data/categories';
 import { CategoryDetailsModal } from './category-details-modal';
+import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { type Column, DataTable } from './data-table';
 import { useRerunningCategories } from './use-rerunning-categories';
 
@@ -19,8 +20,8 @@ type CategoryStatus = 'not-ready' | 'ready' | 'consolidated';
  *
  *   not-ready    → some "included" codes still unmapped
  *   ready        → every included code mapped, no consolidated output yet
- *   consolidated → every included code mapped AND at least one
- *                  newArticleSuggestions row cites a code from this bucket
+ *   consolidated → every included code mapped AND current consolidated
+ *                  article/section output exists for this bucket
  *
  * The (unbucketed) row is always "not-ready" — by definition its codes
  * weren't picked up by the bucketing step and consolidation can't run
@@ -70,6 +71,10 @@ function QcChip({ value, tone }: { value: ReactNode; tone: ChipTone }) {
   );
 }
 
+function nullableCount(value: number | null): ReactNode {
+  return value === null ? '—' : value;
+}
+
 type ViewMode = 'consolidation' | 'source';
 
 export function CategoriesView({
@@ -83,7 +88,23 @@ export function CategoriesView({
 }) {
   const [mode, setMode] = useState<ViewMode>('consolidation');
   const [openBucket, setOpenBucket] = useState<CategoryOrchestration | null>(null);
+  const [optimisticRunningCategories, setOptimisticRunningCategories] = useState<
+    Set<string>
+  >(() => new Set());
   const rebuildingCategories = useRerunningCategories(slug);
+  const runningCategories = new Set([
+    ...rebuildingCategories,
+    ...optimisticRunningCategories,
+  ]);
+
+  const setCategoryRunning = useCallback((category: string, running: boolean) => {
+    setOptimisticRunningCategories((current) => {
+      const next = new Set(current);
+      if (running) next.add(category);
+      else next.delete(category);
+      return next;
+    });
+  }, []);
 
   const columns: Column<CategoryOrchestration>[] = [
     {
@@ -100,9 +121,9 @@ export function CategoriesView({
             </Tooltip>
           );
         }
-        if (!r.hasAnyStatusInfo) {
+        if (r.hasConsolidatedOutput && !r.hasAnyStatusInfo) {
           return (
-            <Tooltip content="No source-category status info for any code in this bucket — every code reports as orphan.">
+            <Tooltip content="Current output exists, but no code in this bucket is included, excluded, or ignored. Every code reports as orphan.">
               <QcChip value={label} tone="amber" />
             </Tooltip>
           );
@@ -163,8 +184,8 @@ export function CategoriesView({
       description:
         'Not ready → some codes still unmapped. Ready for consolidation → all included codes mapped, awaiting consolidation. Consolidated → at least one consolidated output article cites a code from this bucket.',
       render: (r) => {
-        if (rebuildingCategories.has(r.consolidationCategory)) {
-          return <Badge text="Rebuilding…" color="yellow" />;
+        if (runningCategories.has(r.consolidationCategory)) {
+          return <ConsolidationProgressBadge />;
         }
         const status = deriveStatus(r);
         if (status === 'consolidated') {
@@ -194,10 +215,13 @@ export function CategoriesView({
       key: 'numIncludedCodes',
       label: '# Included',
       description:
-        'Codes in this bucket the consolidation kept and routed into articles/sections. Amber when below # Codes.',
+        'Codes in this bucket the current consolidated article/section output cites. Shows — until current output exists.',
       render: (r) => {
-        const tone: ChipTone = r.numIncludedCodes < r.numCodes ? 'amber' : 'none';
-        return <QcChip value={r.numIncludedCodes} tone={tone} />;
+        const tone: ChipTone =
+          r.numIncludedCodes !== null && r.numIncludedCodes < r.numCodes
+            ? 'amber'
+            : 'none';
+        return <QcChip value={nullableCount(r.numIncludedCodes)} tone={tone} />;
       },
       width: 110,
       align: 'center',
@@ -210,8 +234,8 @@ export function CategoriesView({
       key: 'numExcludedCodes',
       label: '# Excluded',
       description:
-        'Codes in this bucket the LLM/rules explicitly chose to drop. Intentional — not a bug.',
-      render: (r) => r.numExcludedCodes,
+        'Codes in this bucket explicitly excluded by source decision arrays after current output exists. Shows — until current output exists.',
+      render: (r) => nullableCount(r.numExcludedCodes),
       width: 110,
       align: 'center',
       accessor: (r) => r.numExcludedCodes,
@@ -223,10 +247,13 @@ export function CategoriesView({
       key: 'numTotallyIgnoredCodes',
       label: '# Ignored',
       description:
-        'Codes in this bucket the LLM silently omitted (leakage). Should be 0 — non-zero is a quality red flag, more common on larger consolidation runs.',
+        'Codes in this bucket ignored by source decision arrays after current output exists. Shows — until current output exists.',
       render: (r) => {
-        const tone: ChipTone = r.numTotallyIgnoredCodes > 0 ? 'amber' : 'none';
-        return <QcChip value={r.numTotallyIgnoredCodes} tone={tone} />;
+        const tone: ChipTone =
+          r.numTotallyIgnoredCodes !== null && r.numTotallyIgnoredCodes > 0
+            ? 'amber'
+            : 'none';
+        return <QcChip value={nullableCount(r.numTotallyIgnoredCodes)} tone={tone} />;
       },
       width: 110,
       align: 'center',
@@ -239,10 +266,11 @@ export function CategoriesView({
       key: 'numOrphanCodes',
       label: '# Orphan',
       description:
-        'Codes in this bucket whose code-string is in none of the included / excluded / ignored arrays of any source-category record. Worst signal — pipeline never accounted for them.',
+        'Codes in this bucket not accounted for by current output or explicit excluded/ignored decisions. Shows — until current output exists.',
       render: (r) => {
-        const tone: ChipTone = r.numOrphanCodes > 0 ? 'red' : 'none';
-        return <QcChip value={r.numOrphanCodes} tone={tone} />;
+        const tone: ChipTone =
+          r.numOrphanCodes !== null && r.numOrphanCodes > 0 ? 'red' : 'none';
+        return <QcChip value={nullableCount(r.numOrphanCodes)} tone={tone} />;
       },
       width: 110,
       align: 'center',
@@ -284,6 +312,7 @@ export function CategoriesView({
         <CategoryDetailsModal
           bucket={openBucket}
           slug={slug}
+          onRunningChange={setCategoryRunning}
           onClose={() => setOpenBucket(null)}
         />
       )}

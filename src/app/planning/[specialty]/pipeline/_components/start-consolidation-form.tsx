@@ -3,6 +3,7 @@
 import { Button, Callout, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { readSpecForStage } from './model-selection-storage';
 
 /**
  * Minimal Start form for the three consolidation stages on the pipeline
@@ -52,7 +53,10 @@ export function StartConsolidationForm({
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ specialtySlug }),
+        body: JSON.stringify({
+          specialtySlug,
+          model: readSpecForStage(specialtySlug, stage),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -71,9 +75,7 @@ export function StartConsolidationForm({
   return (
     <Stack space="s">
       <Text color="secondary">
-        LLM consolidation prompt not yet wired — this stage runs a passthrough
-        aggregation/dedupe of the upstream mapping output. See{' '}
-        <code>src/lib/workflows/consolidation/prompts.ts</code>.
+        Runs consolidation with the model configured on this stage card.
       </Text>
       <Inline space="s">
         <div style={{ width: 320 }}>
