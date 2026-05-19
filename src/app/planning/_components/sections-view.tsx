@@ -579,7 +579,7 @@ export function SectionsView({
               setReviewOpen(true);
             }}
             countAddendum={() => 'articles'}
-            leadingNote={`Sections across these articles: ${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
+            leadingNote={`Sections: ${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed across ${reviewCounts.unreviewedArticleCount} article${reviewCounts.unreviewedArticleCount === 1 ? '' : 's'}`}
             storageKey={`sections-table:${slug}:article`}
             leftActions={viewToggle}
           />
