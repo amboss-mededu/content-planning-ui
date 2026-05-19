@@ -25,6 +25,7 @@ import {
 import type { ArticleRow } from './articles-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
+import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
 
 type CategoryBucket = {
@@ -464,6 +465,7 @@ export function ConsolidationReviewView({
 
   return (
     <Stack space="m">
+      <ConsolidationViewSwitcher slug={slug} />
       {/* Use a plain CSS grid (not the DS `Inline`) for the rail/content
        *  split. `Inline` wraps by default, so a wide right-pane could
        *  wrap below the rail invisibly — what we hit before. Grid keeps

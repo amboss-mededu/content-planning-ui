@@ -13,11 +13,15 @@ const TABS = [
   { label: 'Milestones', segment: 'milestones', numbered: true },
   { label: 'Categories', segment: 'categories', numbered: true },
   { label: 'Mapping', segment: 'mapping', numbered: true },
-  { label: 'Consolidation Review', segment: 'consolidation-review', numbered: true },
-  { label: 'New Articles', segment: 'articles', numbered: true },
-  { label: 'Article Updates', segment: 'sections', numbered: true },
+  // Single parent for the three consolidation surfaces. Lands on the
+  // review screen by default; the in-page SegmentedControl (see
+  // `consolidation-view-switcher.tsx`) flips between the three.
+  { label: '1st consolidation', segment: 'consolidation-review', numbered: true },
   { label: 'Backlog', segment: 'backlog', numbered: true },
 ] as const;
+
+// Sub-routes that should highlight the "1st consolidation" parent tab.
+const CONSOLIDATION_SEGMENTS = new Set(['consolidation-review', 'articles', 'sections']);
 
 // AMBOSS brand orange — used for the active-tab underline (matches
 // data-table.tsx, code-detail-modal.tsx accents).
@@ -90,8 +94,18 @@ export function SpecialtyTabs({
   return (
     <div role="tablist" aria-label={`${slug} sections`} style={navStyle}>
       {tabsWithStep.map((tab) => {
-        const isActive = tab.segment === currentSegment;
-        const isComplete = tab.numbered && tabsComplete[tab.segment] === true;
+        const isActive =
+          tab.segment === currentSegment ||
+          (tab.segment === 'consolidation-review' &&
+            CONSOLIDATION_SEGMENTS.has(currentSegment));
+        // "1st consolidation" parent is complete only when both children
+        // (`articles` + `sections`) are complete — neither is sufficient
+        // alone since the editor must approve both halves.
+        const isComplete =
+          tab.numbered &&
+          (tab.segment === 'consolidation-review'
+            ? tabsComplete.articles === true && tabsComplete.sections === true
+            : tabsComplete[tab.segment] === true);
         const buttonStyle: CSSProperties = {
           ...buttonBase,
           borderBottom: isActive ? `2px solid ${BRAND}` : '2px solid transparent',
