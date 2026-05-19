@@ -282,7 +282,13 @@ export function ArticlesView({
   const [pass, setPass] = useState<Pass>(() =>
     params.get('pass') === 'second' ? 'second' : 'first',
   );
-  const tableColumns = pass === 'first' ? columns : secondPassColumns;
+  // 2nd-pass is only meaningful when secondary consolidation has run.
+  // If the user lands on `?pass=second` while `newOnes` is empty, fall
+  // back to the 1st-pass view rather than render an empty table.
+  const secondPassAvailable = newOnes.length > 0;
+  const effectivePass: Pass =
+    pass === 'second' && !secondPassAvailable ? 'first' : pass;
+  const tableColumns = effectivePass === 'first' ? columns : secondPassColumns;
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -319,7 +325,7 @@ export function ArticlesView({
     return undefined;
   };
 
-  const activeRows = pass === 'first' ? consolidated : newOnes;
+  const activeRows = effectivePass === 'first' ? consolidated : newOnes;
 
   // Per-pass review counts. PB record ids are unique across collections,
   // so the same `reviews` map covers both 1st-pass (consolidatedArticles)
@@ -344,7 +350,7 @@ export function ArticlesView({
     return { first: count(consolidated), second: count(newOnes) };
   }, [consolidated, newOnes, reviews]);
   const reviewCounts =
-    pass === 'first' ? reviewCountsByPass.first : reviewCountsByPass.second;
+    effectivePass === 'first' ? reviewCountsByPass.first : reviewCountsByPass.second;
 
   return (
     <Stack space="xl">
@@ -353,11 +359,19 @@ export function ArticlesView({
           <SegmentedControl
             label="Consolidation pass"
             isLabelHidden
-            value={pass}
+            value={effectivePass}
             onChange={(v) => setPass(v === 'second' ? 'second' : 'first')}
             options={[
               { name: 'pass', value: 'first', label: '1st pass' },
-              { name: 'pass', value: 'second', label: '2nd pass' },
+              {
+                name: 'pass',
+                value: 'second',
+                label: '2nd pass',
+                disabled: !secondPassAvailable,
+                tooltipContent: secondPassAvailable
+                  ? undefined
+                  : 'Run secondary consolidation to populate',
+              },
             ]}
           />
           <Button
@@ -365,7 +379,7 @@ export function ArticlesView({
             onClick={() => {
               setReviewArticles(visibleRows);
               setReviewStartAtId(undefined);
-              setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
+              setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
               setReviewOpen(true);
             }}
             disabled={visibleRows.length === 0}
@@ -380,7 +394,7 @@ export function ArticlesView({
               onClick={() => {
                 setReviewArticles(activeRows);
                 setReviewStartAtId(undefined);
-                setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
+                setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
                 setReviewOpen(true);
               }}
             >
@@ -391,26 +405,26 @@ export function ArticlesView({
         <DataTable
           rows={activeRows}
           columns={tableColumns}
-          getRowKey={(_r, i) => `${pass}-${i}`}
+          getRowKey={(_r, i) => `${effectivePass}-${i}`}
           getRowStyle={getRowStyle}
           onVisibleRowsChange={setVisibleRows}
           onRowClick={(row) => {
             if (!row.id) return;
             setReviewArticles(activeRows);
             setReviewStartAtId(row.id);
-            setReviewPassLabel(pass === 'first' ? '1st pass' : '2nd pass');
+            setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
             setReviewOpen(true);
           }}
           leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
           emptyText={
-            pass === 'first'
+            effectivePass === 'first'
               ? 'No 1st-pass articles for this specialty.'
-              : 'No 2nd-pass articles for this specialty.'
+              : 'Secondary consolidation not yet performed.'
           }
           // 1st-pass and 2nd-pass tables have different column sets
           // (1st drops `previousArticleTitles`, 2nd drops `category`),
           // so each lens gets its own persisted state.
-          storageKey={`articles-table:${slug}:${pass}`}
+          storageKey={`articles-table:${slug}:${effectivePass}`}
         />
       </Stack>
 
@@ -442,10 +456,10 @@ export function ArticlesView({
         <ArticleManagerModalV2
           opener={{
             type: 'new',
-            stage: pass === 'first' ? 'review-1st' : 'review-2nd',
+            stage: effectivePass === 'first' ? 'review-1st' : 'review-2nd',
             slug,
             articles: reviewArticles,
-            passLabel: reviewPassLabel ?? (pass === 'first' ? '1st pass' : '2nd pass'),
+            passLabel: reviewPassLabel ?? (effectivePass === 'first' ? '1st pass' : '2nd pass'),
             startAtId: reviewStartAtId,
             initialReviews: reviews,
             initialReviewers: reviewers,

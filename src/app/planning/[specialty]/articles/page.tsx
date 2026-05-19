@@ -126,9 +126,19 @@ async function ArticlesData({ slug }: { slug: string }) {
     sectionRecs,
   );
 
-  const consolidated = consolidatedRecs.map((r) => projectConsolidated(slug, r));
-  const newOnes = newRecs.map((r) => projectSuggestion(slug, r));
-  const updates = updateRecs.map((r) => projectSuggestion(slug, r));
+  // Only approved rows reach this surface. Approval happens on the
+  // /consolidation-review page; until that flips for a row, it
+  // shouldn't appear in the suggested-articles / article-updates
+  // lists. Rows without a stable articleKey are unreviewable
+  // zombies — drop them too.
+  const isApproved = (r: ConsolidatedArticle | NewArticleSuggestion | ArticleUpdateSuggestion) => {
+    const key = r.articleKey;
+    if (!key) return false;
+    return reviewRecs[key]?.status === 'approved';
+  };
+  const consolidated = consolidatedRecs.filter(isApproved).map((r) => projectConsolidated(slug, r));
+  const newOnes = newRecs.filter(isApproved).map((r) => projectSuggestion(slug, r));
+  const updates = updateRecs.filter(isApproved).map((r) => projectSuggestion(slug, r));
 
   // `reviewRecs` is keyed by articleKey (the stable id). The modal
   // displays review state by PB id (`current.id`) so it can survive

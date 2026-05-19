@@ -14,7 +14,6 @@ import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   bulkApproveArticleReviews,
   bulkApproveSectionReviews,
-  setConsolidationCategoryReview,
 } from '../[specialty]/actions';
 import {
   ArticleManagerModalV2,
@@ -48,7 +47,6 @@ export function ConsolidationReviewView({
   initialCategory,
   articles,
   sections,
-  flaggedCategories,
   mappingByCategory,
   categoryLookup,
   titleOriginLookup,
@@ -73,7 +71,6 @@ export function ConsolidationReviewView({
   initialCategory: string | null;
   articles: ArticleRow[];
   sections: SectionRow[];
-  flaggedCategories: string[];
   /** Per-category mapping snapshot, computed once on the server from the
    *  `codes` collection. Drives the readiness chip next to each rail item.
    *  `ready` flips true once every code in the category has `mappedAt`
@@ -100,9 +97,6 @@ export function ConsolidationReviewView({
   const [sectionReviews, setSectionReviews] = useState<ReviewMap>(initialSectionReviews);
   const [sectionReviewers, setSectionReviewers] = useState<ReviewerMap>(
     initialSectionReviewers,
-  );
-  const [flaggedSet, setFlaggedSet] = useState<Set<string>>(
-    () => new Set(flaggedCategories),
   );
   const [selectedArticleIds, setSelectedArticleIds] = useState<Set<string>>(new Set());
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
@@ -297,26 +291,6 @@ export function ConsolidationReviewView({
     setSelectedSectionIds(new Set());
   }, [selectedBucket, articleReviews, sectionReviews, approveArticles, approveSections]);
 
-  // ----- Re-run flag -----
-  const toggleFlag = useCallback(
-    (cat: string, flagged: boolean) => {
-      setFlaggedSet((prev) => {
-        const next = new Set(prev);
-        if (flagged) next.add(cat);
-        else next.delete(cat);
-        return next;
-      });
-      startTransition(async () => {
-        await setConsolidationCategoryReview(
-          slug,
-          cat,
-          flagged ? 'flagged-for-rerun' : null,
-        );
-      });
-    },
-    [slug],
-  );
-
   // ----- Specialty-level consolidation trigger -----
   // Omitting `categories` runs primary for every mapped category in
   // the specialty. The same endpoint handles both bootstrap (no
@@ -324,6 +298,14 @@ export function ConsolidationReviewView({
   // one click produces end-to-end output.
   const startConsolidationAll = useCallback(async () => {
     if (isRunningAll) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Re-run consolidation for all categories? This will erase all current consolidation output.',
+      )
+    ) {
+      return;
+    }
     setConsolidateError(null);
     setIsRunningAll(true);
     try {
@@ -352,6 +334,14 @@ export function ConsolidationReviewView({
   const startConsolidation = useCallback(
     async (category: string) => {
       if (consolidatingSet.has(category)) return;
+      if (
+        typeof window !== 'undefined' &&
+        !window.confirm(
+          `Re-run consolidation for "${category}"? This will erase the current consolidation output for this category.`,
+        )
+      ) {
+        return;
+      }
       setConsolidateError(null);
       setConsolidatingSet((prev) => {
         const next = new Set(prev);
@@ -412,7 +402,6 @@ export function ConsolidationReviewView({
         <CategoryRail
           categories={categories}
           counts={counts}
-          flaggedSet={flaggedSet}
           mappingByCategory={mappingByCategory}
           hasAnyMapping={hasAnyMapping}
           selectedCategory={selectedCategory}
@@ -429,7 +418,6 @@ export function ConsolidationReviewView({
             <CategoryDetailPane
               category={selectedCategory}
               bucket={selectedBucket}
-              flagged={flaggedSet.has(selectedCategory)}
               articleReviews={articleReviews}
               articleReviewers={articleReviewers}
               sectionReviews={sectionReviews}
@@ -462,7 +450,8 @@ export function ConsolidationReviewView({
                 setSelectedSectionIds(new Set());
               }}
               onApproveAll={approveAllInCategory}
-              onToggleFlag={(flagged) => toggleFlag(selectedCategory, flagged)}
+              onStartConsolidation={startConsolidation}
+              isConsolidating={consolidatingSet.has(selectedCategory)}
               onRowClickArticle={(id) => setModal({ kind: 'article', startAtId: id })}
               onRowClickSection={(id) => setModal({ kind: 'section', startAtId: id })}
             />
@@ -531,7 +520,6 @@ export function ConsolidationReviewView({
 function CategoryRail({
   categories,
   counts,
-  flaggedSet,
   mappingByCategory,
   hasAnyMapping,
   selectedCategory,
@@ -548,7 +536,6 @@ function CategoryRail({
     string,
     { articleApproved: number; sectionApproved: number; total: number }
   >;
-  flaggedSet: Set<string>;
   mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
   hasAnyMapping: boolean;
   selectedCategory: string | null;
@@ -620,7 +607,6 @@ function CategoryRail({
           const c = counts[cat] ?? { articleApproved: 0, sectionApproved: 0, total: 0 };
           const approved = c.articleApproved + c.sectionApproved;
           const isActive = cat === selectedCategory;
-          const isFlagged = flaggedSet.has(cat);
           const allApproved = c.total > 0 && approved === c.total;
           const itemStyle: CSSProperties = {
             display: 'flex',
@@ -667,11 +653,10 @@ function CategoryRail({
                   {cat}
                 </Text>
                 <Inline space="xxs" vAlignItems="center">
-                  {isFlagged && <Badge text="re-run" color="red" />}
-                  {allApproved && !isFlagged && (
+                  {allApproved && (
                     <Badge text="all approved" color="green" />
                   )}
-                  {!allApproved && !isFlagged && hasOutput && (
+                  {!allApproved && hasOutput && (
                     <Text size="xs" color="secondary">
                       {approved}/{c.total} approved
                     </Text>
@@ -708,7 +693,6 @@ function CategoryRail({
 function CategoryDetailPane({
   category,
   bucket,
-  flagged,
   articleReviews,
   articleReviewers: _articleReviewers,
   sectionReviews,
@@ -721,13 +705,13 @@ function CategoryDetailPane({
   onApproveSelectedArticles,
   onApproveSelectedSections,
   onApproveAll,
-  onToggleFlag,
+  onStartConsolidation,
+  isConsolidating,
   onRowClickArticle,
   onRowClickSection,
 }: {
   category: string;
   bucket: CategoryBucket;
-  flagged: boolean;
   articleReviews: ReviewMap;
   articleReviewers: ReviewerMap;
   sectionReviews: ReviewMap;
@@ -740,7 +724,8 @@ function CategoryDetailPane({
   onApproveSelectedArticles: () => void;
   onApproveSelectedSections: () => void;
   onApproveAll: () => void;
-  onToggleFlag: (flagged: boolean) => void;
+  onStartConsolidation: (cat: string) => void;
+  isConsolidating: boolean;
   onRowClickArticle: (id: string) => void;
   onRowClickSection: (id: string) => void;
 }) {
@@ -754,22 +739,19 @@ function CategoryDetailPane({
         <Text size="m" weight="bold">
           {category}
         </Text>
-        {flagged && <Badge text="flagged for re-run" color="red" />}
       </Inline>
 
       <Inline space="xs" vAlignItems="center">
         <Button variant="primary" onClick={onApproveAll} disabled={unapprovedCount === 0}>
-          {`Send all to backlog (${unapprovedCount})`}
+          {`Approve all (${unapprovedCount})`}
         </Button>
-        {flagged ? (
-          <Button variant="tertiary" onClick={() => onToggleFlag(false)}>
-            Clear re-run flag
-          </Button>
-        ) : (
-          <Button variant="tertiary" onClick={() => onToggleFlag(true)}>
-            Flag category for re-run
-          </Button>
-        )}
+        <Button
+          variant="tertiary"
+          onClick={() => onStartConsolidation(category)}
+          disabled={isConsolidating}
+        >
+          {isConsolidating ? 'Consolidating…' : 'Re-run consolidation'}
+        </Button>
       </Inline>
 
       <ArticleSubTable
