@@ -14,6 +14,8 @@ import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   bulkApproveArticleReviews,
   bulkApproveSectionReviews,
+  bulkUnapproveArticleReviews,
+  bulkUnapproveSectionReviews,
 } from '../[specialty]/actions';
 import {
   ArticleManagerModalV2,
@@ -23,6 +25,7 @@ import {
 import type { ArticleRow } from './articles-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
+import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
 
 type CategoryBucket = {
@@ -36,6 +39,7 @@ const UNCATEGORIZED = '(uncategorized)';
 // approval state reads identically across screens.
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 type ModalOpener =
   | { kind: 'article'; startAtId: string }
@@ -271,6 +275,51 @@ export function ConsolidationReviewView({
     [slug, viewerEmail],
   );
 
+  const unapproveArticles = useCallback(
+    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      // Clear status optimistically (drops the row out of /articles
+      // visibility-gating on the next refresh).
+      setArticleReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.articleRecordId];
+        return next;
+      });
+      setArticleReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.articleRecordId];
+        return next;
+      });
+      startTransition(async () => {
+        await bulkUnapproveArticleReviews(
+          slug,
+          pairs.map((p) => ({ articleKey: p.articleKey })),
+        );
+      });
+    },
+    [slug],
+  );
+
+  const unapproveSections = useCallback(
+    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
+      if (pairs.length === 0) return;
+      setSectionReviews((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.sectionRecordId];
+        return next;
+      });
+      setSectionReviewers((prev) => {
+        const next = { ...prev };
+        for (const p of pairs) delete next[p.sectionRecordId];
+        return next;
+      });
+      startTransition(async () => {
+        await bulkUnapproveSectionReviews(slug, pairs);
+      });
+    },
+    [slug],
+  );
+
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
     const articlePairs = selectedBucket.articles
@@ -379,11 +428,45 @@ export function ConsolidationReviewView({
     [slug, router, consolidatingSet],
   );
 
+  // ----- Reset approvals -----
+  const [isResetting, setIsResetting] = useState(false);
+  const resetApprovals = useCallback(async () => {
+    if (isResetting) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Reset approvals for this specialty? This removes all approvals, backlog assignments, sources, and writing drafts. The mapping and 1st consolidation are preserved.',
+      )
+    ) {
+      return;
+    }
+    setConsolidateError(null);
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/workflows/reset-approvals', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ specialtySlug: slug }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsolidateError(body?.error ?? `HTTP ${res.status} resetting approvals`);
+        return;
+      }
+      router.refresh();
+    } catch (e) {
+      setConsolidateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsResetting(false);
+    }
+  }, [slug, router, isResetting]);
+
   // ----- Modal close -----
   const closeModal = useCallback(() => setModal(null), []);
 
   return (
     <Stack space="m">
+      <ConsolidationViewSwitcher slug={slug} />
       {/* Use a plain CSS grid (not the DS `Inline`) for the rail/content
        *  split. `Inline` wraps by default, so a wide right-pane could
        *  wrap below the rail invisibly — what we hit before. Grid keeps
@@ -410,6 +493,8 @@ export function ConsolidationReviewView({
           onStartConsolidation={startConsolidation}
           isRunningAll={isRunningAll}
           onStartConsolidationAll={startConsolidationAll}
+          onResetApprovals={resetApprovals}
+          isResetting={isResetting}
           consolidateError={consolidateError}
           onDismissError={() => setConsolidateError(null)}
         />
@@ -448,6 +533,56 @@ export function ConsolidationReviewView({
                   }));
                 approveSections(pairs);
                 setSelectedSectionIds(new Set());
+              }}
+              onUnapproveSelectedArticles={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.articles
+                  .filter(
+                    (a) =>
+                      a.id &&
+                      a.articleKey &&
+                      selectedArticleIds.has(a.id) &&
+                      articleReviews[a.id] === 'approved',
+                  )
+                  .map((a) => ({
+                    articleKey: a.articleKey as string,
+                    articleRecordId: a.id as string,
+                  }));
+                unapproveArticles(pairs);
+                setSelectedArticleIds(new Set());
+              }}
+              onUnapproveSelectedSections={() => {
+                if (!selectedBucket) return;
+                const pairs = selectedBucket.sections
+                  .filter(
+                    (s) =>
+                      s.id &&
+                      s.sectionKey &&
+                      selectedSectionIds.has(s.id) &&
+                      sectionReviews[s.id] === 'approved',
+                  )
+                  .map((s) => ({
+                    sectionKey: s.sectionKey as string,
+                    sectionRecordId: s.id as string,
+                  }));
+                unapproveSections(pairs);
+                setSelectedSectionIds(new Set());
+              }}
+              onUnapproveArticle={(id) => {
+                if (!selectedBucket) return;
+                const a = selectedBucket.articles.find((x) => x.id === id);
+                if (!a?.id || !a.articleKey) return;
+                unapproveArticles([
+                  { articleKey: a.articleKey, articleRecordId: a.id },
+                ]);
+              }}
+              onUnapproveSection={(id) => {
+                if (!selectedBucket) return;
+                const s = selectedBucket.sections.find((x) => x.id === id);
+                if (!s?.id || !s.sectionKey) return;
+                unapproveSections([
+                  { sectionKey: s.sectionKey, sectionRecordId: s.id },
+                ]);
               }}
               onApproveAll={approveAllInCategory}
               onStartConsolidation={startConsolidation}
@@ -528,6 +663,8 @@ function CategoryRail({
   onStartConsolidation,
   isRunningAll,
   onStartConsolidationAll,
+  onResetApprovals,
+  isResetting,
   consolidateError,
   onDismissError,
 }: {
@@ -544,6 +681,8 @@ function CategoryRail({
   onStartConsolidation: (cat: string) => void;
   isRunningAll: boolean;
   onStartConsolidationAll: () => void;
+  onResetApprovals: () => void;
+  isResetting: boolean;
   consolidateError: string | null;
   onDismissError: () => void;
 }) {
@@ -594,6 +733,16 @@ function CategoryRail({
               : hasOutput
                 ? 'Re-run all consolidation'
                 : 'Run consolidation for all categories'}
+          </Button>
+        ) : null}
+        {hasOutput ? (
+          <Button
+            variant="tertiary"
+            fullWidth
+            onClick={onResetApprovals}
+            disabled={isResetting}
+          >
+            {isResetting ? 'Resetting…' : 'Reset approvals'}
           </Button>
         ) : null}
         {categories.length === 0 && (
@@ -704,6 +853,10 @@ function CategoryDetailPane({
   categoryLookup,
   onApproveSelectedArticles,
   onApproveSelectedSections,
+  onUnapproveSelectedArticles,
+  onUnapproveSelectedSections,
+  onUnapproveArticle,
+  onUnapproveSection,
   onApproveAll,
   onStartConsolidation,
   isConsolidating,
@@ -723,6 +876,10 @@ function CategoryDetailPane({
   categoryLookup: CategoryLookup;
   onApproveSelectedArticles: () => void;
   onApproveSelectedSections: () => void;
+  onUnapproveSelectedArticles: () => void;
+  onUnapproveSelectedSections: () => void;
+  onUnapproveArticle: (id: string) => void;
+  onUnapproveSection: (id: string) => void;
   onApproveAll: () => void;
   onStartConsolidation: (cat: string) => void;
   isConsolidating: boolean;
@@ -777,6 +934,8 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickArticle}
         onApproveSelected={onApproveSelectedArticles}
+        onUnapproveSelected={onUnapproveSelectedArticles}
+        onUnapproveRow={onUnapproveArticle}
         categoryLookup={categoryLookup}
       />
 
@@ -803,6 +962,8 @@ function CategoryDetailPane({
         }}
         onRowClick={onRowClickSection}
         onApproveSelected={onApproveSelectedSections}
+        onUnapproveSelected={onUnapproveSelectedSections}
+        onUnapproveRow={onUnapproveSection}
         categoryLookup={categoryLookup}
       />
     </Stack>
@@ -833,6 +994,16 @@ const tdStyle: CSSProperties = {
 };
 const numTdStyle: CSSProperties = { ...tdStyle, textAlign: 'center', width: 70 };
 const checkboxTdStyle: CSSProperties = { ...tdStyle, width: 36, textAlign: 'center' };
+const inlineUnapproveBtnStyle: CSSProperties = {
+  padding: '2px 6px',
+  border: '1px solid rgb(228, 228, 234)',
+  borderRadius: 4,
+  background: 'white',
+  cursor: 'pointer',
+  font: 'inherit',
+  fontSize: 11,
+  color: 'rgb(80, 80, 90)',
+};
 
 function rowTint(status: 'approved' | 'rejected' | undefined): CSSProperties | undefined {
   if (status === 'approved') return { background: APPROVED_TINT };
@@ -858,6 +1029,8 @@ function ArticleSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onUnapproveSelected,
+  onUnapproveRow,
   categoryLookup,
 }: {
   rows: ArticleRow[];
@@ -867,12 +1040,17 @@ function ArticleSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onUnapproveSelected: () => void;
+  onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
   const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const selectedApprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] === 'approved',
+  ).length;
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -885,6 +1063,13 @@ function ArticleSubTable({
           disabled={selectedIds.size === 0}
         >
           {`Send to suggested new articles (${selectedIds.size})`}
+        </Button>
+        <Button
+          variant="tertiary"
+          onClick={onUnapproveSelected}
+          disabled={selectedApprovedCount === 0}
+        >
+          {`Unapprove selected (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -913,12 +1098,13 @@ function ArticleSubTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {rows.map((r, i) => {
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[rowId];
+              const tint = rowTint(status);
               const rowStyle: CSSProperties = {
-                ...rowTint(status),
+                ...(tint ?? (i % 2 === 1 ? { background: ZEBRA_TINT } : undefined)),
                 cursor: 'pointer',
               };
               return (
@@ -944,7 +1130,22 @@ function ArticleSubTable({
                     {r.overallCoverage ?? r.existingAmbossCoverage ?? '—'}
                   </td>
                   <td style={tdStyle}>
-                    <StatusBadge status={status} />
+                    <Inline space="xxs" vAlignItems="center">
+                      <StatusBadge status={status} />
+                      {status === 'approved' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnapproveRow(rowId);
+                          }}
+                          style={inlineUnapproveBtnStyle}
+                          title="Unapprove this article"
+                        >
+                          Unapprove
+                        </button>
+                      ) : null}
+                    </Inline>
                   </td>
                 </tr>
               );
@@ -964,6 +1165,8 @@ function SectionSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
+  onUnapproveSelected,
+  onUnapproveRow,
   categoryLookup,
 }: {
   rows: SectionRow[];
@@ -973,12 +1176,35 @@ function SectionSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
+  onUnapproveSelected: () => void;
+  onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
   const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const selectedApprovedCount = Array.from(selectedIds).filter(
+    (id) => reviews[id] === 'approved',
+  ).length;
+  // Band by parent-article title so all sections under one article
+  // share a tint; the band flips on every article transition. Rows
+  // are scoped per-category here, so sections sharing a title sit
+  // together naturally.
+  const bandByRowId = new Map<string, 0 | 1>();
+  {
+    let band: 0 | 1 = 0;
+    let lastTitle: string | null = null;
+    for (const r of rows) {
+      if (!r.id) continue;
+      const title = r.articleTitle ?? '';
+      if (lastTitle !== null && title !== lastTitle) {
+        band = band === 0 ? 1 : 0;
+      }
+      bandByRowId.set(r.id, band);
+      lastTitle = title;
+    }
+  }
   return (
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
@@ -991,6 +1217,13 @@ function SectionSubTable({
           disabled={selectedIds.size === 0}
         >
           {`Send to article updates (${selectedIds.size})`}
+        </Button>
+        <Button
+          variant="tertiary"
+          onClick={onUnapproveSelected}
+          disabled={selectedApprovedCount === 0}
+        >
+          {`Unapprove selected (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -1025,8 +1258,10 @@ function SectionSubTable({
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[rowId];
+              const tint = rowTint(status);
+              const band = bandByRowId.get(rowId);
               const rowStyle: CSSProperties = {
-                ...rowTint(status),
+                ...(tint ?? (band === 1 ? { background: ZEBRA_TINT } : undefined)),
                 cursor: 'pointer',
               };
               const updateLabel =
@@ -1068,7 +1303,22 @@ function SectionSubTable({
                   <td style={numTdStyle}>{r.overallImportance ?? '—'}</td>
                   <td style={numTdStyle}>{r.overallCoverage ?? '—'}</td>
                   <td style={tdStyle}>
-                    <StatusBadge status={status} />
+                    <Inline space="xxs" vAlignItems="center">
+                      <StatusBadge status={status} />
+                      {status === 'approved' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnapproveRow(rowId);
+                          }}
+                          style={inlineUnapproveBtnStyle}
+                          title="Unapprove this section"
+                        >
+                          Unapprove
+                        </button>
+                      ) : null}
+                    </Inline>
                   </td>
                 </tr>
               );

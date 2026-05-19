@@ -270,6 +270,20 @@ export async function ensureNewArticleBacklogRow(
 }
 
 /**
+ * Wipe every `articleBacklog` row for a specialty. Used by the
+ * specialty-level reset path; takes assignees and statuses with it.
+ */
+export async function deleteArticleBacklogForSpecialtyAsAdmin(
+  slug: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<ArticleBacklogRecord>('articleBacklog')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(rows.map((r) => pb.collection('articleBacklog').delete(r.id)));
+}
+
+/**
  * Tear down an update-type backlog row. Used when the last approved
  * section under the parent article is unreviewed/rejected.
  */

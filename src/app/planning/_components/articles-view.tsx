@@ -1,16 +1,7 @@
 'use client';
 
-import {
-  Button,
-  Callout,
-  H2,
-  Inline,
-  SegmentedControl,
-  Stack,
-  Text,
-} from '@amboss/design-system';
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { Button, Inline, Stack, Text } from '@amboss/design-system';
+import { useMemo, useState } from 'react';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   ArticleManagerModalV2,
@@ -19,6 +10,7 @@ import {
 } from './article-manager-modal-v2';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
+import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { type Column, DataTable } from './data-table';
 
 /**
@@ -54,8 +46,6 @@ export type ArticleRow = {
   previousArticleTitleSuggestions?: string[];
   pass: 'first' | 'second';
 };
-
-type Pass = 'first' | 'second';
 
 /** Compact list of 1st-pass article titles consolidated into the
  *  current 2nd-pass row. Each title is annotated by origin via the
@@ -105,6 +95,7 @@ function PreviousTitlesCell({
 
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
+const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 function buildColumns(
   categoryLookup: CategoryLookup,
@@ -237,8 +228,6 @@ function buildColumns(
 export function ArticlesView({
   slug,
   consolidated,
-  newOnes,
-  updates,
   categoryLookup,
   titleOriginLookup,
   initialReviews,
@@ -249,8 +238,6 @@ export function ArticlesView({
 }: {
   slug: string;
   consolidated: ArticleRow[];
-  newOnes: ArticleRow[];
-  updates: ArticleRow[];
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
@@ -263,32 +250,12 @@ export function ArticlesView({
     () => buildColumns(categoryLookup, titleOriginLookup),
     [categoryLookup, titleOriginLookup],
   );
-  // Per-pass column shape:
-  //  - 1st pass keeps Category; 1st-pass records don't have the
-  //    cross-category previousArticleTitleSuggestions lineage, so we
-  //    drop that column.
-  //  - 2nd pass crosses categories (no category field), but each row
-  //    carries the 1st-pass titles that were consolidated into it via
-  //    previousArticleTitleSuggestions — show those, drop Category.
+  // 1st-consolidation column shape: keep Category, drop the cross-category
+  // lineage column (the 2nd-pass-only `previousArticleTitles`).
   const columns = useMemo(
     () => allColumns.filter((c) => c.key !== 'previousArticleTitles'),
     [allColumns],
   );
-  const secondPassColumns = useMemo(
-    () => allColumns.filter((c) => c.key !== 'category'),
-    [allColumns],
-  );
-  const params = useSearchParams();
-  const [pass, setPass] = useState<Pass>(() =>
-    params.get('pass') === 'second' ? 'second' : 'first',
-  );
-  // 2nd-pass is only meaningful when secondary consolidation has run.
-  // If the user lands on `?pass=second` while `newOnes` is empty, fall
-  // back to the 1st-pass view rather than render an empty table.
-  const secondPassAvailable = newOnes.length > 0;
-  const effectivePass: Pass =
-    pass === 'second' && !secondPassAvailable ? 'first' : pass;
-  const tableColumns = effectivePass === 'first' ? columns : secondPassColumns;
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -299,87 +266,50 @@ export function ArticlesView({
   // record id and the modal seeks straight to it. The Start review /
   // Review all buttons clear this so the modal lands on first-unreviewed.
   const [reviewStartAtId, setReviewStartAtId] = useState<string | undefined>();
-  // Header label for the modal — distinguishes "1st / 2nd pass" reviews
-  // from "Article updates" review scope when launched from the updates
-  // sub-table at the bottom of the page.
-  const [reviewPassLabel, setReviewPassLabel] = useState<string | undefined>();
   // Visible row set after the DataTable's filters + sort have been
   // applied. Drives the review modal so editors can scope a review
   // pass to whatever's currently filtered.
   const [visibleRows, setVisibleRows] = useState<ArticleRow[]>([]);
 
-  useEffect(() => {
-    const p = new URLSearchParams();
-    if (pass !== 'first') p.set('pass', pass);
-    const qs = p.toString();
-    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-    window.history.replaceState(null, '', next);
-  }, [pass]);
-
-  // Tint applies to 1st-pass rows that have a recorded review status.
-  const getRowStyle = (r: ArticleRow) => {
-    if (!r.id) return undefined;
-    const s = reviews[r.id];
-    if (s === 'approved') return { background: APPROVED_TINT };
-    if (s === 'rejected') return { background: REJECTED_TINT };
-    return undefined;
+  // Approval tints take precedence; otherwise stripe by row index so
+  // the table reads as bands instead of an undifferentiated grid.
+  const getRowStyle = (r: ArticleRow, i: number) => {
+    if (r.id) {
+      const s = reviews[r.id];
+      if (s === 'approved') return { background: APPROVED_TINT };
+      if (s === 'rejected') return { background: REJECTED_TINT };
+    }
+    return i % 2 === 1 ? { background: ZEBRA_TINT } : undefined;
   };
 
-  const activeRows = effectivePass === 'first' ? consolidated : newOnes;
+  const activeRows = consolidated;
 
-  // Per-pass review counts. PB record ids are unique across collections,
-  // so the same `reviews` map covers both 1st-pass (consolidatedArticles)
-  // and 2nd-pass (newArticleSuggestions) — we just slice it by which
-  // rows we're counting.
-  const reviewCountsByPass = useMemo(() => {
-    function count(rows: ArticleRow[]) {
-      let approved = 0;
-      let rejected = 0;
-      for (const r of rows) {
-        if (!r.id) continue;
-        const s = reviews[r.id];
-        if (s === 'approved') approved++;
-        else if (s === 'rejected') rejected++;
-      }
-      return {
-        approved,
-        rejected,
-        unreviewed: rows.length - approved - rejected,
-      };
+  const reviewCounts = useMemo(() => {
+    let approved = 0;
+    let rejected = 0;
+    for (const r of consolidated) {
+      if (!r.id) continue;
+      const s = reviews[r.id];
+      if (s === 'approved') approved++;
+      else if (s === 'rejected') rejected++;
     }
-    return { first: count(consolidated), second: count(newOnes) };
-  }, [consolidated, newOnes, reviews]);
-  const reviewCounts =
-    effectivePass === 'first' ? reviewCountsByPass.first : reviewCountsByPass.second;
+    return {
+      approved,
+      rejected,
+      unreviewed: consolidated.length - approved - rejected,
+    };
+  }, [consolidated, reviews]);
 
   return (
     <Stack space="xl">
+      <ConsolidationViewSwitcher slug={slug} />
       <Stack space="m">
         <Inline space="s" vAlignItems="bottom">
-          <SegmentedControl
-            label="Consolidation pass"
-            isLabelHidden
-            value={effectivePass}
-            onChange={(v) => setPass(v === 'second' ? 'second' : 'first')}
-            options={[
-              { name: 'pass', value: 'first', label: '1st pass' },
-              {
-                name: 'pass',
-                value: 'second',
-                label: '2nd pass',
-                disabled: !secondPassAvailable,
-                tooltipContent: secondPassAvailable
-                  ? undefined
-                  : 'Run secondary consolidation to populate',
-              },
-            ]}
-          />
           <Button
             variant="primary"
             onClick={() => {
               setReviewArticles(visibleRows);
               setReviewStartAtId(undefined);
-              setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
               setReviewOpen(true);
             }}
             disabled={visibleRows.length === 0}
@@ -394,7 +324,6 @@ export function ArticlesView({
               onClick={() => {
                 setReviewArticles(activeRows);
                 setReviewStartAtId(undefined);
-                setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
                 setReviewOpen(true);
               }}
             >
@@ -404,62 +333,30 @@ export function ArticlesView({
         </Inline>
         <DataTable
           rows={activeRows}
-          columns={tableColumns}
-          getRowKey={(_r, i) => `${effectivePass}-${i}`}
+          columns={columns}
+          getRowKey={(_r, i) => `art-${i}`}
           getRowStyle={getRowStyle}
           onVisibleRowsChange={setVisibleRows}
           onRowClick={(row) => {
             if (!row.id) return;
             setReviewArticles(activeRows);
             setReviewStartAtId(row.id);
-            setReviewPassLabel(effectivePass === 'first' ? '1st pass' : '2nd pass');
             setReviewOpen(true);
           }}
           leadingNote={`${reviewCounts.approved} approved · ${reviewCounts.rejected} rejected · ${reviewCounts.unreviewed} unreviewed`}
-          emptyText={
-            effectivePass === 'first'
-              ? 'No 1st-pass articles for this specialty.'
-              : 'Secondary consolidation not yet performed.'
-          }
-          // 1st-pass and 2nd-pass tables have different column sets
-          // (1st drops `previousArticleTitles`, 2nd drops `category`),
-          // so each lens gets its own persisted state.
-          storageKey={`articles-table:${slug}:${effectivePass}`}
+          emptyText="No approved new articles yet. Approve rows on the Review tab to populate this list."
+          storageKey={`articles-table:${slug}`}
         />
-      </Stack>
-
-      <Stack space="m">
-        <H2>Article update suggestions</H2>
-        {updates.length === 0 ? (
-          <Callout
-            type="info"
-            text="Article_Update_Suggestions is empty for this specialty."
-          />
-        ) : (
-          <DataTable
-            rows={updates}
-            columns={secondPassColumns}
-            getRowKey={(_r, i) => `upd-${i}`}
-            onRowClick={(row) => {
-              if (!row.id) return;
-              setReviewArticles(updates);
-              setReviewStartAtId(row.id);
-              setReviewPassLabel('Article updates');
-              setReviewOpen(true);
-            }}
-            storageKey={`article-updates-table:${slug}`}
-          />
-        )}
       </Stack>
 
       {reviewOpen && (
         <ArticleManagerModalV2
           opener={{
             type: 'new',
-            stage: effectivePass === 'first' ? 'review-1st' : 'review-2nd',
+            stage: 'review-1st',
             slug,
             articles: reviewArticles,
-            passLabel: reviewPassLabel ?? (effectivePass === 'first' ? '1st pass' : '2nd pass'),
+            passLabel: 'New articles',
             startAtId: reviewStartAtId,
             initialReviews: reviews,
             initialReviewers: reviewers,

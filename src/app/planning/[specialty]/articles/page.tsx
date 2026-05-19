@@ -2,19 +2,11 @@ import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { computeArticleKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import {
-  listArticleUpdateSuggestions,
-  listConsolidatedArticles,
-  listNewArticleSuggestions,
-} from '@/lib/data/articles';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listConsolidatedSections } from '@/lib/data/sections';
-import type {
-  ArticleUpdateSuggestion,
-  ConsolidatedArticle,
-  NewArticleSuggestion,
-} from '@/lib/types';
+import type { ConsolidatedArticle } from '@/lib/types';
 import type { ReviewerMap, ReviewMap } from '../../_components/article-manager-modal-v2';
 import { type ArticleRow, ArticlesView } from '../../_components/articles-view';
 import {
@@ -63,42 +55,9 @@ function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
   };
 }
 
-function projectSuggestion(
-  slug: string,
-  r: NewArticleSuggestion | ArticleUpdateSuggestion,
-): ArticleRow {
-  const codes = extractCodes(r.codes);
-  return {
-    id: r.id,
-    articleKey:
-      r.articleKey ||
-      computeArticleKey({
-        specialtySlug: slug,
-        articleTitle: r.articleTitle,
-        articleId: r.articleId,
-        // 2nd-pass suggestion rows don't carry `category` in the
-        // schema — the field is on consolidatedArticles only — so the
-        // fallback formula kicks in (slug + title).
-      }),
-    articleTitle: r.articleTitle,
-    articleType: r.articleType,
-    // category + numCodes are not on the 2nd-pass schema; fall back where we can.
-    category: undefined,
-    codes,
-    numCodes: codes.length,
-    existingAmbossCoverage: r.existingAmbossCoverage,
-    overallImportance: r.overallImportance,
-    justification: r.justification,
-    previousArticleTitleSuggestions: r.previousArticleTitleSuggestions,
-    pass: 'second',
-  };
-}
-
 async function ArticlesData({ slug }: { slug: string }) {
   const [
     consolidatedRecs,
-    newRecs,
-    updateRecs,
     codeRecs,
     reviewRecs,
     sectionRecs,
@@ -106,8 +65,6 @@ async function ArticlesData({ slug }: { slug: string }) {
     user,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
-    listNewArticleSuggestions(slug),
-    listArticleUpdateSuggestions(slug),
     listCodes(slug),
     listArticleReviews(slug),
     listConsolidatedSections(slug),
@@ -119,36 +76,31 @@ async function ArticlesData({ slug }: { slug: string }) {
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
   // Lineage map: each known title → whether it's an article, a section
-  // (in which article), or both. Used by the review modal to annotate the
-  // flat strings in `previousArticleTitleSuggestions`.
+  // (in which article), or both. Used by the review modal to annotate
+  // the flat strings in `previousArticleTitleSuggestions`.
   const titleOriginLookup: TitleOriginLookup = buildTitleOriginLookup(
     consolidatedRecs,
     sectionRecs,
   );
 
-  // Only approved rows reach this surface. Approval happens on the
-  // /consolidation-review page; until that flips for a row, it
-  // shouldn't appear in the suggested-articles / article-updates
-  // lists. Rows without a stable articleKey are unreviewable
-  // zombies — drop them too.
-  const isApproved = (r: ConsolidatedArticle | NewArticleSuggestion | ArticleUpdateSuggestion) => {
+  // Visibility-gating: only approved 1st-consolidation candidates reach
+  // this surface. The editor approves on /consolidation-review.
+  const isApproved = (r: ConsolidatedArticle) => {
     const key = r.articleKey;
     if (!key) return false;
     return reviewRecs[key]?.status === 'approved';
   };
-  const consolidated = consolidatedRecs.filter(isApproved).map((r) => projectConsolidated(slug, r));
-  const newOnes = newRecs.filter(isApproved).map((r) => projectSuggestion(slug, r));
-  const updates = updateRecs.filter(isApproved).map((r) => projectSuggestion(slug, r));
+  const consolidated = consolidatedRecs
+    .filter(isApproved)
+    .map((r) => projectConsolidated(slug, r));
 
   // `reviewRecs` is keyed by articleKey (the stable id). The modal
   // displays review state by PB id (`current.id`) so it can survive
-  // local row reordering. Translate at the boundary: for each row that
-  // has both a key and a current PB id, copy the review's status into
-  // the id-keyed map.
+  // local row reordering. Translate at the boundary.
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
   const initialNotesByArticle: Record<string, string> = {};
-  for (const row of [...consolidated, ...newOnes, ...updates]) {
+  for (const row of consolidated) {
     if (!row.id || !row.articleKey) continue;
     const review = reviewRecs[row.articleKey];
     if (!review) continue;
@@ -164,8 +116,6 @@ async function ArticlesData({ slug }: { slug: string }) {
     <ArticlesView
       slug={slug}
       consolidated={consolidated}
-      newOnes={newOnes}
-      updates={updates}
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
