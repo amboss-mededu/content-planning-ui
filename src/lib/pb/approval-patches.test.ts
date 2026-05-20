@@ -469,6 +469,77 @@ describe('race scenarios', () => {
       reconcileReviewPatches('articleReviews', patches, live, (r) => r.articleKey),
     ).toEqual(patches);
   });
+
+  it('drops older review patches when the latest status patch converges', () => {
+    const patches: ReviewPatch[] = [
+      {
+        collection: 'articleReviews',
+        key: 'new::cardiology::heart-failure',
+        override: 'approved',
+        appliedAt: 100,
+      },
+      {
+        collection: 'articleReviews',
+        key: 'new::cardiology::heart-failure',
+        override: 'rejected',
+        appliedAt: 200,
+      },
+    ];
+    const live = [
+      articleReview({
+        id: 'pb-1',
+        articleKey: 'new::cardiology::heart-failure',
+        status: 'rejected',
+      }),
+    ];
+    expect(
+      reconcileReviewPatches('articleReviews', patches, live, (r) => r.articleKey),
+    ).toEqual([]);
+  });
+
+  it('keeps only the latest review patch when live data has not converged', () => {
+    const latest = {
+      collection: 'articleReviews',
+      key: 'new::cardiology::heart-failure',
+      override: 'rejected',
+      appliedAt: 200,
+    } satisfies ReviewPatch;
+    const patches: ReviewPatch[] = [
+      {
+        collection: 'articleReviews',
+        key: 'new::cardiology::heart-failure',
+        override: 'approved',
+        appliedAt: 100,
+      },
+      latest,
+    ];
+    const live = [
+      articleReview({
+        id: 'pb-1',
+        articleKey: 'new::cardiology::heart-failure',
+        status: 'approved',
+      }),
+    ];
+    expect(
+      reconcileReviewPatches('articleReviews', patches, live, (r) => r.articleKey),
+    ).toEqual([latest]);
+  });
+
+  it('drops older backlog patches when the latest tombstone converges', () => {
+    const patches: BacklogPatch[] = [
+      {
+        key: 'new::cardiology::heart-failure',
+        override: { type: 'new' },
+        appliedAt: 100,
+      },
+      {
+        key: 'new::cardiology::heart-failure',
+        override: null,
+        appliedAt: 200,
+      },
+    ];
+    expect(reconcileBacklogPatches(patches, [])).toEqual([]);
+  });
 });
 
 describe('section review fixtures keep section flow honest', () => {

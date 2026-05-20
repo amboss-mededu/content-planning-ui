@@ -17,6 +17,7 @@ import {
   ArticleManagerModalV2,
   type ReviewerMap,
   type ReviewMap,
+  type ReviewStatus,
 } from './article-manager-modal-v2';
 import type { ArticleRow } from './articles-view';
 import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
@@ -571,17 +572,21 @@ export function ConsolidationReviewView({
                 unapproveSections(pairs);
                 setSelectedSectionIds(new Set());
               }}
-              onUnapproveArticle={(id) => {
+              onDecideArticle={(id, status) => {
                 if (!selectedBucket) return;
                 const a = selectedBucket.articles.find((x) => x.id === id);
                 if (!a?.id || !a.articleKey) return;
-                unapproveArticles([{ articleKey: a.articleKey, articleRecordId: a.id }]);
+                approval
+                  .decideArticle(a.articleKey, a.id, status)
+                  .catch(surfaceActionError);
               }}
-              onUnapproveSection={(id) => {
+              onDecideSection={(id, status) => {
                 if (!selectedBucket) return;
                 const s = selectedBucket.sections.find((x) => x.id === id);
                 if (!s?.id || !s.sectionKey) return;
-                unapproveSections([{ sectionKey: s.sectionKey, sectionRecordId: s.id }]);
+                approval
+                  .decideSection(s.sectionKey, s.id, status)
+                  .catch(surfaceActionError);
               }}
               onApproveAll={approveAllInCategory}
               onStartConsolidation={startConsolidation}
@@ -899,8 +904,8 @@ function CategoryDetailPane({
   onApproveSelectedSections,
   onUnapproveSelectedArticles,
   onUnapproveSelectedSections,
-  onUnapproveArticle,
-  onUnapproveSection,
+  onDecideArticle,
+  onDecideSection,
   onApproveAll,
   onStartConsolidation,
   isConsolidating,
@@ -923,8 +928,8 @@ function CategoryDetailPane({
   onApproveSelectedSections: () => void;
   onUnapproveSelectedArticles: () => void;
   onUnapproveSelectedSections: () => void;
-  onUnapproveArticle: (id: string) => void;
-  onUnapproveSection: (id: string) => void;
+  onDecideArticle: (id: string, status: ReviewStatus | null) => void;
+  onDecideSection: (id: string, status: ReviewStatus | null) => void;
   onApproveAll: () => void;
   onStartConsolidation: (cat: string, options?: ConsolidationRerunOptions) => void;
   isConsolidating: boolean;
@@ -982,15 +987,14 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const a of bucket.articles) {
-            if (a.id && a.articleKey && articleReviews[a.articleKey] !== 'approved')
-              next.add(a.id);
+            if (a.id && a.articleKey) next.add(a.id);
           }
           setSelectedArticleIds(next);
         }}
         onRowClick={onRowClickArticle}
         onApproveSelected={onApproveSelectedArticles}
         onUnapproveSelected={onUnapproveSelectedArticles}
-        onUnapproveRow={onUnapproveArticle}
+        onDecideRow={onDecideArticle}
         categoryLookup={categoryLookup}
       />
 
@@ -1011,15 +1015,14 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const s of bucket.sections) {
-            if (s.id && s.sectionKey && sectionReviews[s.sectionKey] !== 'approved')
-              next.add(s.id);
+            if (s.id && s.sectionKey) next.add(s.id);
           }
           setSelectedSectionIds(next);
         }}
         onRowClick={onRowClickSection}
         onApproveSelected={onApproveSelectedSections}
         onUnapproveSelected={onUnapproveSelectedSections}
-        onUnapproveRow={onUnapproveSection}
+        onDecideRow={onDecideSection}
         categoryLookup={categoryLookup}
       />
     </Stack>
@@ -1050,30 +1053,86 @@ const tdStyle: CSSProperties = {
 };
 const numTdStyle: CSSProperties = { ...tdStyle, textAlign: 'center', width: 70 };
 const checkboxTdStyle: CSSProperties = { ...tdStyle, width: 36, textAlign: 'center' };
-const inlineUnapproveBtnStyle: CSSProperties = {
-  padding: '2px 6px',
-  border: '1px solid rgb(228, 228, 234)',
+const decisionCellStyle: CSSProperties = { ...tdStyle, textAlign: 'center' };
+const decisionButtonBase: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 28,
+  height: 28,
   borderRadius: 4,
-  background: 'white',
+  border: '1px solid rgba(0, 0, 0, 0.15)',
+  background: '#fff',
   cursor: 'pointer',
-  font: 'inherit',
-  fontSize: 11,
-  color: 'rgb(80, 80, 90)',
+  fontSize: 14,
+  lineHeight: 1,
+  padding: 0,
 };
 
-function rowTint(status: 'approved' | 'rejected' | undefined): CSSProperties | undefined {
+function rowTint(status: ReviewStatus | undefined): CSSProperties | undefined {
   if (status === 'approved') return { background: APPROVED_TINT };
   if (status === 'rejected') return { background: REJECTED_TINT };
   return undefined;
 }
 
-function StatusBadge({ status }: { status: 'approved' | 'rejected' | undefined }) {
-  if (status === 'approved') return <Badge text="approved" color="green" />;
-  if (status === 'rejected') return <Badge text="rejected" color="red" />;
+function decisionButton(active: boolean, kind: ReviewStatus): CSSProperties {
+  if (!active) return decisionButtonBase;
+  if (kind === 'approved') {
+    return {
+      ...decisionButtonBase,
+      background: 'rgb(16, 185, 129)',
+      borderColor: 'rgb(16, 185, 129)',
+      color: '#fff',
+    };
+  }
+  return {
+    ...decisionButtonBase,
+    background: 'rgb(220, 38, 38)',
+    borderColor: 'rgb(220, 38, 38)',
+    color: '#fff',
+  };
+}
+
+function DecisionButtons({
+  status,
+  disabled,
+  approveTitle,
+  rejectTitle,
+  onDecide,
+}: {
+  status: ReviewStatus | undefined;
+  disabled: boolean;
+  approveTitle: string;
+  rejectTitle: string;
+  onDecide: (status: ReviewStatus | null) => void;
+}) {
   return (
-    <Text color="secondary" size="xs">
-      —
-    </Text>
+    <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+      <button
+        type="button"
+        title={status === 'approved' ? `${approveTitle} — click to clear` : approveTitle}
+        style={decisionButton(status === 'approved', 'approved')}
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDecide(status === 'approved' ? null : 'approved');
+        }}
+      >
+        ✓
+      </button>
+      <button
+        type="button"
+        title={status === 'rejected' ? `${rejectTitle} — click to clear` : rejectTitle}
+        style={decisionButton(status === 'rejected', 'rejected')}
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDecide(status === 'rejected' ? null : 'rejected');
+        }}
+      >
+        ✗
+      </button>
+    </div>
   );
 }
 
@@ -1086,7 +1145,7 @@ function ArticleSubTable({
   onRowClick,
   onApproveSelected,
   onUnapproveSelected,
-  onUnapproveRow,
+  onDecideRow,
   categoryLookup,
 }: {
   rows: ArticleRow[];
@@ -1097,7 +1156,7 @@ function ArticleSubTable({
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
   onUnapproveSelected: () => void;
-  onUnapproveRow: (id: string) => void;
+  onDecideRow: (id: string, status: ReviewStatus | null) => void;
   categoryLookup: CategoryLookup;
 }) {
   const keyById = useMemo(() => {
@@ -1105,17 +1164,14 @@ function ArticleSubTable({
     for (const r of rows) if (r.id && r.articleKey) out[r.id] = r.articleKey;
     return out;
   }, [rows]);
-  const unapprovedRows = rows.filter(
-    (r) => r.articleKey && reviews[r.articleKey] !== 'approved',
-  );
-  const allUnapprovedChecked =
-    unapprovedRows.length > 0 &&
-    unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const reviewableIds = rows.flatMap((r) => (r.id && r.articleKey ? [r.id] : []));
+  const allReviewableChecked =
+    reviewableIds.length > 0 && reviewableIds.every((id) => selectedIds.has(id));
   const selectedApprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[keyById[id]] === 'approved',
+    (id) => keyById[id] && reviews[keyById[id]] === 'approved',
   ).length;
   const selectedUnapprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[keyById[id]] !== 'approved',
+    (id) => keyById[id] && reviews[keyById[id]] !== 'approved',
   ).length;
   return (
     <Stack space="xs">
@@ -1149,10 +1205,10 @@ function ArticleSubTable({
               <th style={thStyle}>
                 <input
                   type="checkbox"
-                  checked={allUnapprovedChecked}
+                  checked={allReviewableChecked}
                   onChange={(e) => onToggleAll(e.target.checked)}
-                  aria-label="Select all unapproved articles in this category"
-                  disabled={unapprovedRows.length === 0}
+                  aria-label="Select all reviewable articles in this category"
+                  disabled={reviewableIds.length === 0}
                 />
               </th>
               <th style={thStyle}>Title</th>
@@ -1160,7 +1216,7 @@ function ArticleSubTable({
               <th style={thStyle}># Codes</th>
               <th style={thStyle}>Importance</th>
               <th style={thStyle}>Coverage</th>
-              <th style={thStyle}>Status</th>
+              <th style={{ ...thStyle, textAlign: 'center' }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -1168,6 +1224,7 @@ function ArticleSubTable({
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[r.articleKey ?? ''];
+              const isReviewable = Boolean(r.articleKey);
               const tint = rowTint(status);
               const rowStyle: CSSProperties = {
                 ...(tint ?? (i % 2 === 1 ? { background: ZEBRA_TINT } : undefined)),
@@ -1181,6 +1238,7 @@ function ArticleSubTable({
                       checked={selectedIds.has(rowId)}
                       onChange={() => onToggle(rowId)}
                       aria-label={`Select article ${r.articleTitle ?? rowId}`}
+                      disabled={!isReviewable}
                       onClick={(e) => e.stopPropagation()}
                     />
                   </td>
@@ -1202,23 +1260,14 @@ function ArticleSubTable({
                   <td style={numTdStyle}>
                     {r.overallCoverage ?? r.existingAmbossCoverage ?? '—'}
                   </td>
-                  <td style={tdStyle}>
-                    <Inline space="xxs" vAlignItems="center">
-                      <StatusBadge status={status} />
-                      {status === 'approved' ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onUnapproveRow(rowId);
-                          }}
-                          style={inlineUnapproveBtnStyle}
-                          title="Unapprove this article"
-                        >
-                          Unapprove
-                        </button>
-                      ) : null}
-                    </Inline>
+                  <td style={decisionCellStyle}>
+                    <DecisionButtons
+                      status={status}
+                      disabled={!isReviewable}
+                      approveTitle="Approve this article"
+                      rejectTitle="Reject this article"
+                      onDecide={(nextStatus) => onDecideRow(rowId, nextStatus)}
+                    />
                   </td>
                 </tr>
               );
@@ -1239,7 +1288,7 @@ function SectionSubTable({
   onRowClick,
   onApproveSelected,
   onUnapproveSelected,
-  onUnapproveRow,
+  onDecideRow,
   categoryLookup,
 }: {
   rows: SectionRow[];
@@ -1250,7 +1299,7 @@ function SectionSubTable({
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
   onUnapproveSelected: () => void;
-  onUnapproveRow: (id: string) => void;
+  onDecideRow: (id: string, status: ReviewStatus | null) => void;
   categoryLookup: CategoryLookup;
 }) {
   const keyById = useMemo(() => {
@@ -1258,17 +1307,14 @@ function SectionSubTable({
     for (const r of rows) if (r.id && r.sectionKey) out[r.id] = r.sectionKey;
     return out;
   }, [rows]);
-  const unapprovedRows = rows.filter(
-    (r) => r.sectionKey && reviews[r.sectionKey] !== 'approved',
-  );
-  const allUnapprovedChecked =
-    unapprovedRows.length > 0 &&
-    unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
+  const reviewableIds = rows.flatMap((r) => (r.id && r.sectionKey ? [r.id] : []));
+  const allReviewableChecked =
+    reviewableIds.length > 0 && reviewableIds.every((id) => selectedIds.has(id));
   const selectedApprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[keyById[id]] === 'approved',
+    (id) => keyById[id] && reviews[keyById[id]] === 'approved',
   ).length;
   const selectedUnapprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[keyById[id]] !== 'approved',
+    (id) => keyById[id] && reviews[keyById[id]] !== 'approved',
   ).length;
   // Band by parent-article title so all sections under one article
   // share a tint; the band flips on every article transition. Rows
@@ -1320,10 +1366,10 @@ function SectionSubTable({
               <th style={thStyle}>
                 <input
                   type="checkbox"
-                  checked={allUnapprovedChecked}
+                  checked={allReviewableChecked}
                   onChange={(e) => onToggleAll(e.target.checked)}
-                  aria-label="Select all unapproved section updates in this category"
-                  disabled={unapprovedRows.length === 0}
+                  aria-label="Select all reviewable section updates in this category"
+                  disabled={reviewableIds.length === 0}
                 />
               </th>
               <th style={thStyle}>Parent article</th>
@@ -1333,7 +1379,7 @@ function SectionSubTable({
               <th style={thStyle}># Codes</th>
               <th style={thStyle}>Importance</th>
               <th style={thStyle}>Coverage</th>
-              <th style={thStyle}>Status</th>
+              <th style={{ ...thStyle, textAlign: 'center' }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -1341,6 +1387,7 @@ function SectionSubTable({
               if (!r.id) return null;
               const rowId = r.id;
               const status = reviews[r.sectionKey ?? ''];
+              const isReviewable = Boolean(r.sectionKey);
               const tint = rowTint(status);
               const band = bandByRowId.get(rowId);
               const rowStyle: CSSProperties = {
@@ -1367,6 +1414,7 @@ function SectionSubTable({
                       checked={selectedIds.has(rowId)}
                       onChange={() => onToggle(rowId)}
                       aria-label={`Select section ${r.sectionName ?? rowId}`}
+                      disabled={!isReviewable}
                       onClick={(e) => e.stopPropagation()}
                     />
                   </td>
@@ -1392,23 +1440,14 @@ function SectionSubTable({
                   <td style={numTdStyle}>{r.numCodes}</td>
                   <td style={numTdStyle}>{r.overallImportance ?? '—'}</td>
                   <td style={numTdStyle}>{r.overallCoverage ?? '—'}</td>
-                  <td style={tdStyle}>
-                    <Inline space="xxs" vAlignItems="center">
-                      <StatusBadge status={status} />
-                      {status === 'approved' ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onUnapproveRow(rowId);
-                          }}
-                          style={inlineUnapproveBtnStyle}
-                          title="Unapprove this section"
-                        >
-                          Unapprove
-                        </button>
-                      ) : null}
-                    </Inline>
+                  <td style={decisionCellStyle}>
+                    <DecisionButtons
+                      status={status}
+                      disabled={!isReviewable}
+                      approveTitle="Approve this section"
+                      rejectTitle="Reject this section"
+                      onDecide={(nextStatus) => onDecideRow(rowId, nextStatus)}
+                    />
                   </td>
                 </tr>
               );

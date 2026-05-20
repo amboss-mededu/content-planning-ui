@@ -129,17 +129,24 @@ export function reconcileReviewPatches<
     const k = keyOf(row);
     if (k) liveByKey.set(k, row);
   }
-  const next = patches.filter((p) => {
-    if (p.collection !== collection) return true;
+  const latest = new Map<string, ReviewPatch>();
+  for (const p of patches) {
+    if (p.collection !== collection) continue;
+    const prior = latest.get(p.key);
+    if (!prior || p.appliedAt >= prior.appliedAt) latest.set(p.key, p);
+  }
+  const keep = new Set<ReviewPatch>();
+  for (const p of latest.values()) {
     const live = liveByKey.get(p.key);
     if (p.override === null) {
       // Tombstone: keep until the live row is actually gone.
-      return live !== undefined;
+      if (live !== undefined) keep.add(p);
+      continue;
     }
     // Status override: keep until the live row exists and matches.
-    if (!live) return true;
-    return live.status !== p.override;
-  });
+    if (!live || live.status !== p.override) keep.add(p);
+  }
+  const next = patches.filter((p) => p.collection !== collection || keep.has(p));
   return next.length === patches.length ? patches : next;
 }
 
@@ -157,14 +164,21 @@ export function reconcileBacklogPatches(
   for (const row of liveRows) {
     if (row.articleKey) liveByKey.set(row.articleKey, row);
   }
-  const next = patches.filter((p) => {
+  const latest = new Map<string, BacklogPatch>();
+  for (const p of patches) {
+    const prior = latest.get(p.key);
+    if (!prior || p.appliedAt >= prior.appliedAt) latest.set(p.key, p);
+  }
+  const keep = new Set<BacklogPatch>();
+  for (const p of latest.values()) {
     const live = liveByKey.get(p.key);
     if (p.override === null) {
-      return live !== undefined;
+      if (live !== undefined) keep.add(p);
+      continue;
     }
-    if (!live) return true;
-    return live.type !== p.override.type;
-  });
+    if (!live || live.type !== p.override.type) keep.add(p);
+  }
+  const next = patches.filter((p) => keep.has(p));
   return next.length === patches.length ? patches : next;
 }
 
