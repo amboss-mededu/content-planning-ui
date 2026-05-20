@@ -40,15 +40,11 @@ export interface SpecialtyRecord extends PbRecord {
    *  (e.g. `''` for Overview, `'categories'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */
   tabOverrides?: Record<string, boolean>;
-  /** Per-pipeline-stage manual "mark step complete" override, keyed by
-   *  stage name (e.g. `'map_codes'`). OR-merged with
-   *  `stage.status === 'completed'` in the pipeline dashboard. */
+  /** Legacy per-stage "mark step complete" override. Read fallback only;
+   *  superseded by `pipelineStageStates`. */
   pipelineStageOverrides?: Record<string, boolean>;
-  /** Per-pipeline-stage "skip step" flag, keyed by stage name. Renders
-   *  the stage as "Skipped" (gray badge) instead of "Completed", and
-   *  advances the last-completed-step chain the same way an override
-   *  does. Only the 2nd-consolidation stages expose a skip toggle in
-   *  the UI today. */
+  /** Legacy per-stage "skip step" flag. Read fallback only; superseded
+   *  by `pipelineStageStates`. */
   pipelineStageSkipped?: Record<string, boolean>;
   /** Editor-controlled pipeline card state. Legacy
    *  `pipelineStageOverrides` / `pipelineStageSkipped` are read fallback

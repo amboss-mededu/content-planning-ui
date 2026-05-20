@@ -163,10 +163,9 @@ export async function setTabOverride(
 }
 
 /**
- * Read the per-pipeline-stage manual override map for a specialty. Used
- * by the pipeline dashboard so each stage card can render the right
- * "complete" vs "incomplete" toggle label without re-running the whole
- * `getLastCompletedStep` derivation.
+ * Read the legacy per-stage manual override map for a specialty. New
+ * writes use `pipelineStageStates` instead; this is kept as a read-only
+ * fallback for older rows. Used by `normalizePipelineStageStates`.
  */
 export async function getPipelineStageOverrides(
   slug: string,
@@ -185,10 +184,9 @@ export async function getPipelineStageOverrides(
 }
 
 /**
- * Read the per-pipeline-stage manual "skip" map for a specialty. The
- * pipeline dashboard renders a skipped stage as gray "Skipped" and
- * advances the last-completed-step chain past it. Used today for the
- * optional 2nd-consolidation stages.
+ * Read the legacy per-stage manual "skip" map for a specialty. New
+ * writes use `pipelineStageStates`; this is the read-only fallback for
+ * older rows applied to the optional 2nd-consolidation stages.
  */
 export async function getPipelineStageSkipped(
   slug: string,
@@ -229,6 +227,28 @@ export async function getPipelineStageStates(slug: string): Promise<PipelineStag
     }
     throw e;
   }
+}
+
+/**
+ * Bulk variant for the home grids: single `specialties` scan, normalized
+ * stage state per slug. Replaces the broader cross-collection derivation
+ * that used to back the now-removed last-completed-step badge.
+ */
+export async function listSpecialtyPipelineStageStates(): Promise<
+  Record<string, PipelineStageStates>
+> {
+  await connection();
+  const pb = await userClient();
+  const rows = await pb.collection<SpecialtyRecord>('specialties').getFullList();
+  const out: Record<string, PipelineStageStates> = {};
+  for (const row of rows) {
+    out[row.slug] = normalizePipelineStageStates({
+      states: row.pipelineStageStates,
+      overrides: row.pipelineStageOverrides,
+      skipped: row.pipelineStageSkipped,
+    });
+  }
+  return out;
 }
 
 /**

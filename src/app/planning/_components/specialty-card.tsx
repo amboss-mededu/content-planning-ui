@@ -1,21 +1,21 @@
 'use client';
 
-import { Badge, Card, CardBox, Inline, Stack, Text } from '@amboss/design-system';
+import { Card, CardBox, Stack, Text } from '@amboss/design-system';
 import NextLink from 'next/link';
-import type { LastStep } from '@/lib/data/last-completed-step';
+import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
 import type { Specialty } from '@/lib/types';
+import { PipelineStageStrip } from './pipeline-stage-strip';
 
 export function SpecialtyCard({
   specialty,
-  lastStep,
+  stageStates,
   meta,
 }: {
   specialty: Specialty;
-  lastStep?: LastStep;
+  stageStates?: PipelineStageStates;
   meta?: { codes?: number; consolidatedArticles?: number; consolidatedSections?: number };
 }) {
   const href = `/planning/${specialty.slug}`;
-  const resolved: LastStep = lastStep ?? { rank: 0, label: 'Not started', color: 'gray' };
   const hasCounts =
     meta?.codes !== undefined ||
     meta?.consolidatedArticles !== undefined ||
@@ -26,9 +26,7 @@ export function SpecialtyCard({
         <Card title={specialty.name} titleAs="h3" outlined>
           <CardBox>
             <Stack space="s">
-              <Inline space="xs">
-                <Badge text={resolved.label} color={resolved.color} />
-              </Inline>
+              <PipelineStageStrip stageStates={stageStates} />
               {hasCounts ? (
                 <Text color="secondary">
                   {meta?.codes !== undefined ? `${meta.codes} codes` : ''}

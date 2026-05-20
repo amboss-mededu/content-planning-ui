@@ -1,6 +1,8 @@
 import { Suspense } from 'react';
-import { listSpecialtyLastSteps } from '@/lib/data/last-completed-step';
-import { listSpecialties } from '@/lib/data/specialties';
+import {
+  listSpecialties,
+  listSpecialtyPipelineStageStates,
+} from '@/lib/data/specialties';
 import { HomeShell, SpecialtiesJumpToShell } from './planning/_components/home-shell';
 import {
   SpecialtiesGridSkeleton,
@@ -26,11 +28,16 @@ export default function Home() {
 }
 
 async function SpecialtiesGridData() {
-  const [specialties, lastSteps] = await Promise.all([
+  const [specialties, stageStatesBySlug] = await Promise.all([
     listSpecialties(),
-    listSpecialtyLastSteps(),
+    listSpecialtyPipelineStageStates(),
   ]);
-  return <SpecialtiesGridView specialties={specialties} lastSteps={lastSteps} />;
+  return (
+    <SpecialtiesGridView
+      specialties={specialties}
+      stageStatesBySlug={stageStatesBySlug}
+    />
+  );
 }
 
 async function SpecialtiesJumpToData() {

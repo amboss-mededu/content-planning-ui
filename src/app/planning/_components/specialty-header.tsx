@@ -1,7 +1,6 @@
 'use client';
 
-import { Badge, Callout, H1, Inline, Stack, Text } from '@amboss/design-system';
-import { PHASE_COLOR, PHASE_LABEL, type Phase } from '@/lib/phase';
+import { Callout, H1, Inline, Stack, Text } from '@amboss/design-system';
 import type { Specialty } from '@/lib/types';
 import { Breadcrumbs } from './breadcrumbs';
 import { ChangeSpecialtyButton } from './change-specialty-button';
@@ -10,11 +9,9 @@ import { SpecialtyTabs } from './specialty-tabs';
 
 export function SpecialtyHeader({
   specialty,
-  phase,
   tabsComplete,
 }: {
   specialty: Specialty;
-  phase: Phase;
   tabsComplete: Record<string, boolean>;
 }) {
   return (
@@ -28,7 +25,6 @@ export function SpecialtyHeader({
       />
       <Inline space="m" vAlignItems="center">
         <H1>{specialty.name}</H1>
-        <Badge text={PHASE_LABEL[phase]} color={PHASE_COLOR[phase]} />
         <ChangeSpecialtyButton />
         <RefreshButton slug={specialty.slug} />
       </Inline>

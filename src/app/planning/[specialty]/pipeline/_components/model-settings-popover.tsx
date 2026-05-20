@@ -47,7 +47,12 @@ export function ModelSettingsPopover({
   );
 
   return (
-    <Popover content={content} placement="bottom-right" maxWidth={520}>
+    <Popover
+      content={content}
+      placement="bottom-right"
+      maxWidth={520}
+      disableInitialFocus
+    >
       <Button
         variant="tertiary"
         size="s"

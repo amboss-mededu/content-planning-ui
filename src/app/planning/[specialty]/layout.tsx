@@ -1,8 +1,6 @@
 import { Suspense } from 'react';
-import { getCurrentPipelineRun } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { getTabsComplete } from '@/lib/data/tab-status';
-import { derivePhase } from '@/lib/phase';
 import { RememberSpecialty } from '../_components/remember-specialty';
 import { NotConfiguredView, SpecialtyHeader } from '../_components/specialty-header';
 
@@ -29,13 +27,7 @@ async function SpecialtyHeaderData({ slug }: { slug: string }) {
   const specialty = await getSpecialty(slug);
   if (!specialty) return <NotConfiguredView slug={slug} />;
 
-  const [run, tabsComplete] = await Promise.all([
-    getCurrentPipelineRun(slug),
-    getTabsComplete(slug),
-  ]);
-  const phase = derivePhase(run);
+  const tabsComplete = await getTabsComplete(slug);
 
-  return (
-    <SpecialtyHeader specialty={specialty} phase={phase} tabsComplete={tabsComplete} />
-  );
+  return <SpecialtyHeader specialty={specialty} tabsComplete={tabsComplete} />;
 }
