@@ -12,21 +12,27 @@ import {
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { AmbossLibraryStats } from '@/lib/data/amboss-library';
-import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
-import type { MapCodesHistory, PipelineRunRow, StageContext } from '@/lib/data/pipeline';
+import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';
+import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
+import { LazyStartMapCodesForm } from './lazy-start-map-codes-form';
 import { PhaseGroup } from './phase-group';
 import { RunLitSearchButton } from './run-lit-search-button';
 import { SourcesCard } from './sources-card';
 import { StageCard } from './stage-card';
-import { StartMapCodesForm } from './start-map-codes-form';
 import { StartMilestonesForm } from './start-milestones-form';
 import { StartRunForm } from './start-run-form';
 
 type StagesMap = Record<StageName, StageContext | null>;
+
+function stageState(
+  states: PipelineStageStates,
+  stageName: StageName,
+): NonNullable<PipelineStageStates[StageName]> {
+  return states[stageName] ?? 'not_started';
+}
 
 export function PipelineDashboard({
   specialtySlug,
@@ -36,15 +42,11 @@ export function PipelineDashboard({
   milestoneSources,
   unmappedCodeCount,
   defaultContentBase,
-  libraryStats,
-  codeCategories,
-  unmappedCodePicker,
-  mapCodesHistory,
+  mappedCodeCount,
   litSearchStats,
   draftEligibleIds,
   stageHasOutput,
-  stageOverrides,
-  stageSkipped,
+  stageStates,
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -53,10 +55,7 @@ export function PipelineDashboard({
   milestoneSources: CodeSource[];
   unmappedCodeCount: number;
   defaultContentBase: string;
-  libraryStats: AmbossLibraryStats;
-  codeCategories: CodeCategorySummary[];
-  unmappedCodePicker: UnmappedCodePickerRow[];
-  mapCodesHistory: MapCodesHistory;
+  mappedCodeCount: number;
   litSearchStats: {
     approvedTotal: number;
     waitingForSources: number;
@@ -67,16 +66,16 @@ export function PipelineDashboard({
    *  `ready-for-llm-draft` — eligible to enqueue for article writing. */
   draftEligibleIds: string[];
   stageHasOutput: Record<string, boolean>;
-  stageOverrides: Record<string, boolean>;
-  stageSkipped: Record<string, boolean>;
+  stageStates: PipelineStageStates;
 }) {
   const runActive =
     run !== null &&
     run.status !== 'completed' &&
     run.status !== 'failed' &&
     run.status !== 'cancelled';
-  const extractCodesDone = stages.extract_codes?.stage.status === 'completed';
-  const extractMilestonesDone = stages.extract_milestones?.stage.status === 'completed';
+  const extractCodesDone = stageState(stageStates, 'extract_codes') === 'complete';
+  const extractMilestonesDone =
+    stageState(stageStates, 'extract_milestones') === 'complete';
   // "Is mapping complete for the specialty?" isn't the same as "did the last
   // map_codes run finish" — sequential runs are allowed, each handling a
   // subset of codes. The right signal is whether any codes are still
@@ -154,13 +153,11 @@ export function PipelineDashboard({
                 specialtySlug={specialtySlug}
                 stageName="map_codes"
                 events={stages.map_codes.events}
-                alwaysShowReset
                 treatAsInProgress={hasUnmappedCodes}
-                mapCodesHistory={mapCodesHistory}
                 unmappedCount={unmappedCodeCount}
+                mappedCount={mappedCodeCount}
                 hasOutput={stageHasOutput.map_codes ?? false}
-                manualOverride={stageOverrides.map_codes === true}
-                manualSkipped={stageSkipped.map_codes === true}
+                manualState={stageState(stageStates, 'map_codes')}
               />
             );
           }
@@ -176,8 +173,7 @@ export function PipelineDashboard({
                 events={stages.extract_codes.events}
                 sources={sources}
                 hasOutput={stageHasOutput.extract_codes ?? false}
-                manualOverride={stageOverrides.extract_codes === true}
-                manualSkipped={stageSkipped.extract_codes === true}
+                manualState={stageState(stageStates, 'extract_codes')}
               />
             );
           }
@@ -193,8 +189,7 @@ export function PipelineDashboard({
                 events={stages.extract_milestones.events}
                 sources={milestoneSources}
                 hasOutput={stageHasOutput.extract_milestones ?? false}
-                manualOverride={stageOverrides.extract_milestones === true}
-                manualSkipped={stageSkipped.extract_milestones === true}
+                manualState={stageState(stageStates, 'extract_milestones')}
               />
             );
           }
@@ -297,13 +292,10 @@ export function PipelineDashboard({
                     Cancel
                   </Button>
                 </Inline>
-                <StartMapCodesForm
+                <LazyStartMapCodesForm
                   specialtySlug={specialtySlug}
                   unmappedCount={unmappedCodeCount}
                   defaultContentBase={defaultContentBase}
-                  libraryStats={libraryStats}
-                  categories={codeCategories}
-                  unmappedCodes={unmappedCodePicker}
                 />
               </Stack>
             ) : (
@@ -355,8 +347,7 @@ export function PipelineDashboard({
             events={stages.extract_codes?.events ?? []}
             sources={sources}
             hasOutput={stageHasOutput.extract_codes ?? false}
-            manualOverride={stageOverrides.extract_codes === true}
-            manualSkipped={stageSkipped.extract_codes === true}
+            manualState={stageState(stageStates, 'extract_codes')}
           />
           <StageCard
             title="Extract milestones"
@@ -368,8 +359,7 @@ export function PipelineDashboard({
             events={stages.extract_milestones?.events ?? []}
             sources={milestoneSources}
             hasOutput={stageHasOutput.extract_milestones ?? false}
-            manualOverride={stageOverrides.extract_milestones === true}
-            manualSkipped={stageSkipped.extract_milestones === true}
+            manualState={stageState(stageStates, 'extract_milestones')}
           />
         </Stack>
       </PhaseGroup>
@@ -383,17 +373,15 @@ export function PipelineDashboard({
           stageName="map_codes"
           events={stages.map_codes?.events ?? []}
           treatAsInProgress={hasUnmappedCodes}
-          alwaysShowReset
-          mapCodesHistory={mapCodesHistory}
           unmappedCount={unmappedCodeCount}
+          mappedCount={mappedCodeCount}
           continueAction={
             hasUnmappedCodes
               ? { label: 'Continue mapping', onClick: onContinueMapping }
               : undefined
           }
           hasOutput={stageHasOutput.map_codes ?? false}
-          manualOverride={stageOverrides.map_codes === true}
-          manualSkipped={stageSkipped.map_codes === true}
+          manualState={stageState(stageStates, 'map_codes')}
         />
       </PhaseGroup>
 
@@ -407,8 +395,27 @@ export function PipelineDashboard({
             stageName="consolidate_primary"
             events={stages.consolidate_primary?.events ?? []}
             hasOutput={stageHasOutput.consolidate_primary ?? false}
-            manualOverride={stageOverrides.consolidate_primary === true}
-            manualSkipped={stageSkipped.consolidate_primary === true}
+            manualState={stageState(stageStates, 'consolidate_primary')}
+          />
+          <StageCard
+            title="Articles (2nd consolidation)"
+            description="Optional second pass over new-article candidates."
+            stage={stages.consolidate_articles?.stage ?? null}
+            specialtySlug={specialtySlug}
+            stageName="consolidate_articles"
+            events={stages.consolidate_articles?.events ?? []}
+            hasOutput={stageHasOutput.consolidate_articles ?? false}
+            manualState={stageState(stageStates, 'consolidate_articles')}
+          />
+          <StageCard
+            title="Sections (2nd consolidation)"
+            description="Optional second pass over article-update section candidates."
+            stage={stages.consolidate_sections?.stage ?? null}
+            specialtySlug={specialtySlug}
+            stageName="consolidate_sections"
+            events={stages.consolidate_sections?.events ?? []}
+            hasOutput={stageHasOutput.consolidate_sections ?? false}
+            manualState={stageState(stageStates, 'consolidate_sections')}
           />
           <Stack space="s">
             <StageCard
@@ -423,8 +430,7 @@ export function PipelineDashboard({
               stageName="literature_search"
               events={stages.literature_search?.events ?? []}
               hasOutput={stageHasOutput.literature_search ?? false}
-              manualOverride={stageOverrides.literature_search === true}
-              manualSkipped={stageSkipped.literature_search === true}
+              manualState={stageState(stageStates, 'literature_search')}
             />
             <RunLitSearchButton
               specialtySlug={specialtySlug}

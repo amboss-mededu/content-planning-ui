@@ -8,14 +8,17 @@ import { createServerClient } from '@/lib/pb/server';
 import type {
   ArticleBacklogRecord,
   ArticleReviewRecord,
-  CodeRecord,
   ConsolidatedArticleRecord,
   ConsolidatedSectionRecord,
   PipelineRunRecord,
-  PipelineStageRecord,
   SectionReviewRecord,
   SpecialtyRecord,
 } from '@/lib/pb/types';
+import {
+  normalizePipelineStageStates,
+  type PipelineStageStates,
+} from '@/lib/pipeline-stage-state';
+import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
@@ -52,10 +55,6 @@ const RANK_TABLE: ReadonlyArray<{ label: string; color: LastStepColor }> = [
 /** Per-specialty signal bag fed into `resolveLastStep`. */
 type Signals = {
   hasRun: boolean;
-  stageCompleted: Partial<Record<string, boolean>>;
-  milestonesText: boolean;
-  mappedCodeCount: number;
-  totalCodeCount: number;
   consolidatedArticleCount: number;
   consolidatedSectionCount: number;
   decidedArticleCount: number;
@@ -66,55 +65,22 @@ type Signals = {
   publishedBacklogKeys: Set<string>;
   overrides: Record<string, boolean>;
   skipped: Record<string, boolean>;
+  stageStates: PipelineStageStates;
 };
 
-function bool(value: unknown): boolean {
-  return value === true;
+function stateDone(states: PipelineStageStates, stageName: StageName): boolean {
+  const state = states[stageName];
+  return state === 'complete' || state === 'skipped';
 }
 
 function resolveLastStep(s: Signals): LastStep {
-  const o = s.overrides;
-  const k = s.skipped;
-  // Each rank corresponds to one slot in the chain — true if the
-  // auto-derive signal fires OR the editor manually overrode it OR
-  // the editor explicitly skipped it. Skipped stages count as
-  // "completed" for chain advancement; only their badge label differs.
-  const r1_codes =
-    bool(s.stageCompleted.extract_codes) ||
-    bool(o.extract_codes) ||
-    bool(k.extract_codes);
-  const r2_milestones =
-    bool(s.stageCompleted.extract_milestones) ||
-    s.milestonesText ||
-    bool(o.extract_milestones) ||
-    bool(k.extract_milestones);
-  // "Mapping done" only auto-fires once every code is mapped. Partial
-  // progress shouldn't claim the whole stage is complete — that misled
-  // the dashboard into showing "Mapping done" after a single code landed.
-  // Editors can still force-complete via the override blob if some codes
-  // legitimately can't be mapped.
-  const r3_mapping =
-    bool(s.stageCompleted.map_codes) ||
-    (s.totalCodeCount > 0 && s.mappedCodeCount === s.totalCodeCount) ||
-    bool(o.map_codes) ||
-    bool(k.map_codes);
-  const r4_consolidations =
-    bool(s.stageCompleted.consolidate_primary) ||
-    s.consolidatedArticleCount + s.consolidatedSectionCount >= 1 ||
-    bool(o.consolidate_primary) ||
-    bool(k.consolidate_primary);
-  const r5_consArticles =
-    bool(s.stageCompleted.consolidate_articles) ||
-    bool(o.consolidate_articles) ||
-    bool(k.consolidate_articles);
-  const r6_consSections =
-    bool(s.stageCompleted.consolidate_sections) ||
-    bool(o.consolidate_sections) ||
-    bool(k.consolidate_sections);
-  const r7_litSearch =
-    bool(s.stageCompleted.literature_search) ||
-    bool(o.literature_search) ||
-    bool(k.literature_search);
+  const r1_codes = stateDone(s.stageStates, 'extract_codes');
+  const r2_milestones = stateDone(s.stageStates, 'extract_milestones');
+  const r3_mapping = stateDone(s.stageStates, 'map_codes');
+  const r4_consolidations = stateDone(s.stageStates, 'consolidate_primary');
+  const r5_consArticles = stateDone(s.stageStates, 'consolidate_articles');
+  const r6_consSections = stateDone(s.stageStates, 'consolidate_sections');
+  const r7_litSearch = stateDone(s.stageStates, 'literature_search');
   const r8_articlesReviewed =
     s.consolidatedArticleCount > 0 &&
     s.decidedArticleCount === s.consolidatedArticleCount &&
@@ -261,54 +227,32 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
   await connection();
   const pb = await userClient();
 
-  const [
-    specialty,
-    runs,
-    codeRows,
-    articles,
-    sections,
-    reviews,
-    sectionReviews,
-    backlog,
-  ] = await Promise.all([
-    readSpecialty(pb, slug),
-    pb
-      .collection<PipelineRunRecord>('pipelineRuns')
-      .getFullList({ filter: `specialtySlug = "${slug}"`, sort: '-startedAt' }),
-    pb
-      .collection<CodeRecord>('codes')
-      .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,mappedAt' }),
-    pb.collection<ConsolidatedArticleRecord>('consolidatedArticles').getFullList({
-      filter: `specialtySlug = "${slug}"`,
-      fields: 'articleKey,articleTitle,articleId,category',
-    }),
-    pb.collection<ConsolidatedSectionRecord>('consolidatedSections').getFullList({
-      filter: `specialtySlug = "${slug}"`,
-      fields: 'sectionKey,articleTitle,articleId,sectionName,sectionId,category',
-    }),
-    pb
-      .collection<ArticleReviewRecord>('articleReviews')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
-    pb
-      .collection<SectionReviewRecord>('sectionReviews')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
-    pb
-      .collection<ArticleBacklogRecord>('articleBacklog')
-      .getFullList({ filter: `specialtySlug = "${slug}"` }),
-  ]);
+  const [specialty, runs, articles, sections, reviews, sectionReviews, backlog] =
+    await Promise.all([
+      readSpecialty(pb, slug),
+      pb
+        .collection<PipelineRunRecord>('pipelineRuns')
+        .getFullList({ filter: `specialtySlug = "${slug}"`, sort: '-startedAt' }),
+      pb.collection<ConsolidatedArticleRecord>('consolidatedArticles').getFullList({
+        filter: `specialtySlug = "${slug}"`,
+        fields: 'articleKey,articleTitle,articleId,category',
+      }),
+      pb.collection<ConsolidatedSectionRecord>('consolidatedSections').getFullList({
+        filter: `specialtySlug = "${slug}"`,
+        fields: 'sectionKey,articleTitle,articleId,sectionName,sectionId,category',
+      }),
+      pb
+        .collection<ArticleReviewRecord>('articleReviews')
+        .getFullList({ filter: `specialtySlug = "${slug}"` }),
+      pb
+        .collection<SectionReviewRecord>('sectionReviews')
+        .getFullList({ filter: `specialtySlug = "${slug}"` }),
+      pb
+        .collection<ArticleBacklogRecord>('articleBacklog')
+        .getFullList({ filter: `specialtySlug = "${slug}"` }),
+    ]);
 
   const latestRun = runs[0] ?? null;
-  const stageRows = latestRun
-    ? await pb
-        .collection<PipelineStageRecord>('pipelineStages')
-        .getFullList({ filter: `runId = "${latestRun.id}"`, fields: 'stage,status' })
-    : [];
-
-  const stageCompleted: Partial<Record<string, boolean>> = {};
-  for (const row of stageRows) {
-    if (row.status === 'completed') stageCompleted[row.stage] = true;
-  }
-
   const reviewSignals = reviewCompletionSignals({
     slug,
     articles,
@@ -320,16 +264,16 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
 
   return resolveLastStep({
     hasRun: latestRun !== null,
-    stageCompleted,
-    milestonesText:
-      typeof specialty?.milestones === 'string' && specialty.milestones.length > 0,
-    mappedCodeCount: codeRows.filter((c) => (c.mappedAt ?? 0) > 0).length,
-    totalCodeCount: codeRows.length,
     consolidatedArticleCount: articles.length,
     consolidatedSectionCount: sections.length,
     ...reviewSignals,
     overrides: (specialty?.pipelineStageOverrides ?? {}) as Record<string, boolean>,
     skipped: (specialty?.pipelineStageSkipped ?? {}) as Record<string, boolean>,
+    stageStates: normalizePipelineStageStates({
+      states: specialty?.pipelineStageStates,
+      overrides: specialty?.pipelineStageOverrides,
+      skipped: specialty?.pipelineStageSkipped,
+    }),
   });
 }
 
@@ -356,15 +300,12 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   await connection();
   const pb = await userClient();
 
-  const [specialties, runs, codes, articles, sections, reviews, sectionReviews, backlog] =
+  const [specialties, runs, articles, sections, reviews, sectionReviews, backlog] =
     await Promise.all([
       pb.collection<SpecialtyRecord>('specialties').getFullList(),
       pb
         .collection<PipelineRunRecord>('pipelineRuns')
         .getFullList({ sort: '-startedAt' }),
-      pb
-        .collection<CodeRecord>('codes')
-        .getFullList({ fields: 'specialtySlug,mappedAt' }),
       pb.collection<ConsolidatedArticleRecord>('consolidatedArticles').getFullList({
         fields: 'specialtySlug,articleKey,articleTitle,articleId,category',
       }),
@@ -382,35 +323,6 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   const latestRunBySlug = new Map<string, PipelineRunRecord>();
   for (const r of runs) {
     if (!latestRunBySlug.has(r.specialtySlug)) latestRunBySlug.set(r.specialtySlug, r);
-  }
-
-  // Stages for the *latest* run of each specialty. One filter call per
-  // run is acceptable here — this list is the homepage grid; one-extra
-  // query per specialty is still bounded by the specialty count.
-  // `requestKey: null` opts each fan-out call out of the PB SDK's
-  // auto-cancellation, which otherwise nukes every concurrent same-method
-  // request on `pipelineStages` except the last.
-  const stagesByRunId = new Map<string, PipelineStageRecord[]>();
-  await Promise.all(
-    Array.from(latestRunBySlug.values()).map(async (run) => {
-      const list = await pb
-        .collection<PipelineStageRecord>('pipelineStages')
-        .getFullList({
-          filter: `runId = "${run.id}"`,
-          fields: 'stage,status',
-          requestKey: null,
-        });
-      stagesByRunId.set(run.id, list);
-    }),
-  );
-
-  const mappedCount = new Map<string, number>();
-  const totalCount = new Map<string, number>();
-  for (const c of codes) {
-    totalCount.set(c.specialtySlug, (totalCount.get(c.specialtySlug) ?? 0) + 1);
-    if ((c.mappedAt ?? 0) > 0) {
-      mappedCount.set(c.specialtySlug, (mappedCount.get(c.specialtySlug) ?? 0) + 1);
-    }
   }
 
   const articleCount = new Map<string, number>();
@@ -453,11 +365,6 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   for (const sp of specialties) {
     const slug = sp.slug;
     const latestRun = latestRunBySlug.get(slug) ?? null;
-    const stageRows = latestRun ? (stagesByRunId.get(latestRun.id) ?? []) : [];
-    const stageCompleted: Partial<Record<string, boolean>> = {};
-    for (const row of stageRows) {
-      if (row.status === 'completed') stageCompleted[row.stage] = true;
-    }
     const reviewSignals = reviewCompletionSignals({
       slug,
       articles: articlesBySlug.get(slug) ?? [],
@@ -468,15 +375,16 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
     });
     out[slug] = resolveLastStep({
       hasRun: latestRun !== null,
-      stageCompleted,
-      milestonesText: typeof sp.milestones === 'string' && sp.milestones.length > 0,
-      mappedCodeCount: mappedCount.get(slug) ?? 0,
-      totalCodeCount: totalCount.get(slug) ?? 0,
       consolidatedArticleCount: articleCount.get(slug) ?? 0,
       consolidatedSectionCount: sectionCount.get(slug) ?? 0,
       ...reviewSignals,
       overrides: (sp.pipelineStageOverrides ?? {}) as Record<string, boolean>,
       skipped: (sp.pipelineStageSkipped ?? {}) as Record<string, boolean>,
+      stageStates: normalizePipelineStageStates({
+        states: sp.pipelineStageStates,
+        overrides: sp.pipelineStageOverrides,
+        skipped: sp.pipelineStageSkipped,
+      }),
     });
   }
   return out;

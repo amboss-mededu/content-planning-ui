@@ -50,6 +50,10 @@ export interface SpecialtyRecord extends PbRecord {
    *  does. Only the 2nd-consolidation stages expose a skip toggle in
    *  the UI today. */
   pipelineStageSkipped?: Record<string, boolean>;
+  /** Editor-controlled pipeline card state. Legacy
+   *  `pipelineStageOverrides` / `pipelineStageSkipped` are read fallback
+   *  only; new writes use this string state map. */
+  pipelineStageStates?: Record<string, string>;
 }
 
 // --- Collection: codes -----------------------------------------------------

@@ -6,6 +6,11 @@ import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { SpecialtyRecord } from '@/lib/pb/types';
+import {
+  normalizePipelineStageStates,
+  type PipelineCardState,
+  type PipelineStageStates,
+} from '@/lib/pipeline-stage-state';
 import type { Specialty } from '@/lib/types';
 
 // Specialties live in PocketBase. RSC pages call these helpers and get a
@@ -180,27 +185,6 @@ export async function getPipelineStageOverrides(
 }
 
 /**
- * Set or clear a per-stage "manual mark complete" override on a
- * specialty. Read-merge-write so concurrent edits on different stages
- * don't clobber each other.
- */
-export async function setPipelineStageOverride(
-  slug: string,
-  stageName: string,
-  value: boolean,
-): Promise<void> {
-  const pb = await userClient();
-  const row = await pb
-    .collection<SpecialtyRecord>('specialties')
-    .getFirstListItem(`slug = "${slug}"`);
-  const current = (row.pipelineStageOverrides ?? {}) as Record<string, boolean>;
-  const next: Record<string, boolean> = { ...current };
-  if (value) next[stageName] = true;
-  else delete next[stageName];
-  await pb.collection('specialties').update(row.id, { pipelineStageOverrides: next });
-}
-
-/**
  * Read the per-pipeline-stage manual "skip" map for a specialty. The
  * pipeline dashboard renders a skipped stage as gray "Skipped" and
  * advances the last-completed-step chain past it. Used today for the
@@ -223,24 +207,50 @@ export async function getPipelineStageSkipped(
 }
 
 /**
- * Set or clear a per-stage "skip" flag on a specialty. Read-merge-
- * write so concurrent edits on different stages don't clobber each
- * other.
+ * Read editor-controlled pipeline card states. Falls back to legacy
+ * boolean blobs for older rows: skipped wins, then complete, otherwise
+ * not started.
  */
-export async function setPipelineStageSkipped(
+export async function getPipelineStageStates(slug: string): Promise<PipelineStageStates> {
+  await connection();
+  const pb = await userClient();
+  try {
+    const row = await pb
+      .collection<SpecialtyRecord>('specialties')
+      .getFirstListItem(`slug = "${slug}"`);
+    return normalizePipelineStageStates({
+      states: row.pipelineStageStates,
+      overrides: row.pipelineStageOverrides,
+      skipped: row.pipelineStageSkipped,
+    });
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      return normalizePipelineStageStates({});
+    }
+    throw e;
+  }
+}
+
+/**
+ * Set a per-stage editor state. New writes intentionally avoid legacy
+ * override/skip fields so those remain read-only compatibility fallbacks.
+ */
+export async function setPipelineStageState(
   slug: string,
   stageName: string,
-  value: boolean,
+  state: PipelineCardState,
 ): Promise<void> {
   const pb = await userClient();
   const row = await pb
     .collection<SpecialtyRecord>('specialties')
     .getFirstListItem(`slug = "${slug}"`);
-  const current = (row.pipelineStageSkipped ?? {}) as Record<string, boolean>;
-  const next: Record<string, boolean> = { ...current };
-  if (value) next[stageName] = true;
-  else delete next[stageName];
-  await pb.collection('specialties').update(row.id, { pipelineStageSkipped: next });
+  const current = normalizePipelineStageStates({
+    states: row.pipelineStageStates,
+    overrides: row.pipelineStageOverrides,
+    skipped: row.pipelineStageSkipped,
+  });
+  const next: Record<string, PipelineCardState> = { ...current, [stageName]: state };
+  await pb.collection('specialties').update(row.id, { pipelineStageStates: next });
 }
 
 /**

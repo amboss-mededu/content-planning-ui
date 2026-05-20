@@ -39,8 +39,7 @@ import {
   hasOtherApprovedSectionsForParent,
 } from '@/lib/data/sections';
 import {
-  setPipelineStageOverride as setPipelineStageOverrideData,
-  setPipelineStageSkipped as setPipelineStageSkippedData,
+  setPipelineStageState as setPipelineStageStateData,
   setTabOverride as setTabOverrideData,
 } from '@/lib/data/specialties';
 import type {
@@ -50,6 +49,12 @@ import type {
   ReviewCommentRecord,
   ReviewRecordKind,
 } from '@/lib/pb/types';
+import {
+  canSkipPipelineStage,
+  isPipelineCardState,
+  isPipelineStageName,
+  type PipelineCardState,
+} from '@/lib/pipeline-stage-state';
 import type { ApprovalActionResult } from './actions.types';
 
 // Re-exported so consumers can keep importing the type from the actions
@@ -585,36 +590,20 @@ export async function setTabOverride(
   revalidatePath(`/planning/${slug}`, 'layout');
 }
 
-const KNOWN_PIPELINE_STAGES = new Set([
-  'extract_codes',
-  'extract_milestones',
-  'map_codes',
-  'consolidate_primary',
-  'consolidate_articles',
-  'consolidate_sections',
-  'literature_search',
-]);
-
-export async function setPipelineStageOverride(
+export async function setPipelineStageState(
   slug: string,
   stageName: string,
-  value: boolean,
+  state: PipelineCardState,
 ): Promise<void> {
-  if (!KNOWN_PIPELINE_STAGES.has(stageName)) {
+  if (!isPipelineStageName(stageName)) {
     throw new Error(`Unknown pipeline stage: ${stageName}`);
   }
-  await setPipelineStageOverrideData(slug, stageName, value);
-  revalidatePath(`/planning/${slug}`, 'layout');
-}
-
-export async function setPipelineStageSkipped(
-  slug: string,
-  stageName: string,
-  value: boolean,
-): Promise<void> {
-  if (!KNOWN_PIPELINE_STAGES.has(stageName)) {
-    throw new Error(`Unknown pipeline stage: ${stageName}`);
+  if (!isPipelineCardState(state)) {
+    throw new Error(`Unknown pipeline stage state: ${state}`);
   }
-  await setPipelineStageSkippedData(slug, stageName, value);
+  if (state === 'skipped' && !canSkipPipelineStage(stageName)) {
+    throw new Error(`Pipeline stage cannot be skipped: ${stageName}`);
+  }
+  await setPipelineStageStateData(slug, stageName, state);
   revalidatePath(`/planning/${slug}`, 'layout');
 }

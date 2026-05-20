@@ -81,6 +81,7 @@ export type StageContext = {
 export type MapCodesHistory = {
   runs: PipelineRunRow[];
   events: PipelineEventRow[];
+  eventsByRunId: Record<string, PipelineEventRow[]>;
 };
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -157,13 +158,21 @@ export async function getCurrentPipelineRun(
 ): Promise<PipelineRunRow | null> {
   await connection();
   const pb = await userClient();
-  const rows = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+  const active = await pb.collection<PipelineRunRecord>('pipelineRuns').getList(1, 1, {
+    filter: pb.filter(
+      'specialtySlug = {:slug} && status != "completed" && status != "failed" && status != "cancelled"',
+      { slug },
+    ),
+    sort: '-startedAt',
+  });
+  const activeRow = active.items.find((r) => !TERMINAL_STATUSES.has(r.status));
+  if (activeRow) return toRun(activeRow);
+
+  const latest = await pb.collection<PipelineRunRecord>('pipelineRuns').getList(1, 1, {
     filter: pb.filter('specialtySlug = {:slug}', { slug }),
     sort: '-startedAt',
   });
-  if (rows.length === 0) return null;
-  const nonTerminal = rows.find((r) => !TERMINAL_STATUSES.has(r.status));
-  return toRun(nonTerminal ?? rows[0]);
+  return latest.items[0] ? toRun(latest.items[0]) : null;
 }
 
 export async function listPipelineRuns(slug: string): Promise<PipelineRunRow[]> {
@@ -266,7 +275,7 @@ export async function getMapCodesHistory(slug: string): Promise<MapCodesHistory>
     filter: pb.filter('specialtySlug = {:slug}', { slug }),
     sort: '-startedAt',
   });
-  if (runs.length === 0) return { runs: [], events: [] };
+  if (runs.length === 0) return { runs: [], events: [], eventsByRunId: {} };
   const events: PipelineEventRecord[] = [];
   const runIdsWithMapEvents = new Set<string>();
   for (const r of runs) {
@@ -282,9 +291,17 @@ export async function getMapCodesHistory(slug: string): Promise<MapCodesHistory>
     }
   }
   events.sort((a, b) => a.createdAt - b.createdAt);
+  const eventRows = events.map(toEvent);
+  const eventsByRunId: Record<string, PipelineEventRow[]> = {};
+  for (const event of eventRows) {
+    const list = eventsByRunId[event.runId] ?? [];
+    list.push(event);
+    eventsByRunId[event.runId] = list;
+  }
   return {
     runs: runs.filter((r) => runIdsWithMapEvents.has(r.id)).map(toRun),
-    events: events.map(toEvent),
+    events: eventRows,
+    eventsByRunId,
   };
 }
 

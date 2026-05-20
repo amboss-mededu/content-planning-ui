@@ -12,13 +12,14 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   MapCodesHistory,
   PipelineEventRow,
   PipelineRunRow,
   PipelineStageRow,
 } from '@/lib/data/pipeline';
+import type { PipelineCardState } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import {
   type CodeSource,
@@ -27,18 +28,8 @@ import {
 } from '@/lib/workflows/lib/sources';
 import { ApproveButton } from './approve-button';
 import { CancelButton } from './cancel-button';
-import { MarkStageCompleteButton } from './mark-stage-complete-button';
 import { ModelSettingsPopover } from './model-settings-popover';
-import { ResetButton } from './reset-button';
-import { SkipStageButton } from './skip-stage-button';
-
-// Stages that expose a manual "Skip step" button. Today this is only
-// the 2nd-consolidation passes, which are explicitly optional — for
-// every other stage, "skip" is not a meaningful editorial action.
-const SKIPPABLE_STAGES = new Set<StageName>([
-  'consolidate_articles',
-  'consolidate_sections',
-]);
+import { StageStateControl } from './stage-state-control';
 
 /**
  * Persist a boolean flag in localStorage. Defaults to `false` on first paint
@@ -333,23 +324,16 @@ function aggregateMapEvents(events: PipelineEventRow[]) {
   };
 }
 
-/** Specialty-wide "X mapped, Y unmapped" tally for the Map codes card. The
- *  mapped count is the number of distinct codes that show up in any map_codes
- *  event (across every run); unmapped is whatever the server has left in
- *  the codes table. Returns null when neither side has anything to say. */
+/** Specialty-wide "X mapped, Y unmapped" tally for the Map codes card.
+ *  Counts come from the codes table, so initial render does not need to
+ *  hydrate every mapping event. */
 function buildMapCodesSummary(
-  history: MapCodesHistory,
+  mapped: number | undefined,
   unmapped: number | undefined,
 ): string | null {
-  const mappedCodes = new Set<string>();
-  for (const e of history.events) {
-    const m = (e.metrics ?? {}) as Record<string, unknown>;
-    if (typeof m.code === 'string') mappedCodes.add(m.code);
-  }
-  const mapped = mappedCodes.size;
-  if (mapped === 0 && (unmapped === undefined || unmapped === 0)) return null;
+  if ((mapped ?? 0) === 0 && (unmapped === undefined || unmapped === 0)) return null;
   const parts: string[] = [];
-  parts.push(`${mapped} mapped`);
+  parts.push(`${mapped ?? 0} mapped`);
   if (typeof unmapped === 'number') parts.push(`${unmapped} unmapped`);
   return parts.join(', ');
 }
@@ -496,7 +480,9 @@ function MapCodesRunBrowser({
   const run = isOverall ? null : history.runs[clamped - 1];
   const eventsForView = isOverall
     ? history.events
-    : history.events.filter((e) => run !== null && e.runId === run.id);
+    : run
+      ? (history.eventsByRunId?.[run.id] ?? [])
+      : [];
   const label = isOverall
     ? `Overall · ${history.runs.length} run${history.runs.length === 1 ? '' : 's'}`
     : run
@@ -545,13 +531,11 @@ export function StageCard({
   events,
   sources,
   treatAsInProgress,
-  alwaysShowReset,
   continueAction,
   mapCodesHistory,
   unmappedCount,
-  hasOutput,
-  manualOverride,
-  manualSkipped,
+  mappedCount,
+  manualState,
   children,
 }: {
   title: string;
@@ -566,29 +550,18 @@ export function StageCard({
   runUrls?: unknown;
   events?: PipelineEventRow[];
   sources?: CodeSource[];
-  /** True when the stage has produced at least one piece of output — gates
-   *  the manual "Mark step complete" button so editors can't flag an
-   *  empty stage as done (except for the always-enabled 2nd-consolidation
-   *  passes, which pass `hasOutput=true` unconditionally). */
+  /** True when the stage has produced at least one piece of output. */
   hasOutput?: boolean;
-  /** Editor's per-specialty manual "this stage is done" override from
-   *  `specialties.pipelineStageOverrides`. OR-merged with
-   *  `stage.status === 'completed'` for the badge. */
-  manualOverride?: boolean;
-  /** Editor's per-specialty "skip this stage" flag from
-   *  `specialties.pipelineStageSkipped`. When true the badge renders
-   *  as "Skipped" (gray) and supersedes both the auto-derived status
-   *  and `manualOverride`. */
-  manualSkipped?: boolean;
+  /** Editor-controlled card state. Workflow status still powers details,
+   *  approval/cancel availability, logs, and run metadata. */
+  manualState: PipelineCardState;
   /** When the latest run wrapped up (completed / approved) but the
    *  specialty-level work isn't finished — e.g. map_codes ran for a subset
    *  of codes and more remain unmapped — display "In progress" instead of
    *  "Completed". Other statuses (running / awaiting_approval / failed /
    *  pending) are left alone so they remain actionable signals. */
   treatAsInProgress?: boolean;
-  /** Render the Reset button whenever `stage` exists, not just on terminal
-   *  states. Used by map_codes so users can wipe state at any point in the
-   *  partial-run flow. */
+  /** @deprecated Kept as an ignored prop while call sites are simplified. */
   alwaysShowReset?: boolean;
   /** Opt-in primary CTA for partially-complete stages. Renders an AMBOSS-
    *  green Button with the given label when the latest run is wrapped up
@@ -608,64 +581,56 @@ export function StageCard({
    *  `X mapped, Y unmapped`, replacing the per-run "X mapped" from
    *  outputSummary and giving the user a true progress signal. */
   unmappedCount?: number;
+  mappedCount?: number;
 }) {
   const runInputs = normalizeInputs(runUrls);
+  const [displayManualState, setDisplayManualState] = useState(manualState);
+  useEffect(() => {
+    setDisplayManualState(manualState);
+  }, [manualState]);
   const rawStatus = (stage?.status ?? 'pending') as StageStatus;
-  // OR-merge the manual override into the rendered status so the badge
-  // flips to "Completed" once an editor marks the step done — even if
-  // the stage row itself never reached completed/approved (e.g. the
-  // workflow was killed mid-run, or the 2nd-consolidation pass produced
-  // nothing).
-  const inFlight = rawStatus === 'running' || rawStatus === 'awaiting_approval';
   const status: StageStatus =
-    manualSkipped === true && !inFlight
+    displayManualState === 'skipped'
       ? 'skipped'
-      : manualOverride === true && !inFlight
+      : displayManualState === 'complete'
         ? 'completed'
-        : rawStatus;
-  const useMapHistory = stageName === 'map_codes' && mapCodesHistory !== undefined;
+        : displayManualState === 'in_progress'
+          ? 'running'
+          : 'pending';
+  const useMapHistory = stageName === 'map_codes';
   // Map codes shows a specialty-wide "X mapped, Y unmapped" tally instead of
   // the per-run summary, since the card represents the whole stage and per-run
   // numbers reset every batch. Suppress the metrics line for the same reason —
   // overall API call / token totals live inside the per-run Metadata browser.
   const summary = useMapHistory
-    ? buildMapCodesSummary(mapCodesHistory, unmappedCount)
+    ? buildMapCodesSummary(mappedCount, unmappedCount)
     : summaryLine(stage?.outputSummary);
   const metrics = useMapHistory ? null : metricsLine(stage?.outputSummary);
   const approvable =
     stage?.stage === 'extract_codes' ||
     stage?.stage === 'extract_milestones' ||
     stage?.stage === 'map_codes';
-  const isTerminal =
-    status === 'completed' || status === 'failed' || status === 'skipped';
-  const isCancellable = status === 'running' || status === 'awaiting_approval';
-  // Manual override wins over treatAsInProgress: once the editor explicitly
-  // marks the stage complete, partial-progress signals stop overriding the
-  // badge back to "In progress".
+  const isCancellable = rawStatus === 'running' || rawStatus === 'awaiting_approval';
   const inProgressOverride =
     treatAsInProgress === true &&
-    manualOverride !== true &&
-    (status === 'completed' || status === 'approved');
-  // Distinguish "Marked complete" (editor override on a non-completed PB
-  // status) from "Completed" (workflow actually finished) so the source of
-  // the green badge is obvious to anyone reading the pipeline.
-  const isManualMark =
-    manualOverride === true && rawStatus !== 'completed' && rawStatus !== 'approved';
-  const badgeLabel = inProgressOverride
-    ? 'In progress'
-    : isManualMark
-      ? 'Marked complete'
-      : STATUS_LABEL[status];
+    displayManualState === 'complete' &&
+    status === 'completed';
+  const badgeLabel = inProgressOverride ? 'In progress' : STATUS_LABEL[status];
   const badgeColor = inProgressOverride ? 'blue' : STATUS_COLOR[status];
-  const showReset = stage !== null && (isTerminal || alwaysShowReset === true);
   // Continue is only useful when nothing is mid-flight. While running or
   // awaiting_approval the user should drive the run via Cancel / Approve.
   const showContinue =
     continueAction !== undefined &&
-    status !== 'running' &&
-    status !== 'awaiting_approval';
+    rawStatus !== 'running' &&
+    rawStatus !== 'awaiting_approval';
   const [continuing, setContinuing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [lazyMapHistory, setLazyMapHistory] = useState<MapCodesHistory | null>(
+    mapCodesHistory ?? null,
+  );
+  const [mapHistoryLoading, setMapHistoryLoading] = useState(false);
+  const [mapHistoryError, setMapHistoryError] = useState<string | null>(null);
+  const mapHistoryRequested = useRef(mapCodesHistory !== undefined);
   // Card-level collapse — clicking the header hides the body. Persisted per
   // (specialty, stage) so a user's expand/collapse layout survives reloads.
   const [bodyCollapsed, setBodyCollapsed] = useStoredBoolean(
@@ -673,7 +638,8 @@ export function StageCard({
     false,
   );
   const evs = events ?? [];
-  const hasMapHistory = useMapHistory && (mapCodesHistory?.events.length ?? 0) > 0;
+  const activeMapHistory = mapCodesHistory ?? lazyMapHistory;
+  const hasMapHistory = useMapHistory && (activeMapHistory?.events.length ?? 0) > 0;
   const hasDetails =
     stage !== null &&
     (stage.outputSummary ||
@@ -683,6 +649,32 @@ export function StageCard({
       runInputs.length > 0 ||
       evs.length > 0 ||
       hasMapHistory);
+
+  useEffect(() => {
+    if (!expanded || !useMapHistory || activeMapHistory || mapHistoryRequested.current) {
+      return;
+    }
+    let cancelled = false;
+    mapHistoryRequested.current = true;
+    setMapHistoryLoading(true);
+    setMapHistoryError(null);
+    fetch(`/api/pipeline/${encodeURIComponent(specialtySlug)}/map-codes-history`)
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+        if (!cancelled) setLazyMapHistory(body as MapCodesHistory);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setMapHistoryError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setMapHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMapHistory, expanded, specialtySlug, useMapHistory]);
   // Only let users collapse cards once the step has actually run — a pending
   // card's body holds the preview / CTA copy that explains what the step does,
   // and hiding that behind a click before anything has happened just makes the
@@ -741,7 +733,7 @@ export function StageCard({
               {description ? <Text color="secondary">{description}</Text> : null}
               {summary ? <Text>{summary}</Text> : null}
               {metrics ? <Text color="secondary">{metrics}</Text> : null}
-              {status === 'failed' && stage?.errorMessage ? (
+              {rawStatus === 'failed' && stage?.errorMessage ? (
                 <Text color="secondary">{stage.errorMessage}</Text>
               ) : null}
               <Inline space="s" vAlignItems="center">
@@ -750,7 +742,7 @@ export function StageCard({
                     {expanded ? 'Hide details' : 'Show details'}
                   </Button>
                 ) : null}
-                {status === 'awaiting_approval' && stage && approvable ? (
+                {rawStatus === 'awaiting_approval' && stage && approvable ? (
                   <ApproveButton
                     runId={stage.runId}
                     specialtySlug={specialtySlug}
@@ -761,13 +753,6 @@ export function StageCard({
                 ) : null}
                 {isCancellable && stage ? (
                   <CancelButton
-                    runId={stage.runId}
-                    specialtySlug={specialtySlug}
-                    stage={stageName}
-                  />
-                ) : null}
-                {showReset && stage ? (
-                  <ResetButton
                     runId={stage.runId}
                     specialtySlug={specialtySlug}
                     stage={stageName}
@@ -789,23 +774,12 @@ export function StageCard({
                     {continuing ? 'Working…' : continueAction.label}
                   </Button>
                 ) : null}
-                {status !== 'running' && status !== 'awaiting_approval' ? (
-                  <MarkStageCompleteButton
-                    slug={specialtySlug}
-                    stageName={stageName}
-                    hasOutput={hasOutput === true || manualOverride === true}
-                    isComplete={manualOverride === true}
-                  />
-                ) : null}
-                {status !== 'running' &&
-                status !== 'awaiting_approval' &&
-                SKIPPABLE_STAGES.has(stageName) ? (
-                  <SkipStageButton
-                    slug={specialtySlug}
-                    stageName={stageName}
-                    isSkipped={manualSkipped === true}
-                  />
-                ) : null}
+                <StageStateControl
+                  slug={specialtySlug}
+                  stageName={stageName}
+                  state={displayManualState}
+                  onOptimisticStateChange={setDisplayManualState}
+                />
               </Inline>
               {children && status !== 'running' ? children : null}
               {expanded && stage ? (
@@ -996,9 +970,17 @@ export function StageCard({
                       </CollapsibleSubsection>
                     );
                   })()}
-                  {useMapHistory && mapCodesHistory && hasMapHistory ? (
+                  {useMapHistory && mapHistoryLoading ? (
                     <CollapsibleSubsection title="Metadata">
-                      <MapCodesRunBrowser history={mapCodesHistory} mode="metadata" />
+                      <Text color="secondary">Loading mapping history...</Text>
+                    </CollapsibleSubsection>
+                  ) : useMapHistory && mapHistoryError ? (
+                    <CollapsibleSubsection title="Metadata">
+                      <Text color="secondary">{mapHistoryError}</Text>
+                    </CollapsibleSubsection>
+                  ) : useMapHistory && activeMapHistory && hasMapHistory ? (
+                    <CollapsibleSubsection title="Metadata">
+                      <MapCodesRunBrowser history={activeMapHistory} mode="metadata" />
                     </CollapsibleSubsection>
                   ) : summaryPairs(stage.outputSummary).length > 0 ? (
                     <CollapsibleSubsection title="Metadata">
@@ -1033,11 +1015,11 @@ export function StageCard({
                       ))}
                     </CollapsibleSubsection>
                   ) : null}
-                  {useMapHistory && mapCodesHistory && hasMapHistory ? (
+                  {useMapHistory && activeMapHistory && hasMapHistory ? (
                     <CollapsibleSubsection
-                      title={`Log · ${mapCodesHistory.events.length} events across ${mapCodesHistory.runs.length} run${mapCodesHistory.runs.length === 1 ? '' : 's'}`}
+                      title={`Log · ${activeMapHistory.events.length} events across ${activeMapHistory.runs.length} run${activeMapHistory.runs.length === 1 ? '' : 's'}`}
                     >
-                      <MapCodesRunBrowser history={mapCodesHistory} mode="logs" />
+                      <MapCodesRunBrowser history={activeMapHistory} mode="logs" />
                     </CollapsibleSubsection>
                   ) : evs.length > 0 ? (
                     <CollapsibleSubsection title={`Log · ${evs.length} events`}>

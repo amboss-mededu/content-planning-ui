@@ -1,23 +1,14 @@
 import { Suspense } from 'react';
-import { getAmbossLibraryStats } from '@/lib/data/amboss-library';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourceCount } from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
-import { deriveCodeCategories, listCodes } from '@/lib/data/codes';
+import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
-import {
-  getCurrentPipelineRun,
-  getLatestStageContexts,
-  getMapCodesHistory,
-} from '@/lib/data/pipeline';
+import { getCurrentPipelineRun, getLatestStageContexts } from '@/lib/data/pipeline';
 import { listConsolidatedSections } from '@/lib/data/sections';
-import {
-  getPipelineStageOverrides,
-  getPipelineStageSkipped,
-  getSpecialty,
-} from '@/lib/data/specialties';
+import { getPipelineStageStates, getSpecialty } from '@/lib/data/specialties';
 import { SkeletonLine } from '../../_components/skeleton';
 import { PipelineDashboard } from './_components/pipeline-dashboard';
 
@@ -74,46 +65,30 @@ async function PipelineData({ slug }: { slug: string }) {
     sources,
     milestoneSources,
     stageCtxs,
-    codes,
-    libraryStats,
+    codeCount,
+    unmappedCodeCount,
     specialty,
-    mapCodesHistory,
     consolidatedArticleRecs,
     consolidatedSectionRecs,
     articleReviewRecs,
     articleBacklogRecs,
     articleSourceCount,
-    stageOverrides,
-    stageSkipped,
+    stageStates,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
     listMilestoneSources(),
     getLatestStageContexts(slug),
-    listCodes(slug),
-    getAmbossLibraryStats(),
+    listCodeCount(slug),
+    listUnmappedCodeCount(slug),
     getSpecialty(slug),
-    getMapCodesHistory(slug),
     listConsolidatedArticles(slug),
     listConsolidatedSections(slug),
     listArticleReviews(slug),
     listArticleBacklog(slug),
     listArticleSourceCount(slug),
-    getPipelineStageOverrides(slug),
-    getPipelineStageSkipped(slug),
+    getPipelineStageStates(slug),
   ]);
-
-  // Derive variables in memory from the single codes list
-  const codeCount = codes.length;
-  const unmappedCodeCount = codes.filter((r) => !r.mappedAt || r.mappedAt === 0).length;
-  const codeCategories = deriveCodeCategories(codes);
-  const unmappedCodePicker = codes
-    .filter((r) => !r.mappedAt || r.mappedAt === 0)
-    .map((r) => ({
-      code: r.code,
-      description: r.description ?? null,
-      category: r.category ?? null,
-    }));
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
@@ -201,15 +176,11 @@ async function PipelineData({ slug }: { slug: string }) {
       stages={stages}
       unmappedCodeCount={unmappedCodeCount}
       defaultContentBase={defaultContentBase}
-      libraryStats={libraryStats}
-      codeCategories={codeCategories}
-      unmappedCodePicker={unmappedCodePicker}
-      mapCodesHistory={mapCodesHistory}
+      mappedCodeCount={mappedCount}
       litSearchStats={litSearchStats}
       draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}
-      stageOverrides={stageOverrides}
-      stageSkipped={stageSkipped}
+      stageStates={stageStates}
     />
   );
 }
