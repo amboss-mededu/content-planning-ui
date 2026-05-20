@@ -18,6 +18,7 @@ export type MappedCodeWithSuggestions = {
   category: string | null;
   consolidationCategory: string | null;
   description: string | null;
+  depthOfCoverage?: number;
   newArticlesNeeded: NewArticle[];
   existingArticleUpdates: SectionUpdate[];
 };

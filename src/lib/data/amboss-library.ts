@@ -10,7 +10,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
-import { createServerClient } from '@/lib/pb/server';
+import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { AmbossArticleRecord, AmbossSectionRecord } from '@/lib/pb/types';
 
 export type AmbossLibraryStats = {
@@ -35,6 +35,16 @@ export async function listAmbossArticleIds(): Promise<Set<string>> {
     .collection<AmbossArticleRecord>('ambossArticles')
     .getFullList({ fields: 'articleId' });
   return new Set(rows.map((r) => r.articleId));
+}
+
+export async function listAmbossArticleTitlesAsAdmin(): Promise<string[]> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<AmbossArticleRecord>('ambossArticles')
+    .getFullList({ fields: 'title' });
+  return Array.from(new Set(rows.map((r) => r.title).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b),
+  );
 }
 
 export async function listAmbossSectionIds(): Promise<Set<string>> {

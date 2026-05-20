@@ -105,14 +105,15 @@ export function resolveModel(spec: ModelSpec, apiKeys: ProviderApiKeys): Resolve
   switch (spec.provider) {
     case 'google': {
       const google = createGoogleGenerativeAI({ apiKey: key });
+      const thinkingConfig =
+        spec.reasoning === 'high'
+          ? { thinkingBudget: 32768 }
+          : spec.reasoning === 'auto'
+            ? undefined
+            : { thinkingLevel: spec.reasoning };
       return {
         sdkModel: google(spec.model),
-        providerOptions:
-          spec.reasoning === 'auto'
-            ? {}
-            : {
-                google: { thinkingConfig: { thinkingLevel: spec.reasoning } },
-              },
+        providerOptions: thinkingConfig ? { google: { thinkingConfig } } : {},
         modelId: spec.model,
         provider: 'google',
       };

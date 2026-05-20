@@ -1,14 +1,13 @@
 /**
- * Articles-secondary consolidation step (scaffold, no LLM yet).
+ * Articles-secondary consolidation step.
  *
  * Reads every per-category row in `newArticleSuggestions` (output of
  * primary) and dedupes them across the specialty by title, producing
  * `consolidatedArticles` rows that the review page consumes.
  *
- * Real implementation: an LLM pass that merges semantically-equivalent
- * titles, picks a canonical title, and writes one row per merged group.
- * Stub: case-folded exact-title dedupe + union of contributing codes +
- * average importance.
+ * The category primary stage now performs the LLM consolidation. This
+ * secondary stage promotes scoped staging rows to final rows, preserving
+ * LLM-authored metadata while deduping exact same-title rows.
  */
 
 import {
@@ -42,8 +41,32 @@ export type ConsolidateArticlesSecondaryInput = {
 function extractCodeList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((c) => (typeof c === 'string' ? c : null))
-    .filter((c): c is string => c !== null);
+    .map((c) =>
+      typeof c === 'string'
+        ? c
+        : c && typeof c === 'object' && 'code' in c
+          ? String((c as { code?: unknown }).code ?? '')
+          : null,
+    )
+    .filter((c): c is string => c !== null && c.length > 0);
+}
+
+function extractCodeEntries(raw: unknown): unknown[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  return raw
+    .map((c) => {
+      const code =
+        typeof c === 'string'
+          ? c
+          : c && typeof c === 'object' && 'code' in c
+            ? String((c as { code?: unknown }).code ?? '')
+            : '';
+      if (!code || seen.has(code)) return null;
+      seen.add(code);
+      return c;
+    })
+    .filter((c): c is unknown => c !== null);
 }
 
 function avg(values: number[]): number | undefined {
@@ -144,9 +167,15 @@ export async function consolidateArticlesSecondaryWorkflow(
       string,
       {
         articleTitle: string;
+        articleType?: string;
+        articleId?: string;
+        specialtyName?: string;
         categories: Set<string>;
-        codes: Set<string>;
+        codes: Map<string, unknown>;
+        previousArticleTitleSuggestions: Set<string>;
+        coverages: number[];
         importances: number[];
+        justifications: string[];
       }
     >();
     for (const row of staging as ArticleSuggestionRecord[]) {
@@ -154,22 +183,47 @@ export async function consolidateArticlesSecondaryWorkflow(
       if (!title) continue;
       const key = title.toLowerCase();
       const existing = groups.get(key);
-      const codes = extractCodeList(row.codes);
+      const codes = extractCodeEntries(row.codes);
       const importance =
         typeof row.overallImportance === 'number' ? row.overallImportance : null;
+      const coverage =
+        typeof row.overallCoverage === 'number' ? row.overallCoverage : null;
+      const previousTitles = Array.isArray(row.previousArticleTitleSuggestions)
+        ? row.previousArticleTitleSuggestions.filter(
+            (value): value is string => typeof value === 'string',
+          )
+        : [];
+      const addCodes = (target: Map<string, unknown>) => {
+        for (const c of codes) {
+          const code = typeof c === 'string' ? c : (c as { code?: string }).code;
+          if (code) target.set(code, c);
+        }
+      };
       if (existing) {
-        if (row.specialtyName) existing.categories.add(row.specialtyName);
-        for (const c of codes) existing.codes.add(c);
+        addCodes(existing.codes);
         for (const c of categoriesForCodes(row.codes, codeToCategory)) {
           existing.categories.add(c);
         }
         if (importance !== null) existing.importances.push(importance);
+        if (coverage !== null) existing.coverages.push(coverage);
+        if (row.justification) existing.justifications.push(row.justification);
+        for (const previousTitle of previousTitles) {
+          existing.previousArticleTitleSuggestions.add(previousTitle);
+        }
       } else {
+        const codeMap = new Map<string, unknown>();
+        addCodes(codeMap);
         groups.set(key, {
           articleTitle: title,
+          articleType: row.articleType,
+          articleId: row.articleId,
+          specialtyName: row.specialtyName,
           categories: new Set(),
-          codes: new Set(codes),
+          codes: codeMap,
+          previousArticleTitleSuggestions: new Set(previousTitles),
+          coverages: coverage !== null ? [coverage] : [],
           importances: importance !== null ? [importance] : [],
+          justifications: row.justification ? [row.justification] : [],
         });
       }
       // Preserve category from the suggestion record on first insert.
@@ -188,14 +242,18 @@ export async function consolidateArticlesSecondaryWorkflow(
       const categories = Array.from(g.categories);
       return {
         articleTitle: g.articleTitle,
+        articleType: g.articleType,
+        articleId: g.articleId,
+        specialtyName: g.specialtyName,
         // When the same title appears in multiple categories the rail can
         // surface it under any of them; pick the first deterministically.
         category: categories[0] ?? undefined,
         numCodes: g.codes.size,
-        codes: Array.from(g.codes),
+        codes: Array.from(g.codes.values()),
+        previousArticleTitleSuggestions: Array.from(g.previousArticleTitleSuggestions),
+        overallCoverage: avg(g.coverages),
         overallImportance: avg(g.importances),
-        justification:
-          'Generated by passthrough title-dedupe across primary staging rows — real LLM merge not yet wired (see consolidation/prompts.ts).',
+        justification: g.justifications.join('\n\n') || undefined,
       };
     });
 
@@ -213,7 +271,7 @@ export async function consolidateArticlesSecondaryWorkflow(
     await markStageCompleted(input.runId, 'consolidate_articles', undefined, {
       stagingCandidates: staging.length,
       merged: finalRows.length,
-      llmStub: true,
+      llmStub: false,
     });
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);

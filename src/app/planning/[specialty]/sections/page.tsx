@@ -112,18 +112,6 @@ async function SectionsData({ slug }: { slug: string }) {
     sectionRecs,
   );
 
-  const initialReviews: ReviewMap = {};
-  const initialReviewers: ReviewerMap = {};
-  const initialNotesBySection: Record<string, string> = {};
-  for (const [id, r] of Object.entries(reviewRecs)) {
-    initialReviews[id] = r.status;
-    initialReviewers[id] = {
-      reviewerEmail: r.reviewerEmail,
-      reviewedAt: r.reviewedAt,
-    };
-    if (r.notes) initialNotesBySection[id] = r.notes;
-  }
-
   // Only approved sections reach the article-updates surface.
   // Approval happens on /consolidation-review; until that flips,
   // the row shouldn't be visible here. Match the same fallback
@@ -144,6 +132,24 @@ async function SectionsData({ slug }: { slug: string }) {
     return reviewRecs[key]?.status === 'approved';
   });
   const rows = approvedSections.map((r) => projectSection(slug, r));
+
+  // Review maps in the client are keyed by the current consolidatedSections
+  // PB row id for fast table/modal lookup. The data layer returns stable
+  // sectionKey-keyed rows, so translate after projection.
+  const initialReviews: ReviewMap = {};
+  const initialReviewers: ReviewerMap = {};
+  const initialNotesBySection: Record<string, string> = {};
+  for (const row of rows) {
+    if (!row.id || !row.sectionKey) continue;
+    const review = reviewRecs[row.sectionKey];
+    if (!review) continue;
+    initialReviews[row.id] = review.status;
+    initialReviewers[row.id] = {
+      reviewerEmail: review.reviewerEmail,
+      reviewedAt: review.reviewedAt,
+    };
+    if (review.notes) initialNotesBySection[row.id] = review.notes;
+  }
 
   return (
     <SectionsView

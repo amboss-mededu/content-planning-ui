@@ -1,18 +1,11 @@
 /**
- * Per-category primary consolidation step (scaffold, no LLM yet).
+ * Per-category primary consolidation step.
  *
  * Reads each mapped code in the target category, aggregates the
  * `newArticlesNeeded` and `existingArticleUpdates` blobs the mapping step
  * already wrote, and lands them in the per-category staging tables:
  *   - `newArticleSuggestions`        ← new-article candidates
  *   - `articleUpdateSuggestions`     ← section-update candidates
- *
- * When the real LLM consolidation prompt arrives (see prompts.ts), the
- * aggregation output becomes the LLM's *input* rather than its
- * substitute. The runner shape and the staging-table contract stay the
- * same, so secondary stages (which dedupe staging → consolidated*) don't
- * need to know whether primary's output came from passthrough or from
- * an LLM.
  *
  * Per-category re-run hygiene: before inserting, the runner clears any
  * staging rows tagged with the same category so consecutive clicks of
@@ -21,13 +14,15 @@
 
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
+import { listAmbossArticleTitlesAsAdmin } from '@/lib/data/amboss-library';
 import {
   bulkInsertArticleUpdateSuggestionsAsAdmin,
   bulkInsertNewArticleSuggestionsAsAdmin,
 } from '@/lib/data/articles';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
+import { getSpecialtyRecordAsAdmin } from '@/lib/data/specialties';
 import { createAdminClient } from '@/lib/pb/server';
-import type { ArticleSuggestionRecord } from '@/lib/pb/types';
+import type { ArticleSuggestionRecord, CodeCategoryRecord } from '@/lib/pb/types';
 import {
   getPipelineRunStatus,
   markStageCompleted,
@@ -41,13 +36,12 @@ import { resolveModel } from '../lib/llm';
 import { estimateCostUsd } from '../lib/pricing';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import {
-  type AggregatedNewArticleRow,
-  type AggregatedSectionUpdateRow,
   aggregateNewArticles,
   aggregateSectionUpdates,
   type MappedCodeWithSuggestions,
 } from './aggregate';
 import { groupByConsolidationCategory } from './buckets';
+import { buildCategoryConsolidationPrompt, CONSOLIDATION_SYSTEM_PROMPT } from './prompts';
 
 export type ConsolidatePrimaryInput = {
   runId: string;
@@ -76,69 +70,185 @@ function shouldAbort(status: string | null): boolean {
   return status === 'cancelled' || status === 'failed' || status === null;
 }
 
-const ConsolidationOutputSchema = z.object({
-  newArticleSuggestions: z.array(
-    z.object({
-      articleTitle: z.string(),
-      codes: z.array(z.string()),
-      overallImportance: z.number().optional(),
-      justification: z.string().optional(),
-    }),
-  ),
-  articleUpdateSuggestions: z.array(
-    z.object({
-      articleTitle: z.string().optional(),
-      articleId: z.string().optional(),
-      sectionName: z.string().optional(),
-      sectionId: z.string().optional(),
-      exists: z.boolean().optional(),
-      newSection: z.boolean().optional(),
-      sectionUpdate: z.boolean().optional(),
-      codes: z.array(z.string()),
-      overallImportance: z.number().optional(),
-      justification: z.string().optional(),
-    }),
-  ),
+const nullableString = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.string().optional(),
+);
+const nullableBoolean = z.preprocess((value) => {
+  if (value === null || value === '') return undefined;
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === 'true') return true;
+    if (value.toLowerCase() === 'false') return false;
+  }
+  return value;
+}, z.boolean().optional());
+const nullableNumber = z.preprocess((value) => {
+  if (value === null || value === '') return undefined;
+  return value;
+}, z.coerce.number().optional());
+
+const ConsolidatedCodeSchema = z.object({
+  code: z.string(),
+  description: nullableString,
+  previouslySuggestedArticleTitle: nullableString,
+  previouslySuggestedArticleOrSectionTitle: nullableString,
+  coverageScore: nullableNumber,
+  importance: nullableNumber,
+  index: z.union([z.number(), z.string()]).optional(),
 });
 
-function validCodes(codes: string[], allowed: Set<string>): string[] {
-  return Array.from(new Set(codes.filter((code) => allowed.has(code))));
+const IgnoredArticleSchema = z.object({
+  code: z.string(),
+  description: nullableString,
+  previouslySuggestedArticleTitle: nullableString,
+  justification: nullableString,
+  index: z.union([z.number(), z.string()]).optional(),
+});
+
+const IgnoredSectionSchema = z.object({
+  code: z.string(),
+  description: nullableString,
+  previouslySuggestedSectionTitle: nullableString,
+  exists: nullableBoolean,
+  articleId: nullableString,
+  justification: nullableString,
+  index: z.union([z.number(), z.string()]).optional(),
+});
+
+const ConsolidationOutputSchema = z.object({
+  specialty: nullableString,
+  category: z.string(),
+  articles: z.array(
+    z.object({
+      articleTitle: z.string(),
+      articleType: nullableString,
+      exists: nullableBoolean,
+      articleId: nullableString,
+      codes: z.array(ConsolidatedCodeSchema),
+      previousArticleTitleSuggestions: z.array(z.string()).optional().default([]),
+      overallCoverage: nullableNumber,
+      overallImportance: nullableNumber,
+      justification: nullableString,
+    }),
+  ),
+  includedArticleIndexes: z
+    .array(z.union([z.number(), z.string()]))
+    .optional()
+    .default([]),
+  ignoredArticles: z.array(IgnoredArticleSchema).optional().default([]),
+  ignoredArticleIndexes: z
+    .array(z.union([z.number(), z.string()]))
+    .optional()
+    .default([]),
+  sections: z.array(
+    z.object({
+      articleTitle: z.string(),
+      articleId: nullableString,
+      articleType: nullableString,
+      sectionUpdates: z.array(
+        z.object({
+          sectionName: z.string(),
+          codes: z.array(ConsolidatedCodeSchema),
+          previousArticleAndSectionTitleSuggestions: z
+            .array(z.string())
+            .optional()
+            .default([]),
+          exists: nullableBoolean,
+          sectionId: nullableString,
+          overallCoverage: nullableNumber,
+          overallImportance: nullableNumber,
+          justification: nullableString,
+        }),
+      ),
+    }),
+  ),
+  includedSectionIndexes: z
+    .array(z.union([z.number(), z.string()]))
+    .optional()
+    .default([]),
+  ignoredSections: z.array(IgnoredSectionSchema).optional().default([]),
+  ignoredSectionIndexes: z
+    .array(z.union([z.number(), z.string()]))
+    .optional()
+    .default([]),
+  totallyIgnoredIndexes: z
+    .array(
+      z.object({
+        code: z.string(),
+        index: z.union([z.number(), z.string()]).optional(),
+        justification: nullableString,
+      }),
+    )
+    .optional()
+    .default([]),
+});
+
+type ConsolidationOutput = z.infer<typeof ConsolidationOutputSchema>;
+
+type ConsolidationRows = {
+  newArticles: Array<Record<string, unknown>>;
+  sectionUpdates: Array<Record<string, unknown>>;
+  decisions?: Pick<
+    ConsolidationOutput,
+    | 'ignoredArticles'
+    | 'ignoredSections'
+    | 'totallyIgnoredIndexes'
+    | 'includedArticleIndexes'
+    | 'ignoredArticleIndexes'
+    | 'includedSectionIndexes'
+    | 'ignoredSectionIndexes'
+  >;
+};
+
+function codeList(
+  codes: Array<z.infer<typeof ConsolidatedCodeSchema>>,
+  allowed: Set<string>,
+) {
+  const seen = new Set<string>();
+  return codes.filter((code) => {
+    if (!allowed.has(code.code) || seen.has(code.code)) return false;
+    seen.add(code.code);
+    return true;
+  });
+}
+
+function ignoredCodes(rows: Array<{ code: string }>, allowed: Set<string>): string[] {
+  return Array.from(
+    new Set(rows.map((row) => row.code).filter((code) => allowed.has(code))),
+  );
 }
 
 async function consolidateCategoryWithLlm({
   runId,
+  specialtyName,
+  language,
+  region,
   category,
   codes,
+  articleTitles,
   model,
   apiKeys,
 }: {
   runId: string;
+  specialtyName: string;
+  language: string;
+  region: string;
   category: string;
   codes: MappedCodeWithSuggestions[];
+  articleTitles: string[];
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
-}): Promise<{
-  newArticles: AggregatedNewArticleRow[];
-  sectionUpdates: AggregatedSectionUpdateRow[];
-}> {
+}): Promise<ConsolidationRows> {
   const resolved = resolveModel(model, apiKeys);
   const allowed = new Set(codes.map((code) => code.code));
-  const prompt = JSON.stringify(
-    {
-      consolidationCategory: category,
-      instructions:
-        'Consolidate mapped-code suggestions into reviewable new-article and article-section update candidates. Merge duplicates and near-duplicates. Preserve only input code IDs in each output row. Return empty arrays only if no candidate is clinically appropriate.',
-      codes: codes.map((code) => ({
-        code: code.code,
-        description: code.description,
-        sourceCategory: code.category,
-        newArticlesNeeded: code.newArticlesNeeded,
-        existingArticleUpdates: code.existingArticleUpdates,
-      })),
-    },
-    null,
-    2,
-  );
+  const prompt = buildCategoryConsolidationPrompt({
+    specialty: specialtyName,
+    category,
+    language,
+    region,
+    articleTitles,
+    codes,
+  });
 
   await logEvent({
     runId,
@@ -155,12 +265,11 @@ async function consolidateCategoryWithLlm({
   const started = Date.now();
   const result = await generateText({
     model: resolved.sdkModel,
-    system:
-      'You are an expert medical education content planner. Consolidate board-code mapping outputs into concise AMBOSS content planning candidates. Return only schema-valid structured output.',
+    system: CONSOLIDATION_SYSTEM_PROMPT,
     prompt,
     output: Output.object({ schema: ConsolidationOutputSchema }),
     providerOptions: resolved.providerOptions,
-    temperature: 0,
+    temperature: 1,
   });
   const durationMs = Date.now() - started;
   const usage = {
@@ -185,37 +294,74 @@ async function consolidateCategoryWithLlm({
     },
   });
 
-  return {
-    newArticles: result.output.newArticleSuggestions
-      .map((row) => ({
+  const output = result.output;
+  if (output.category !== category) {
+    throw new Error(
+      `Consolidation output category mismatch: expected "${category}", got "${output.category}"`,
+    );
+  }
+
+  const newArticles = output.articles
+    .map((row) => {
+      const codesForRow = codeList(row.codes, allowed);
+      return {
         articleTitle: row.articleTitle,
-        category,
-        numCodes: validCodes(row.codes, allowed).length,
-        codes: validCodes(row.codes, allowed),
-        overallImportance: row.overallImportance,
-        justification: row.justification ?? 'Generated by LLM primary consolidation.',
-      }))
-      .filter((row) => row.articleTitle.trim() && row.codes.length > 0),
-    sectionUpdates: result.output.articleUpdateSuggestions
-      .map((row) => ({
-        articleTitle: row.articleTitle,
+        articleType: row.articleType,
         articleId: row.articleId,
-        sectionName: row.sectionName,
-        sectionId: row.sectionId,
-        exists: row.exists,
-        newSection: row.newSection,
-        sectionUpdate: row.sectionUpdate,
         category,
-        numCodes: validCodes(row.codes, allowed).length,
-        codes: validCodes(row.codes, allowed),
+        specialtyName,
+        exists: row.exists,
+        numCodes: codesForRow.length,
+        codes: codesForRow,
+        previousArticleTitleSuggestions: row.previousArticleTitleSuggestions,
+        overallCoverage: row.overallCoverage,
         overallImportance: row.overallImportance,
-        justification: row.justification ?? 'Generated by LLM primary consolidation.',
-      }))
-      .filter(
-        (row) =>
-          row.codes.length > 0 &&
-          (row.articleTitle?.trim() || row.articleId || row.sectionName?.trim()),
-      ),
+        justification: row.justification ?? 'Generated by LLM consolidation.',
+      };
+    })
+    .filter((row) => row.articleTitle.trim() && row.numCodes > 0);
+
+  const sectionUpdates = output.sections.flatMap((section) =>
+    section.sectionUpdates
+      .map((update) => {
+        const codesForRow = codeList(update.codes, allowed);
+        const exists = update.exists === true;
+        return {
+          articleTitle: section.articleTitle,
+          articleType: section.articleType,
+          articleId: section.articleId,
+          sectionName: update.sectionName,
+          sectionId: update.sectionId,
+          exists: update.exists,
+          newSection: update.exists === false,
+          sectionUpdate: exists,
+          category,
+          specialtyName,
+          unique_title: `${section.articleTitle} - ${update.sectionName}`,
+          uniqueId: [section.articleId, update.sectionId].filter(Boolean).join(':'),
+          numCodes: codesForRow.length,
+          codes: codesForRow,
+          previousSectionNames: update.previousArticleAndSectionTitleSuggestions,
+          overallCoverage: update.overallCoverage,
+          overallImportance: update.overallImportance,
+          justification: update.justification ?? 'Generated by LLM consolidation.',
+        };
+      })
+      .filter((row) => row.sectionName.trim() && row.numCodes > 0),
+  );
+
+  return {
+    newArticles,
+    sectionUpdates,
+    decisions: {
+      ignoredArticles: output.ignoredArticles,
+      ignoredSections: output.ignoredSections,
+      totallyIgnoredIndexes: output.totallyIgnoredIndexes,
+      includedArticleIndexes: output.includedArticleIndexes,
+      ignoredArticleIndexes: output.ignoredArticleIndexes,
+      includedSectionIndexes: output.includedSectionIndexes,
+      ignoredSectionIndexes: output.ignoredSectionIndexes,
+    },
   };
 }
 
@@ -249,6 +395,83 @@ async function clearStagingForCategories(
   return toDelete.length;
 }
 
+async function updateCategoryDecisions({
+  slug,
+  category,
+  allowedCodes,
+  newArticles,
+  sectionUpdates,
+  decisions,
+}: {
+  slug: string;
+  category: string;
+  allowedCodes: Set<string>;
+  newArticles: Array<Record<string, unknown>>;
+  sectionUpdates: Array<Record<string, unknown>>;
+  decisions?: ConsolidationRows['decisions'];
+}): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<CodeCategoryRecord>('codeCategories')
+    .getFullList({ filter: pb.filter('specialtySlug = {:slug}', { slug }) });
+  const row = rows.find((r) => r.codeCategory?.trim() === category.trim());
+  if (!row) return;
+
+  const codesFromRows = (inputRows: Array<Record<string, unknown>>): string[] => {
+    const out = new Set<string>();
+    for (const inputRow of inputRows) {
+      const rawCodes = inputRow.codes;
+      if (!Array.isArray(rawCodes)) continue;
+      for (const raw of rawCodes) {
+        const code =
+          typeof raw === 'string'
+            ? raw
+            : raw && typeof raw === 'object' && 'code' in raw
+              ? String((raw as { code?: unknown }).code ?? '')
+              : '';
+        if (code && allowedCodes.has(code)) out.add(code);
+      }
+    }
+    return Array.from(out).sort();
+  };
+
+  const includedArticleCodes = codesFromRows(newArticles);
+  const includedSectionCodes = codesFromRows(sectionUpdates);
+  const excludedArticleCodes = ignoredCodes(
+    decisions?.ignoredArticles ?? [],
+    allowedCodes,
+  );
+  const excludedSectionCodes = ignoredCodes(
+    decisions?.ignoredSections ?? [],
+    allowedCodes,
+  );
+  const totallyIgnoredCodes = ignoredCodes(
+    (decisions?.totallyIgnoredIndexes ?? []).map((row) => ({ code: row.code })),
+    allowedCodes,
+  );
+
+  await pb.collection('codeCategories').update(row.id, {
+    isConsolidated: true,
+    includedArticleCodes,
+    numIncludedArticleCodes: includedArticleCodes.length,
+    excludedArticleCodes,
+    numExcludedArticleCodes: excludedArticleCodes.length,
+    includedSectionCodes,
+    numIncludedSectionCodes: includedSectionCodes.length,
+    excludedSectionCodes,
+    numExcludedSectionCodes: excludedSectionCodes.length,
+    totallyIgnoredCodes,
+    numTotallyIgnoredCodes: totallyIgnoredCodes.length,
+    numIncludedCodes: new Set([
+      ...includedArticleCodes,
+      ...includedSectionCodes,
+      ...excludedArticleCodes,
+      ...excludedSectionCodes,
+      ...totallyIgnoredCodes,
+    ]).size,
+  });
+}
+
 export async function consolidatePrimaryWorkflow(
   input: ConsolidatePrimaryInput,
 ): Promise<ConsolidatePrimaryStats> {
@@ -261,11 +484,15 @@ export async function consolidatePrimaryWorkflow(
   try {
     await markStageRunning(input.runId, 'consolidate_primary');
 
-    const codes = await listMappedCodesWithSuggestionsAsAdmin(
-      input.specialtySlug,
-      input.consolidationCategories,
-      input.sourceCategories,
-    );
+    const [codes, specialty, articleTitles] = await Promise.all([
+      listMappedCodesWithSuggestionsAsAdmin(
+        input.specialtySlug,
+        input.consolidationCategories,
+        input.sourceCategories,
+      ),
+      getSpecialtyRecordAsAdmin(input.specialtySlug),
+      listAmbossArticleTitlesAsAdmin(),
+    ]);
     const groups = groupByConsolidationCategory(codes);
     const consolidationCategoriesProcessed = Array.from(groups.keys());
 
@@ -273,7 +500,7 @@ export async function consolidatePrimaryWorkflow(
       runId: input.runId,
       stage: 'consolidate_primary',
       level: 'info',
-      message: `Aggregating mapping suggestions for ${consolidationCategoriesProcessed.length} consolidation categor${consolidationCategoriesProcessed.length === 1 ? 'y' : 'ies'} (${codes.length} mapped codes). LLM consolidation prompt not yet wired — using passthrough aggregation.`,
+      message: `Running category consolidation for ${consolidationCategoriesProcessed.length} consolidation categor${consolidationCategoriesProcessed.length === 1 ? 'y' : 'ies'} (${codes.length} mapped codes).`,
     });
 
     if (consolidationCategoriesProcessed.length > 0) {
@@ -324,12 +551,17 @@ export async function consolidatePrimaryWorkflow(
               runId: input.runId,
               category,
               codes: catCodes,
+              specialtyName: specialty?.name ?? input.specialtySlug,
+              language: specialty?.language ?? 'english',
+              region: specialty?.region ?? 'us',
+              articleTitles,
               model: input.model,
               apiKeys: input.apiKeys,
             })
           : {
               newArticles: aggregateNewArticles(catCodes, category),
               sectionUpdates: aggregateSectionUpdates(catCodes, category),
+              decisions: undefined,
             };
       const newArticles = consolidated.newArticles;
       const sectionUpdates = consolidated.sectionUpdates;
@@ -343,6 +575,14 @@ export async function consolidatePrimaryWorkflow(
           sectionUpdates,
         );
       }
+      await updateCategoryDecisions({
+        slug: input.specialtySlug,
+        category,
+        allowedCodes: new Set(catCodes.map((code) => code.code)),
+        newArticles,
+        sectionUpdates,
+        decisions: consolidated.decisions,
+      });
       totalArticles += newArticles.length;
       totalSections += sectionUpdates.length;
 

@@ -152,7 +152,18 @@ export type NewArticleSuggestion = {
   areAllSourcesFetched?: boolean;
 };
 
-export type ArticleUpdateSuggestion = NewArticleSuggestion;
+export type ArticleUpdateSuggestion = NewArticleSuggestion & {
+  articleType?: string;
+  sectionName?: string;
+  sectionId?: string;
+  exists?: boolean;
+  newSection?: boolean;
+  sectionUpdate?: boolean;
+  previousSectionNames?: string[];
+  overallCoverage?: number;
+  unique_title?: string;
+  uniqueId?: string;
+};
 
 // --- Sections --------------------------------------------------------------
 

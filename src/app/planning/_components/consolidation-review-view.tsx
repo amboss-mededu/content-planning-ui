@@ -306,9 +306,12 @@ export function ConsolidationReviewView({
       });
       startTransition(async () => {
         await bulkApproveSectionReviews(slug, pairs);
+        // The Article Updates tab is server-rendered from sectionReviews,
+        // so refresh after approving sections from this review surface.
+        router.refresh();
       });
     },
-    [slug, viewerEmail],
+    [slug, viewerEmail, router],
   );
 
   const approveAndBacklogArticles = useCallback(
@@ -399,9 +402,10 @@ export function ConsolidationReviewView({
       });
       startTransition(async () => {
         await bulkUnapproveSectionReviews(slug, pairs);
+        router.refresh();
       });
     },
-    [slug],
+    [slug, router],
   );
 
   const approveAllInCategory = useCallback(() => {
@@ -1361,7 +1365,7 @@ function SectionSubTable({
     <Stack space="xs">
       <Inline space="s" vAlignItems="center">
         <Text size="m" weight="bold">
-          Section updates ({rows.length})
+          Sections ({rows.length})
         </Text>
         <Button
           variant="secondary"

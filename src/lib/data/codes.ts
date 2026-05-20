@@ -201,6 +201,7 @@ export async function listMappedCodesWithSuggestionsAsAdmin(
     category: string | null;
     consolidationCategory: string | null;
     description: string | null;
+    depthOfCoverage?: number;
     newArticlesNeeded: NewArticle[];
     existingArticleUpdates: SectionUpdate[];
   }>
@@ -233,6 +234,7 @@ export async function listMappedCodesWithSuggestionsAsAdmin(
       category: r.category ?? null,
       consolidationCategory: r.consolidationCategory ?? null,
       description: r.description ?? null,
+      depthOfCoverage: r.depthOfCoverage,
       newArticlesNeeded: Array.isArray(r.newArticlesNeeded) ? r.newArticlesNeeded : [],
       existingArticleUpdates: Array.isArray(r.existingArticleUpdates)
         ? r.existingArticleUpdates
