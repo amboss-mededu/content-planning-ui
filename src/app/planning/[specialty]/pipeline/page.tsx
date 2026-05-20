@@ -3,7 +3,7 @@ import { getAmbossLibraryStats } from '@/lib/data/amboss-library';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourceCount } from '@/lib/data/article-sources';
-import { listConsolidatedArticles, listNewArticleSuggestions } from '@/lib/data/articles';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
 import {
   listCodeCategories,
@@ -88,7 +88,6 @@ async function PipelineData({ slug }: { slug: string }) {
     consolidatedArticleRecs,
     consolidatedSectionRecs,
     articleReviewRecs,
-    newArticleSuggestionRecs,
     articleBacklogRecs,
     codeCount,
     articleSourceCount,
@@ -108,32 +107,12 @@ async function PipelineData({ slug }: { slug: string }) {
     listConsolidatedArticles(slug),
     listConsolidatedSections(slug),
     listArticleReviews(slug),
-    listNewArticleSuggestions(slug),
     listArticleBacklog(slug),
     listCodeCount(slug),
     listArticleSourceCount(slug),
     getPipelineStageOverrides(slug),
     getPipelineStageSkipped(slug),
   ]);
-
-  // Stats for the "Articles (secondary)" card — the 2nd consolidation
-  // pass should only ingest approved 1st-pass articles. Surface the
-  // current approval state on the card so the editor sees what's gated.
-  let approved = 0;
-  let rejected = 0;
-  for (const a of consolidatedArticleRecs) {
-    const id = a.id;
-    if (!id) continue;
-    const r = articleReviewRecs[id];
-    if (r?.status === 'approved') approved++;
-    else if (r?.status === 'rejected') rejected++;
-  }
-  const articleApprovalStats = {
-    total: consolidatedArticleRecs.length,
-    approved,
-    rejected,
-    unreviewed: consolidatedArticleRecs.length - approved - rejected,
-  };
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
@@ -146,7 +125,7 @@ async function PipelineData({ slug }: { slug: string }) {
   };
 
   // Backlog stats for the Literature search card. "waiting" covers
-  // every approved 2nd-pass article whose effective backlog status is
+  // every approved article whose effective backlog status is
   // unassigned / missing-row / waiting-for-sources — the same gate
   // the API route uses for eligibility.
   let waitingForSources = 0;
@@ -154,10 +133,10 @@ async function PipelineData({ slug }: { slug: string }) {
   let laterStages = 0;
   let approvedNew = 0;
   // Eligibility list for the bulk-draft card. We collect the underlying
-  // newArticleSuggestions PB ids so the card can POST them straight to
+  // consolidatedArticles PB ids so the card can POST them straight to
   // the bulk endpoint.
   const draftEligibleIds: string[] = [];
-  for (const r of newArticleSuggestionRecs) {
+  for (const r of consolidatedArticleRecs) {
     const id = r.id;
     const key = r.articleKey;
     if (!id || !key) continue;
@@ -225,7 +204,6 @@ async function PipelineData({ slug }: { slug: string }) {
       codeCategories={codeCategories}
       unmappedCodePicker={unmappedCodePicker}
       mapCodesHistory={mapCodesHistory}
-      articleApprovalStats={articleApprovalStats}
       litSearchStats={litSearchStats}
       draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}

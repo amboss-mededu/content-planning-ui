@@ -275,41 +275,31 @@ async function ConsolidationReviewData({
   const sections = sectionRecs.map((r) => projectSection(slug, r, codeMetadataLookup));
 
   // The data layer returns reviews keyed by articleKey / sectionKey
-  // (stable across consolidation re-runs). The downstream view + modal
-  // do their O(1) lookups by PB id so the inline table is responsive
-  // even when a row's logical key has just changed. Translate here:
-  // for each current row that has both an id and a key, copy the
-  // review's status/reviewer/notes into the id-keyed map. Reviews
-  // whose key doesn't match any current row (zombies — producer was
-  // deleted before the keys migration) are silently dropped.
+  // (stable across consolidation re-runs). Keep the client maps in
+  // that same namespace so this screen agrees with the dedicated New
+  // Articles and Article Updates tabs.
   const initialArticleReviews: ReviewMap = {};
   const initialArticleReviewers: ReviewerMap = {};
   const initialNotesByArticle: Record<string, string> = {};
-  for (const a of articles) {
-    if (!a.id || !a.articleKey) continue;
-    const r = articleReviewRecs[a.articleKey];
-    if (!r) continue;
-    initialArticleReviews[a.id] = r.status;
-    initialArticleReviewers[a.id] = {
+  for (const [articleKey, r] of Object.entries(articleReviewRecs)) {
+    initialArticleReviews[articleKey] = r.status;
+    initialArticleReviewers[articleKey] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
-    if (r.notes) initialNotesByArticle[a.id] = r.notes;
+    if (r.notes) initialNotesByArticle[articleKey] = r.notes;
   }
 
   const initialSectionReviews: ReviewMap = {};
   const initialSectionReviewers: ReviewerMap = {};
   const initialNotesBySection: Record<string, string> = {};
-  for (const s of sections) {
-    if (!s.id || !s.sectionKey) continue;
-    const r = sectionReviewRecs[s.sectionKey];
-    if (!r) continue;
-    initialSectionReviews[s.id] = r.status;
-    initialSectionReviewers[s.id] = {
+  for (const [sectionKey, r] of Object.entries(sectionReviewRecs)) {
+    initialSectionReviews[sectionKey] = r.status;
+    initialSectionReviewers[sectionKey] = {
       reviewerEmail: r.reviewerEmail,
       reviewedAt: r.reviewedAt,
     };
-    if (r.notes) initialNotesBySection[s.id] = r.notes;
+    if (r.notes) initialNotesBySection[sectionKey] = r.notes;
   }
 
   // Article-level update threads live under recordKind='article' with a
@@ -333,8 +323,10 @@ async function ConsolidationReviewData({
       titleOriginLookup={titleOriginLookup}
       initialArticleReviews={initialArticleReviews}
       initialArticleReviewers={initialArticleReviewers}
+      initialArticleReviewRows={Object.values(articleReviewRecs)}
       initialSectionReviews={initialSectionReviews}
       initialSectionReviewers={initialSectionReviewers}
+      initialSectionReviewRows={Object.values(sectionReviewRecs)}
       initialNotesByArticle={initialNotesByArticle}
       initialNotesBySection={initialNotesBySection}
       initialCommentsByArticle={commentsByArticle}

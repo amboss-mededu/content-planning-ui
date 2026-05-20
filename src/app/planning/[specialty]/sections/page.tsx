@@ -112,43 +112,20 @@ async function SectionsData({ slug }: { slug: string }) {
     sectionRecs,
   );
 
-  // Only approved sections reach the article-updates surface.
-  // Approval happens on /consolidation-review; until that flips,
-  // the row shouldn't be visible here. Match the same fallback
-  // section-key computation the consolidation-review page uses
-  // (article title / id + section name / id + category).
-  const approvedSections = sectionRecs.filter((r) => {
-    const key =
-      r.sectionKey ||
-      computeSectionKey({
-        specialtySlug: slug,
-        articleTitle: r.articleTitle,
-        articleId: r.articleId,
-        sectionName: r.sectionName,
-        sectionId: r.sectionId,
-        category: r.category,
-      });
-    if (!key) return false;
-    return reviewRecs[key]?.status === 'approved';
-  });
-  const rows = approvedSections.map((r) => projectSection(slug, r));
+  const rows = sectionRecs.map((r) => projectSection(slug, r));
 
-  // Review maps in the client are keyed by the current consolidatedSections
-  // PB row id for fast table/modal lookup. The data layer returns stable
-  // sectionKey-keyed rows, so translate after projection.
+  // Review maps in the client stay keyed by stable sectionKey so they
+  // survive consolidation re-runs that replace PB row ids.
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
   const initialNotesBySection: Record<string, string> = {};
-  for (const row of rows) {
-    if (!row.id || !row.sectionKey) continue;
-    const review = reviewRecs[row.sectionKey];
-    if (!review) continue;
-    initialReviews[row.id] = review.status;
-    initialReviewers[row.id] = {
+  for (const [sectionKey, review] of Object.entries(reviewRecs)) {
+    initialReviews[sectionKey] = review.status;
+    initialReviewers[sectionKey] = {
       reviewerEmail: review.reviewerEmail,
       reviewedAt: review.reviewedAt,
     };
-    if (review.notes) initialNotesBySection[row.id] = review.notes;
+    if (review.notes) initialNotesBySection[sectionKey] = review.notes;
   }
 
   return (
@@ -159,6 +136,7 @@ async function SectionsData({ slug }: { slug: string }) {
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
       initialReviewers={initialReviewers}
+      initialReviewRows={Object.values(reviewRecs)}
       initialCommentsBySection={commentsBySection}
       initialCommentsByParentArticle={commentsByParentArticle}
       initialNotesBySection={initialNotesBySection}

@@ -43,7 +43,7 @@ export async function setSectionReview(
   status: ArticleReviewStatus,
   reviewerEmail: string | null,
   notes?: string,
-): Promise<void> {
+): Promise<string> {
   if (!sectionKey) {
     throw new Error('setSectionReview: sectionKey is required');
   }
@@ -67,17 +67,21 @@ export async function setSectionReview(
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
       await pb.collection('sectionReviews').create(payload);
-      return;
+      return sectionKey;
     }
     throw e;
   }
+  return sectionKey;
 }
 
+/**
+ * Returns the sectionKey that was deleted (or null if no row existed).
+ */
 export async function clearSectionReview(
   slug: string,
   sectionKey: string,
-): Promise<void> {
-  if (!sectionKey) return;
+): Promise<string | null> {
+  if (!sectionKey) return null;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && sectionKey = "${sectionKey}"`;
   try {
@@ -85,8 +89,9 @@ export async function clearSectionReview(
       .collection<SectionReviewRecord>('sectionReviews')
       .getFirstListItem(filter);
     await pb.collection('sectionReviews').delete(existing.id);
+    return sectionKey;
   } catch (e) {
-    if (e instanceof ClientResponseError && e.status === 404) return;
+    if (e instanceof ClientResponseError && e.status === 404) return null;
     throw e;
   }
 }

@@ -1,21 +1,19 @@
 'use client';
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  clearBacklogRow,
-  setBacklogAssignee,
-  setBacklogStatus,
-} from '@/app/planning/[specialty]/actions';
+import { setBacklogAssignee, setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleReviewRecord,
   ArticleSourceRecord,
   ArticleWritingRunRecord,
   ReviewCommentRecord,
+  SectionReviewRecord,
 } from '@/lib/pb/types';
-import { useLiveCollection } from '@/lib/pb/use-live-collection';
+import { useApprovalState } from '@/lib/pb/use-approval-state';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
@@ -101,6 +99,8 @@ export function BacklogView({
   categoryLookup,
   assignableUsers,
   initialBacklog,
+  initialArticleReviewRows,
+  initialSectionReviewRows,
   initialSourcesByArticleKey,
   initialCommentsByArticle,
   initialWritingRuns,
@@ -111,11 +111,14 @@ export function BacklogView({
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
+  initialArticleReviewRows: ArticleReviewRecord[];
+  initialSectionReviewRows: SectionReviewRecord[];
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
   viewerEmail?: string;
 }) {
+  const router = useRouter();
   const params = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<string>(
     () => params.get('status') ?? '',
@@ -123,27 +126,30 @@ export function BacklogView({
   const [assigneeFilter, setAssigneeFilter] = useState<string>(
     () => params.get('assignee') ?? '',
   );
-  // Live PB subscription on `articleBacklog`. The hook seeds from the
-  // SSR snapshot (`initialBacklog`) and applies every realtime event to
-  // its internal array; we project the array back to a key-indexed map
-  // for the existing callers. PB writes from any source — this tab,
-  // another tab, async pipeline workers — flow through the same channel,
-  // so the row list always reflects current state without manual
-  // refreshes or cross-view cache tags.
-  const liveBacklogRows = useLiveCollection<ArticleBacklogRecord>(
-    'articleBacklog',
-    useMemo(() => Object.values(initialBacklog), [initialBacklog]),
-    { filter: `specialtySlug = "${slug}"` },
+  // Same shared decision hook used by Consolidation Review / Articles /
+  // Sections. Seeded with the SSR snapshots so the first paint matches
+  // the server, then live PB subscriptions + optimistic patches keep
+  // every row in sync. "Remove approval" patches a tombstone on the
+  // backlog row (and review row for new-article keys) so the table
+  // updates instantly instead of waiting for realtime.
+  const initialBacklogArray = useMemo(
+    () => Object.values(initialBacklog),
+    [initialBacklog],
   );
-  const backlog = useMemo(() => {
-    const m: Record<string, ArticleBacklogRecord> = {};
-    for (const r of liveBacklogRows) {
-      if (r.articleKey) m[r.articleKey] = r;
-    }
-    return m;
-  }, [liveBacklogRows]);
+  const approval = useApprovalState(slug, {
+    articleReviews: initialArticleReviewRows,
+    sectionReviews: initialSectionReviewRows,
+    backlog: initialBacklogArray,
+  });
+  const backlog = approval.backlogByKey;
+  const articleReviews = approval.articleReviewByKey;
+  const sectionReviews = approval.sectionReviewByKey;
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
+  // Inline banner for Remove-approval / status-change failures. Without
+  // this, the hook silently rolls back its optimistic patch and the
+  // user sees a row reappear with no explanation.
+  const [actionError, setActionError] = useState<string | null>(null);
   // Multi-select for the bulk-action toolbar. Keyed by row.id (the
   // newArticleSuggestions PB id for type='new', the parent CMS articleId
   // for type='update'). Updates clear automatically when the row leaves
@@ -172,8 +178,30 @@ export function BacklogView({
     [backlog],
   );
 
+  const memberRows = useMemo(() => {
+    const out: BacklogRow[] = [];
+    for (const row of rows) {
+      const membership = backlog[row.articleKey];
+      if (!membership) continue;
+      if (row.type === 'new') {
+        if ((membership.type ?? 'new') !== 'new') continue;
+        if (articleReviews[row.articleKey]?.status !== 'approved') continue;
+        out.push(row);
+        continue;
+      }
+      if (membership.type !== 'update') continue;
+      const approvedSections = (row.sections ?? []).filter(
+        (section) =>
+          section.sectionKey && sectionReviews[section.sectionKey]?.status === 'approved',
+      );
+      if (approvedSections.length === 0) continue;
+      out.push({ ...row, sections: approvedSections });
+    }
+    return out;
+  }, [rows, backlog, articleReviews, sectionReviews]);
+
   const filtered = useMemo(() => {
-    let out = rows;
+    let out = memberRows;
     if (statusFilter) {
       out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
     }
@@ -185,25 +213,23 @@ export function BacklogView({
       }
     }
     return out;
-  }, [rows, statusFilter, assigneeFilter, statusOf, assigneeOf]);
+  }, [memberRows, statusFilter, assigneeFilter, statusOf, assigneeOf]);
 
   const counts = useMemo(() => {
     let published = 0;
     let inProgress = 0;
     let waiting = 0;
-    for (const r of rows) {
+    for (const r of memberRows) {
       const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
     }
     return { published, inProgress, waiting };
-  }, [rows, statusOf]);
+  }, [memberRows, statusOf]);
 
-  // Optimistic state was removed when this view moved to PB realtime —
-  // the live subscription applies the server's write back to the row
-  // list within ~50–200ms, which is fast enough for an admin tool. The
-  // handlers below are now thin: write, log on failure, let realtime
+  // Optimistic state was removed when this view moved to PB realtime.
+  // The handlers below are thin: write, log on failure, let realtime
   // catch the rest.
   async function handleStatusChange(
     articleKey: string,
@@ -211,18 +237,37 @@ export function BacklogView({
     next: ArticleBacklogStatus,
     notes?: string,
   ): Promise<void> {
+    // Picking "unassigned" from the status dropdown is the same
+    // operation as clicking the Remove approval button — drop the row
+    // through the shared hook so the optimistic tombstone fires.
     if (next === 'unassigned') {
       try {
-        await clearBacklogRow(slug, articleKey);
+        await approval.clearBacklog(articleKey);
       } catch (e) {
-        console.error('clearBacklogRow failed', e);
+        setActionError(e instanceof Error ? e.message : 'Remove approval failed');
       }
       return;
     }
     try {
       await setBacklogStatus(slug, articleKey, articleRecordId, next, notes);
+      router.refresh();
     } catch (e) {
-      console.error('setBacklogStatus failed', e);
+      setActionError(e instanceof Error ? e.message : 'Status change failed');
+    }
+  }
+
+  async function handleRemoveApproval(articleKey: string): Promise<void> {
+    // The shared hook tombstones the backlog row (and matching review
+    // row(s)) immediately, then awaits the server action. If the modal
+    // happens to be open on the removed article, close it.
+    setManagerArticleId((current) => {
+      const row = current ? memberRows.find((r) => r.id === current) : null;
+      return row?.articleKey === articleKey ? null : current;
+    });
+    try {
+      await approval.clearBacklog(articleKey);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Remove approval failed');
     }
   }
 
@@ -234,8 +279,9 @@ export function BacklogView({
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
     try {
       await setBacklogAssignee(slug, articleKey, articleRecordId, emailOrNull);
+      router.refresh();
     } catch (e) {
-      console.error('setBacklogAssignee failed', e);
+      setActionError(e instanceof Error ? e.message : 'Assignee change failed');
     }
   }
 
@@ -294,7 +340,7 @@ export function BacklogView({
       key: 'articleTitle',
       label: 'Article Title',
       description:
-        'For new articles: the approved 2nd-pass suggestion title. For updates: the parent article being updated.',
+        'For new articles: the approved suggestion title. For updates: the parent article being updated.',
       render: (r) => r.articleTitle ?? '—',
       verticalAlign: 'middle',
       align: 'left',
@@ -318,7 +364,7 @@ export function BacklogView({
     {
       key: 'codes',
       label: 'Codes',
-      description: 'Codes assigned to the article in the 2nd-pass consolidation.',
+      description: 'Codes assigned to the article in consolidation.',
       render: (r) => <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />,
       verticalAlign: 'middle',
       align: 'left',
@@ -330,8 +376,7 @@ export function BacklogView({
     {
       key: 'status',
       label: 'Status',
-      description:
-        'Editorial workflow state. Click the badge to pick a new value; selecting Unassigned resets the row.',
+      description: 'Editorial workflow state. Click the badge to pick a new value.',
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
@@ -370,6 +415,27 @@ export function BacklogView({
           </span>
         );
       },
+    },
+    {
+      key: 'approval',
+      label: 'Approval',
+      description: 'Remove the approval decision and drop this row from the backlog.',
+      width: 150,
+      verticalAlign: 'middle',
+      align: 'center',
+      render: (r) => (
+        <Button
+          variant="tertiary"
+          size="s"
+          destructive
+          onClick={(e) => {
+            (e as React.MouseEvent).stopPropagation();
+            handleRemoveApproval(r.articleKey);
+          }}
+        >
+          Remove approval
+        </Button>
+      ),
     },
     {
       key: 'nextAction',
@@ -507,22 +573,44 @@ export function BacklogView({
   // appear in `rows` (e.g. filtered out) get pruned silently.
   const statusByRowId = useMemo(() => {
     const out: Record<string, ArticleBacklogStatus | undefined> = {};
-    for (const r of rows) out[r.id] = statusOf(r.articleKey);
+    for (const r of memberRows) out[r.id] = statusOf(r.articleKey);
     return out;
-  }, [rows, statusOf]);
+  }, [memberRows, statusOf]);
 
   const selectedIdsArr = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
-  const drawerRow = drawerArticleId ? rows.find((r) => r.id === drawerArticleId) : null;
+  const drawerRow = drawerArticleId
+    ? memberRows.find((r) => r.id === drawerArticleId)
+    : null;
   const drawerSources = drawerRow?.articleKey
     ? (initialSourcesByArticleKey[drawerRow.articleKey] ?? [])
     : [];
   const managerRow = managerArticleId
-    ? (rows.find((r) => r.id === managerArticleId) ?? null)
+    ? (memberRows.find((r) => r.id === managerArticleId) ?? null)
     : null;
 
   return (
     <Stack space="m">
+      {actionError ? (
+        <button
+          type="button"
+          onClick={() => setActionError(null)}
+          style={{
+            textAlign: 'left',
+            padding: '6px 8px',
+            border: '1px solid rgb(220, 38, 38)',
+            borderRadius: 4,
+            background: 'rgb(254, 226, 226)',
+            cursor: 'pointer',
+            font: 'inherit',
+            color: 'rgb(127, 29, 29)',
+            fontSize: 12,
+          }}
+          title="Dismiss"
+        >
+          {actionError}
+        </button>
+      ) : null}
       <Inline space="s" vAlignItems="bottom">
         <div className="filter-cell">
           <Select
@@ -567,7 +655,7 @@ export function BacklogView({
         getRowKey={(r) => r.id}
         onRowClick={(r) => setManagerArticleId(r.id)}
         countAddendum={() => 'articles'}
-        leadingNote={`${rows.length} approved · ${counts.published} published · ${counts.inProgress} in progress · ${counts.waiting} waiting for sources`}
+        leadingNote={`${memberRows.length} approved · ${counts.published} published · ${counts.inProgress} in progress · ${counts.waiting} waiting for sources`}
         storageKey={`backlog-table:${slug}`}
       />
       {drawerArticleId && (

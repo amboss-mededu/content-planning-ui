@@ -142,11 +142,7 @@ async function BacklogData({ slug }: { slug: string }) {
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
 
-  // type='new' rows: every consolidatedArticles row (1st-consolidation
-  // output) whose review is approved. Joined by `articleKey` against
-  // articleReviews — the consolidation-review screen approves into
-  // the same key space.
-  const newRows: BacklogRow[] = [];
+  const articleByKey = new Map<string, ConsolidatedArticle>();
   for (const r of articleRecs) {
     const key =
       r.articleKey ||
@@ -156,25 +152,23 @@ async function BacklogData({ slug }: { slug: string }) {
         articleId: r.articleId,
         category: r.category,
       });
-    if (!key) continue;
-    if (reviewRecs[key]?.status !== 'approved') continue;
-    newRows.push(projectNewArticle(slug, r, sourcesByKey));
+    if (key) articleByKey.set(key, r);
   }
 
-  // type='update' rows: aggregate approved section reviews by parent
-  // CMS articleId. We join on the section's `sectionKey`.
+  // Candidate rows are the current consolidated output. BacklogView
+  // applies live articleBacklog + live review membership so rows can
+  // appear/disappear across tabs without waiting on a server refresh.
+  const newRows: BacklogRow[] = [];
+  for (const article of articleByKey.values()) {
+    newRows.push(projectNewArticle(slug, article, sourcesByKey));
+  }
+
+  // type='update' rows: each parent article appears only if the
+  // backlog row exists. Approved sections are joined in as the review
+  // details for that parent article.
   const sectionsByParent = new Map<string, ConsolidatedSection[]>();
   for (const s of sectionRecs) {
     if (!s.id) continue;
-    // The section's review state is looked up by its sectionKey, which
-    // the data layer already provides on the record. Fall back to the
-    // PB id keyed reviewMap entry only if sectionKey is empty (zombie
-    // safety). The new lookup is the load-bearing path.
-    const reviewKeyCandidates = [s.sectionKey].filter((k): k is string => !!k);
-    const approved = reviewKeyCandidates.some(
-      (k) => sectionReviewRecs[k]?.status === 'approved',
-    );
-    if (!approved) continue;
     const parentId = s.articleId;
     if (!parentId) continue;
     const list = sectionsByParent.get(parentId) ?? [];
@@ -182,7 +176,7 @@ async function BacklogData({ slug }: { slug: string }) {
     sectionsByParent.set(parentId, list);
   }
   const updateRows: BacklogRow[] = [];
-  for (const [parentId, sections] of sectionsByParent) {
+  for (const [parentId, sections] of sectionsByParent.entries()) {
     const projected = sections.map((s) => projectSection(slug, s));
     const codes = unionCodes(projected.flatMap((s) => s.codes));
     updateRows.push({
@@ -216,6 +210,8 @@ async function BacklogData({ slug }: { slug: string }) {
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}
+      initialArticleReviewRows={Object.values(reviewRecs)}
+      initialSectionReviewRows={Object.values(sectionReviewRecs)}
       initialSourcesByArticleKey={sourcesByKey}
       initialCommentsByArticle={initialCommentsByArticle}
       initialWritingRuns={writingRunsByArticle}

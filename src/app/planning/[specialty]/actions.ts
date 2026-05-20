@@ -1,6 +1,6 @@
 'use server';
 
-import { updateTag } from 'next/cache';
+import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
 import {
   clearArticleBacklog,
@@ -34,6 +34,7 @@ import {
 } from '@/lib/data/review-comments';
 import { clearSectionReview, setSectionReview } from '@/lib/data/section-reviews';
 import {
+  clearApprovedSectionReviewsForParent,
   getConsolidatedSectionParentArticleId,
   hasOtherApprovedSectionsForParent,
 } from '@/lib/data/sections';
@@ -49,9 +50,19 @@ import type {
   ReviewCommentRecord,
   ReviewRecordKind,
 } from '@/lib/pb/types';
+import type { ApprovalActionResult } from './actions.types';
+
+// Re-exported so consumers can keep importing the type from the actions
+// module if convenient. The canonical definition lives in
+// `./actions.types` to stay importable from non-server code.
+export type { ApprovalActionResult };
+
+function emptyResult(): ApprovalActionResult {
+  return { articleReviewKeys: [], sectionReviewKeys: [], backlogKeys: [] };
+}
 
 export async function refreshSpecialty(slug: string) {
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 export async function listBucketCodes(
@@ -67,12 +78,9 @@ export async function submitArticleReview(
   articleRecordId: string,
   status: ArticleReviewStatus,
   notes?: string,
-): Promise<void> {
+): Promise<ApprovalActionResult> {
   const user = await getCurrentUser();
-  // Approve only. Backlog creation is an explicit, separate action
-  // (see `bulkApproveAndBacklogArticleReviews`); approving here makes
-  // the row visible on /articles but doesn't queue it.
-  await setArticleReview(
+  const reviewKey = await setArticleReview(
     slug,
     articleKey,
     articleRecordId,
@@ -80,15 +88,35 @@ export async function submitArticleReview(
     user?.email ?? null,
     notes,
   );
-  updateTag(`specialty:${slug}`);
+  const result = emptyResult();
+  result.articleReviewKeys.push(reviewKey);
+  if (status === 'approved') {
+    const ensuredKey = await ensureNewArticleBacklogRow(
+      slug,
+      articleKey,
+      articleRecordId,
+      user?.email ?? null,
+    );
+    if (ensuredKey) result.backlogKeys.push(ensuredKey);
+  } else {
+    const clearedKey = await clearArticleBacklog(slug, articleKey);
+    if (clearedKey) result.backlogKeys.push(clearedKey);
+  }
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 export async function resetArticleReview(
   slug: string,
   articleKey: string,
-): Promise<void> {
-  await clearArticleReview(slug, articleKey);
-  updateTag(`specialty:${slug}`);
+): Promise<ApprovalActionResult> {
+  const reviewKey = await clearArticleReview(slug, articleKey);
+  const backlogKey = await clearArticleBacklog(slug, articleKey);
+  const result = emptyResult();
+  if (reviewKey) result.articleReviewKeys.push(reviewKey);
+  if (backlogKey) result.backlogKeys.push(backlogKey);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 /**
@@ -102,7 +130,7 @@ export async function submitSourceReview(
 ): Promise<void> {
   const user = await getCurrentUser();
   await setArticleSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 /**
@@ -115,7 +143,7 @@ export async function submitSourcesOrder(
 ): Promise<void> {
   if (sourceIds.length === 0) return;
   await setSourcesPriorityAsAdmin(sourceIds);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 /**
@@ -129,7 +157,7 @@ export async function submitSourceCortexId(
   value: string,
 ): Promise<void> {
   await markSourceCortexRegisteredAsAdmin(sourceId, value);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 /**
@@ -174,19 +202,29 @@ export async function getLatestDraftForArticle(
 export async function bulkApproveArticleReviews(
   slug: string,
   rows: Array<{ articleKey: string; articleRecordId: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
+  if (rows.length === 0) return result;
   const user = await getCurrentUser();
   for (const r of rows) {
-    await setArticleReview(
+    const reviewKey = await setArticleReview(
       slug,
       r.articleKey,
       r.articleRecordId,
       'approved',
       user?.email ?? null,
     );
+    result.articleReviewKeys.push(reviewKey);
+    const ensuredKey = await ensureNewArticleBacklogRow(
+      slug,
+      r.articleKey,
+      r.articleRecordId,
+      user?.email ?? null,
+    );
+    if (ensuredKey) result.backlogKeys.push(ensuredKey);
   }
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 /**
@@ -198,25 +236,8 @@ export async function bulkApproveArticleReviews(
 export async function bulkApproveAndBacklogArticleReviews(
   slug: string,
   rows: Array<{ articleKey: string; articleRecordId: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
-  const user = await getCurrentUser();
-  for (const r of rows) {
-    await setArticleReview(
-      slug,
-      r.articleKey,
-      r.articleRecordId,
-      'approved',
-      user?.email ?? null,
-    );
-    await ensureNewArticleBacklogRow(
-      slug,
-      r.articleKey,
-      r.articleRecordId,
-      user?.email ?? null,
-    );
-  }
-  updateTag(`specialty:${slug}`);
+): Promise<ApprovalActionResult> {
+  return bulkApproveArticleReviews(slug, rows);
 }
 
 export async function submitSectionReview(
@@ -225,11 +246,9 @@ export async function submitSectionReview(
   sectionRecordId: string,
   status: ArticleReviewStatus,
   notes?: string,
-): Promise<void> {
+): Promise<ApprovalActionResult> {
   const user = await getCurrentUser();
-  // Approve only. Backlog creation for the parent article is handled
-  // explicitly by `bulkApproveAndBacklogSectionReviews`.
-  await setSectionReview(
+  const reviewKey = await setSectionReview(
     slug,
     sectionKey,
     sectionRecordId,
@@ -237,25 +256,67 @@ export async function submitSectionReview(
     user?.email ?? null,
     notes,
   );
-  updateTag(`specialty:${slug}`);
+  const result = emptyResult();
+  result.sectionReviewKeys.push(reviewKey);
+  const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
+  if (status === 'approved') {
+    if (parentArticleId) {
+      const ensuredKey = await ensureUpdateBacklogRow(
+        slug,
+        parentArticleId,
+        user?.email ?? null,
+      );
+      result.backlogKeys.push(ensuredKey);
+    }
+  } else if (parentArticleId) {
+    const stillHasApproved = await hasOtherApprovedSectionsForParent(
+      slug,
+      parentArticleId,
+      sectionKey,
+    );
+    if (!stillHasApproved) {
+      const clearedKey = await clearUpdateBacklogRow(slug, parentArticleId);
+      if (clearedKey) result.backlogKeys.push(clearedKey);
+    }
+  }
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 export async function bulkApproveSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
+  if (rows.length === 0) return result;
   const user = await getCurrentUser();
+  const seenBacklogKeys = new Set<string>();
   for (const r of rows) {
-    await setSectionReview(
+    const reviewKey = await setSectionReview(
       slug,
       r.sectionKey,
       r.sectionRecordId,
       'approved',
       user?.email ?? null,
     );
+    result.sectionReviewKeys.push(reviewKey);
+    const parentArticleId = await getConsolidatedSectionParentArticleId(
+      r.sectionRecordId,
+    );
+    if (parentArticleId) {
+      const ensuredKey = await ensureUpdateBacklogRow(
+        slug,
+        parentArticleId,
+        user?.email ?? null,
+      );
+      if (!seenBacklogKeys.has(ensuredKey)) {
+        seenBacklogKeys.add(ensuredKey);
+        result.backlogKeys.push(ensuredKey);
+      }
+    }
   }
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 /**
@@ -267,25 +328,8 @@ export async function bulkApproveSectionReviews(
 export async function bulkApproveAndBacklogSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
-  const user = await getCurrentUser();
-  for (const r of rows) {
-    await setSectionReview(
-      slug,
-      r.sectionKey,
-      r.sectionRecordId,
-      'approved',
-      user?.email ?? null,
-    );
-    const parentArticleId = await getConsolidatedSectionParentArticleId(
-      r.sectionRecordId,
-    );
-    if (parentArticleId) {
-      await ensureUpdateBacklogRow(slug, parentArticleId, user?.email ?? null);
-    }
-  }
-  updateTag(`specialty:${slug}`);
+): Promise<ApprovalActionResult> {
+  return bulkApproveSectionReviews(slug, rows);
 }
 
 /**
@@ -296,13 +340,17 @@ export async function bulkApproveAndBacklogSectionReviews(
 export async function bulkUnapproveArticleReviews(
   slug: string,
   rows: Array<{ articleKey: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
+  if (rows.length === 0) return result;
   for (const r of rows) {
-    await clearArticleReview(slug, r.articleKey);
-    await clearArticleBacklog(slug, r.articleKey);
+    const reviewKey = await clearArticleReview(slug, r.articleKey);
+    if (reviewKey) result.articleReviewKeys.push(reviewKey);
+    const backlogKey = await clearArticleBacklog(slug, r.articleKey);
+    if (backlogKey) result.backlogKeys.push(backlogKey);
   }
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 /**
@@ -314,45 +362,57 @@ export async function bulkUnapproveArticleReviews(
 export async function bulkUnapproveSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
+  if (rows.length === 0) return result;
+  const seenBacklogKeys = new Set<string>();
   for (const r of rows) {
     const parentArticleId = await getConsolidatedSectionParentArticleId(
       r.sectionRecordId,
     );
-    await clearSectionReview(slug, r.sectionKey);
+    const reviewKey = await clearSectionReview(slug, r.sectionKey);
+    if (reviewKey) result.sectionReviewKeys.push(reviewKey);
     if (parentArticleId) {
       const stillHasApproved = await hasOtherApprovedSectionsForParent(
         slug,
         parentArticleId,
-        r.sectionRecordId,
+        r.sectionKey,
       );
       if (!stillHasApproved) {
-        await clearUpdateBacklogRow(slug, parentArticleId);
+        const clearedKey = await clearUpdateBacklogRow(slug, parentArticleId);
+        if (clearedKey && !seenBacklogKeys.has(clearedKey)) {
+          seenBacklogKeys.add(clearedKey);
+          result.backlogKeys.push(clearedKey);
+        }
       }
     }
   }
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 export async function resetSectionReview(
   slug: string,
   sectionKey: string,
   sectionRecordId: string,
-): Promise<void> {
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
   const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
-  await clearSectionReview(slug, sectionKey);
+  const reviewKey = await clearSectionReview(slug, sectionKey);
+  if (reviewKey) result.sectionReviewKeys.push(reviewKey);
   if (parentArticleId) {
     const stillHasApproved = await hasOtherApprovedSectionsForParent(
       slug,
       parentArticleId,
-      sectionRecordId,
+      sectionKey,
     );
     if (!stillHasApproved) {
-      await clearUpdateBacklogRow(slug, parentArticleId);
+      const clearedKey = await clearUpdateBacklogRow(slug, parentArticleId);
+      if (clearedKey) result.backlogKeys.push(clearedKey);
     }
   }
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 export async function postReviewComment(
@@ -371,7 +431,7 @@ export async function postReviewComment(
     user?.email ?? null,
     body,
   );
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
   return created;
 }
 
@@ -383,7 +443,7 @@ export async function deleteOwnReviewComment(
   commentId: string,
 ): Promise<void> {
   await deleteReviewComment(commentId);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 export async function setBacklogStatus(
@@ -402,7 +462,7 @@ export async function setBacklogStatus(
     user?.email ?? null,
     notes,
   );
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 export async function setBacklogAssignee(
@@ -419,12 +479,28 @@ export async function setBacklogAssignee(
     assigneeEmail,
     user?.email ?? null,
   );
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
-export async function clearBacklogRow(slug: string, articleKey: string): Promise<void> {
-  await clearArticleBacklog(slug, articleKey);
-  updateTag(`specialty:${slug}`);
+export async function clearBacklogRow(
+  slug: string,
+  articleKey: string,
+): Promise<ApprovalActionResult> {
+  const result = emptyResult();
+  if (articleKey.startsWith('upd::')) {
+    const deletedSectionKeys = await clearApprovedSectionReviewsForParent(
+      slug,
+      articleKey.slice('upd::'.length),
+    );
+    result.sectionReviewKeys.push(...deletedSectionKeys);
+  } else {
+    const reviewKey = await clearArticleReview(slug, articleKey);
+    if (reviewKey) result.articleReviewKeys.push(reviewKey);
+  }
+  const backlogKey = await clearArticleBacklog(slug, articleKey);
+  if (backlogKey) result.backlogKeys.push(backlogKey);
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return result;
 }
 
 /**
@@ -459,7 +535,7 @@ export async function resetArticle(
     'waiting-for-sources',
     user?.email ?? null,
   );
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 /**
@@ -482,7 +558,7 @@ export async function setConsolidationCategoryReview(
     user?.email ?? null,
     notes,
   );
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 const KNOWN_TAB_SEGMENTS = new Set([
@@ -506,7 +582,7 @@ export async function setTabOverride(
     throw new Error(`Unknown tab segment: ${segment}`);
   }
   await setTabOverrideData(slug, segment, value);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 const KNOWN_PIPELINE_STAGES = new Set([
@@ -528,7 +604,7 @@ export async function setPipelineStageOverride(
     throw new Error(`Unknown pipeline stage: ${stageName}`);
   }
   await setPipelineStageOverrideData(slug, stageName, value);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }
 
 export async function setPipelineStageSkipped(
@@ -540,5 +616,5 @@ export async function setPipelineStageSkipped(
     throw new Error(`Unknown pipeline stage: ${stageName}`);
   }
   await setPipelineStageSkippedData(slug, stageName, value);
-  updateTag(`specialty:${slug}`);
+  revalidatePath(`/planning/${slug}`, 'layout');
 }

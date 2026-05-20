@@ -56,21 +56,15 @@ function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
 }
 
 async function ArticlesData({ slug }: { slug: string }) {
-  const [
-    consolidatedRecs,
-    codeRecs,
-    reviewRecs,
-    sectionRecs,
-    commentsByArticle,
-    user,
-  ] = await Promise.all([
-    listConsolidatedArticles(slug),
-    listCodes(slug),
-    listArticleReviews(slug),
-    listConsolidatedSections(slug),
-    listReviewComments(slug, 'article'),
-    getCurrentUser(),
-  ]);
+  const [consolidatedRecs, codeRecs, reviewRecs, sectionRecs, commentsByArticle, user] =
+    await Promise.all([
+      listConsolidatedArticles(slug),
+      listCodes(slug),
+      listArticleReviews(slug),
+      listConsolidatedSections(slug),
+      listReviewComments(slug, 'article'),
+      getCurrentUser(),
+    ]);
 
   const categoryLookup: CategoryLookup = {};
   for (const c of codeRecs) categoryLookup[c.code] = c.category;
@@ -83,33 +77,21 @@ async function ArticlesData({ slug }: { slug: string }) {
     sectionRecs,
   );
 
-  // Visibility-gating: only approved 1st-consolidation candidates reach
-  // this surface. The editor approves on /consolidation-review.
-  const isApproved = (r: ConsolidatedArticle) => {
-    const key = r.articleKey;
-    if (!key) return false;
-    return reviewRecs[key]?.status === 'approved';
-  };
-  const consolidated = consolidatedRecs
-    .filter(isApproved)
-    .map((r) => projectConsolidated(slug, r));
+  const consolidated = consolidatedRecs.map((r) => projectConsolidated(slug, r));
 
-  // `reviewRecs` is keyed by articleKey (the stable id). The modal
-  // displays review state by PB id (`current.id`) so it can survive
-  // local row reordering. Translate at the boundary.
+  // `reviewRecs` is keyed by articleKey (the stable id). Keep the
+  // client maps in that same namespace so all review surfaces share
+  // one durable decision state.
   const initialReviews: ReviewMap = {};
   const initialReviewers: ReviewerMap = {};
   const initialNotesByArticle: Record<string, string> = {};
-  for (const row of consolidated) {
-    if (!row.id || !row.articleKey) continue;
-    const review = reviewRecs[row.articleKey];
-    if (!review) continue;
-    initialReviews[row.id] = review.status;
-    initialReviewers[row.id] = {
+  for (const [articleKey, review] of Object.entries(reviewRecs)) {
+    initialReviews[articleKey] = review.status;
+    initialReviewers[articleKey] = {
       reviewerEmail: review.reviewerEmail,
       reviewedAt: review.reviewedAt,
     };
-    if (review.notes) initialNotesByArticle[row.id] = review.notes;
+    if (review.notes) initialNotesByArticle[articleKey] = review.notes;
   }
 
   return (
@@ -120,6 +102,7 @@ async function ArticlesData({ slug }: { slug: string }) {
       titleOriginLookup={titleOriginLookup}
       initialReviews={initialReviews}
       initialReviewers={initialReviewers}
+      initialReviewRows={Object.values(reviewRecs)}
       initialCommentsByArticle={commentsByArticle}
       initialNotesByArticle={initialNotesByArticle}
       viewerEmail={user?.email ?? undefined}

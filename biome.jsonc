@@ -14,10 +14,14 @@
       "!drizzle",
       "!convex/_generated",
       "!.convex",
+      "!.agents",
+      "!.claude",
       "!pb_migrations",
       "!pb_hooks",
       "!pb_data",
-      "!bin"
+      "!bin",
+      "!n8n_workflows",
+      "!skills-lock.json"
     ]
   },
   "formatter": {

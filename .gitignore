@@ -52,3 +52,16 @@ next-env.d.ts
 # pocketbase
 /bin/pocketbase
 /pb_data/
+/bin/pb_data/
+
+# local agent/tooling state
+/.agents/
+/.claude/skills/
+/.claude/scheduled_tasks.lock
+/.mcp.json
+/skills-lock.json
+
+# local workflow and import artifacts
+/n8n_workflows/
+/*.xlsx
+/*.txt

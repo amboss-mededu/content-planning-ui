@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArticleManagerModalV2 } from '@/app/planning/_components/article-manager-modal-v2';
 import { ArticleSourcesDrawer } from '@/app/planning/_components/article-sources-drawer';
@@ -98,6 +98,7 @@ export function MyBacklogView({
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail: string;
 }) {
+  const router = useRouter();
   const params = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<string>(
     () => params.get('status') ?? '',
@@ -191,6 +192,7 @@ export function MyBacklogView({
     if (next === 'unassigned') {
       try {
         await clearBacklogRow(row.specialtySlug, row.articleKey);
+        router.refresh();
       } catch (e) {
         console.error('clearBacklogRow failed', e);
       }
@@ -198,6 +200,7 @@ export function MyBacklogView({
     }
     try {
       await setBacklogStatus(row.specialtySlug, row.articleKey, row.id, next, notes);
+      router.refresh();
     } catch (e) {
       console.error('setBacklogStatus failed', e);
     }
@@ -210,6 +213,7 @@ export function MyBacklogView({
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
     try {
       await setBacklogAssignee(row.specialtySlug, row.articleKey, row.id, emailOrNull);
+      router.refresh();
     } catch (e) {
       console.error('setBacklogAssignee failed', e);
     }
@@ -256,7 +260,7 @@ export function MyBacklogView({
       key: 'articleTitle',
       label: 'Article Title',
       description:
-        'For new articles: the approved 2nd-pass suggestion. For updates: the parent article being updated.',
+        'For new articles: the approved suggestion. For updates: the parent article being updated.',
       render: (r) => r.articleTitle ?? '—',
       verticalAlign: 'middle',
       align: 'left',
@@ -280,7 +284,7 @@ export function MyBacklogView({
     {
       key: 'codes',
       label: 'Codes',
-      description: 'Codes assigned to the article in the 2nd-pass consolidation.',
+      description: 'Codes assigned to the article in consolidation.',
       render: (r) => <CodeChipList codes={r.codes} categoryLookup={categoryLookup} />,
       verticalAlign: 'middle',
       align: 'left',

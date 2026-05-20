@@ -127,11 +127,14 @@ export async function setArticleBacklogAssignee(
   );
 }
 
+/**
+ * Returns the deleted articleKey, or null if no row existed.
+ */
 export async function clearArticleBacklog(
   slug: string,
   articleKey: string,
-): Promise<void> {
-  if (!articleKey) return;
+): Promise<string | null> {
+  if (!articleKey) return null;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
@@ -139,8 +142,9 @@ export async function clearArticleBacklog(
       .collection<ArticleBacklogRecord>('articleBacklog')
       .getFirstListItem(filter);
     await pb.collection('articleBacklog').delete(existing.id);
+    return articleKey;
   } catch (e) {
-    if (e instanceof ClientResponseError && e.status === 404) return;
+    if (e instanceof ClientResponseError && e.status === 404) return null;
     throw e;
   }
 }
@@ -205,17 +209,20 @@ export async function resetArticleBacklogStatusAsAdmin(
  * articleId — `articleKey` as the canonical `upd::<articleId>` token
  * used by joins, `articleRecordId` as the raw id for older code.
  */
+/**
+ * Returns the articleKey of the (possibly pre-existing) backlog row.
+ */
 export async function ensureUpdateBacklogRow(
   slug: string,
   parentArticleId: string,
   changedByEmail: string | null,
-): Promise<void> {
+): Promise<string> {
   const articleKey = `upd::${parentArticleId}`;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
-    return;
+    return articleKey;
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
       await pb.collection('articleBacklog').create({
@@ -227,7 +234,7 @@ export async function ensureUpdateBacklogRow(
         lastChangedByEmail: changedByEmail ?? '',
         lastChangedAt: Date.now(),
       });
-      return;
+      return articleKey;
     }
     throw e;
   }
@@ -240,18 +247,22 @@ export async function ensureUpdateBacklogRow(
  * consolidation-review screen surfaces it on `/my-backlog` (which
  * reads `articleBacklog`) the same way section approvals do.
  */
+/**
+ * Returns the articleKey of the (possibly pre-existing) backlog row, or
+ * null if the caller passed an empty key.
+ */
 export async function ensureNewArticleBacklogRow(
   slug: string,
   articleKey: string,
   articleRecordId: string,
   changedByEmail: string | null,
-): Promise<void> {
-  if (!articleKey) return;
+): Promise<string | null> {
+  if (!articleKey) return null;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
-    return;
+    return articleKey;
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
       await pb.collection('articleBacklog').create({
@@ -263,7 +274,7 @@ export async function ensureNewArticleBacklogRow(
         lastChangedByEmail: changedByEmail ?? '',
         lastChangedAt: Date.now(),
       });
-      return;
+      return articleKey;
     }
     throw e;
   }
@@ -287,10 +298,14 @@ export async function deleteArticleBacklogForSpecialtyAsAdmin(
  * Tear down an update-type backlog row. Used when the last approved
  * section under the parent article is unreviewed/rejected.
  */
+/**
+ * Returns the deleted backlog articleKey (`upd::<parentArticleId>`),
+ * or null if no row existed.
+ */
 export async function clearUpdateBacklogRow(
   slug: string,
   parentArticleId: string,
-): Promise<void> {
+): Promise<string | null> {
   const articleKey = `upd::${parentArticleId}`;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}" && type = "update"`;
@@ -299,8 +314,9 @@ export async function clearUpdateBacklogRow(
       .collection<ArticleBacklogRecord>('articleBacklog')
       .getFirstListItem(filter);
     await pb.collection('articleBacklog').delete(existing.id);
+    return articleKey;
   } catch (e) {
-    if (e instanceof ClientResponseError && e.status === 404) return;
+    if (e instanceof ClientResponseError && e.status === 404) return null;
     throw e;
   }
 }

@@ -30,7 +30,11 @@ export function ConsolidationViewSwitcher({ slug }: { slug: string }) {
       value={value}
       onChange={(v) => {
         const target =
-          v === 'articles' ? 'articles' : v === 'sections' ? 'sections' : 'consolidation-review';
+          v === 'articles'
+            ? 'articles'
+            : v === 'sections'
+              ? 'sections'
+              : 'consolidation-review';
         router.push(`${base}/${target}`);
       }}
       options={[

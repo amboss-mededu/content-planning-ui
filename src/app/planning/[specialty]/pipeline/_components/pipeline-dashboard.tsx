@@ -22,19 +22,11 @@ import { PhaseGroup } from './phase-group';
 import { RunLitSearchButton } from './run-lit-search-button';
 import { SourcesCard } from './sources-card';
 import { StageCard } from './stage-card';
-import { StartConsolidationForm } from './start-consolidation-form';
 import { StartMapCodesForm } from './start-map-codes-form';
 import { StartMilestonesForm } from './start-milestones-form';
 import { StartRunForm } from './start-run-form';
 
 type StagesMap = Record<StageName, StageContext | null>;
-
-export type ArticleApprovalStats = {
-  total: number;
-  approved: number;
-  rejected: number;
-  unreviewed: number;
-};
 
 export function PipelineDashboard({
   specialtySlug,
@@ -48,7 +40,6 @@ export function PipelineDashboard({
   codeCategories,
   unmappedCodePicker,
   mapCodesHistory,
-  articleApprovalStats,
   litSearchStats,
   draftEligibleIds,
   stageHasOutput,
@@ -66,7 +57,6 @@ export function PipelineDashboard({
   codeCategories: CodeCategorySummary[];
   unmappedCodePicker: UnmappedCodePickerRow[];
   mapCodesHistory: MapCodesHistory;
-  articleApprovalStats: ArticleApprovalStats;
   litSearchStats: {
     approvedTotal: number;
     waitingForSources: number;
@@ -419,55 +409,14 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualOverride={stageOverrides.consolidate_primary === true}
             manualSkipped={stageSkipped.consolidate_primary === true}
-          >
-            <StartConsolidationForm
-              specialtySlug={specialtySlug}
-              stage="consolidate_primary"
-            />
-          </StageCard>
-          <StageCard
-            title="Articles (secondary)"
-            description={
-              articleApprovalStats.total === 0
-                ? 'Dedupe new-article candidates across the specialty. Only approved 1st-pass articles flow into this pass — review them on the New Articles tab first.'
-                : `Dedupe new-article candidates across the specialty. Only approved 1st-pass articles flow into this pass — currently ${articleApprovalStats.approved}/${articleApprovalStats.total} approved · ${articleApprovalStats.rejected} rejected · ${articleApprovalStats.unreviewed} unreviewed. Review the unreviewed ones on the New Articles tab before kicking off this stage.`
-            }
-            stage={stages.consolidate_articles?.stage ?? null}
-            specialtySlug={specialtySlug}
-            stageName="consolidate_articles"
-            events={stages.consolidate_articles?.events ?? []}
-            hasOutput={stageHasOutput.consolidate_articles ?? true}
-            manualOverride={stageOverrides.consolidate_articles === true}
-            manualSkipped={stageSkipped.consolidate_articles === true}
-          >
-            <StartConsolidationForm
-              specialtySlug={specialtySlug}
-              stage="consolidate_articles"
-            />
-          </StageCard>
-          <StageCard
-            title="Sections (secondary)"
-            description="Dedupe sections and updates within each consolidated article."
-            stage={stages.consolidate_sections?.stage ?? null}
-            specialtySlug={specialtySlug}
-            stageName="consolidate_sections"
-            events={stages.consolidate_sections?.events ?? []}
-            hasOutput={stageHasOutput.consolidate_sections ?? true}
-            manualOverride={stageOverrides.consolidate_sections === true}
-            manualSkipped={stageSkipped.consolidate_sections === true}
-          >
-            <StartConsolidationForm
-              specialtySlug={specialtySlug}
-              stage="consolidate_sections"
-            />
-          </StageCard>
+          />
           <Stack space="s">
             <StageCard
               title="Literature search"
               description={
                 litSearchStats.approvedTotal === 0
-                  ? 'Run a PubMed literature search for each approved 2nd-pass article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
-                  : `Run a PubMed literature search for each approved 2nd-pass article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
+                  ? 'Run a PubMed literature search for each approved article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
+                  : `Run a PubMed literature search for each approved article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
               }
               stage={stages.literature_search?.stage ?? null}
               specialtySlug={specialtySlug}

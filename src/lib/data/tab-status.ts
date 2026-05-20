@@ -5,6 +5,7 @@ import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listUnmappedCodeCount } from '@/lib/data/codes';
@@ -100,31 +101,64 @@ export async function getTabsComplete(
   // as auto-complete.
   const mappingDone = hasRun && unmappedCount === 0;
 
-  let approvedArticles = 0;
-  const approvedArticleIds: string[] = [];
+  let decidedArticles = 0;
+  let articleApprovalsHaveBacklog = true;
   for (const a of consolidatedArticles) {
-    const id = a.id;
-    if (!id) continue;
-    if (articleReviews[id]?.status === 'approved') {
-      approvedArticles += 1;
-      approvedArticleIds.push(id);
+    const key =
+      a.articleKey ||
+      computeArticleKey({
+        specialtySlug: slug,
+        articleTitle: a.articleTitle,
+        articleId: a.articleId,
+        category: a.category,
+      });
+    if (!key) continue;
+    const review = articleReviews[key];
+    if (review) {
+      decidedArticles += 1;
+      if (review.status === 'approved' && backlog[key]?.type !== 'new') {
+        articleApprovalsHaveBacklog = false;
+      }
     }
   }
   const articlesDone =
-    consolidatedArticles.length > 0 && approvedArticles === consolidatedArticles.length;
+    consolidatedArticles.length > 0 &&
+    decidedArticles === consolidatedArticles.length &&
+    articleApprovalsHaveBacklog;
 
-  let approvedSections = 0;
+  let decidedSections = 0;
+  let sectionApprovalsHaveBacklog = true;
   for (const s of consolidatedSections) {
-    const id = s.id;
-    if (!id) continue;
-    if (sectionReviews[id]?.status === 'approved') approvedSections += 1;
+    const key =
+      s.sectionKey ||
+      computeSectionKey({
+        specialtySlug: slug,
+        articleTitle: s.articleTitle,
+        articleId: s.articleId,
+        sectionName: s.sectionName,
+        sectionId: s.sectionId,
+        category: s.category,
+      });
+    if (!key) continue;
+    const review = sectionReviews[key];
+    if (review) {
+      decidedSections += 1;
+      if (
+        review.status === 'approved' &&
+        (!s.articleId || backlog[`upd::${s.articleId}`]?.type !== 'update')
+      ) {
+        sectionApprovalsHaveBacklog = false;
+      }
+    }
   }
   const sectionsDone =
-    consolidatedSections.length > 0 && approvedSections === consolidatedSections.length;
+    consolidatedSections.length > 0 &&
+    decidedSections === consolidatedSections.length &&
+    sectionApprovalsHaveBacklog;
 
   const backlogDone =
-    approvedArticleIds.length > 0 &&
-    approvedArticleIds.every((id) => backlog[id]?.status === 'published');
+    Object.keys(backlog).length > 0 &&
+    Object.values(backlog).every((row) => row.status === 'published');
 
   // Categories are produced during code extraction and finalized once
   // every code is mapped — so the Categories tab auto-completes on the

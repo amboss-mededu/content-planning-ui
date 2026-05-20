@@ -2,7 +2,8 @@
 
 import { Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useMemo, useState } from 'react';
-import type { ReviewCommentRecord } from '@/lib/pb/types';
+import type { ArticleReviewRecord, ReviewCommentRecord } from '@/lib/pb/types';
+import { useApprovalState } from '@/lib/pb/use-approval-state';
 import {
   ArticleManagerModalV2,
   type ReviewerMap,
@@ -14,13 +15,8 @@ import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { type Column, DataTable } from './data-table';
 
 /**
- * Unified row shape for the New Articles tab. Both 1st-pass
- * (`consolidatedArticles`) and 2nd-pass (`newArticleSuggestions`) records are
- * projected into this shape upstream so the table can render a single column
- * set across both lenses. Pass-specific fields are typed optional and
- * fall back to `—` where the underlying record doesn't carry them
- * (e.g. `category` and `numCodes` are 1st-pass-only; `existingAmbossCoverage`
- * is 2nd-pass-only).
+ * Unified row shape for the New Articles tab. Consolidated candidates are
+ * projected into this shape upstream so the table can render one column set.
  */
 export type ArticleRow = {
   /** PB record id of the underlying consolidatedArticles row. Use for
@@ -47,8 +43,8 @@ export type ArticleRow = {
   pass: 'first' | 'second';
 };
 
-/** Compact list of 1st-pass article titles consolidated into the
- *  current 2nd-pass row. Each title is annotated by origin via the
+/** Compact list of prior article titles consolidated into the
+ *  current row. Each title is annotated by origin via the
  *  shared titleOriginLookup so the editor can tell whether the
  *  precursor was an article in its own right or a section nested
  *  under one. */
@@ -129,8 +125,7 @@ function buildColumns(
     {
       key: 'category',
       label: 'Category',
-      description:
-        'Source code category that anchors this article (1st-pass only — empty for 2nd-pass cross-category records).',
+      description: 'Source code category that anchors this article',
       render: (r) => r.category ?? '—',
       width: 160,
       verticalAlign: 'top',
@@ -142,8 +137,7 @@ function buildColumns(
     {
       key: 'previousArticleTitles',
       label: 'Previous article titles',
-      description:
-        '1st-pass article titles consolidated into this 2nd-pass article (cross-category dedupe lineage).',
+      description: 'Prior article titles consolidated into this article',
       render: (r) => (
         <PreviousTitlesCell
           titles={r.previousArticleTitleSuggestions}
@@ -197,8 +191,7 @@ function buildColumns(
     {
       key: 'coverage',
       label: 'Coverage',
-      description:
-        '1st pass: numeric AMBOSS coverage score (overallCoverage). 2nd pass: free-text coverage note (existingAmbossCoverage).',
+      description: 'AMBOSS coverage score or coverage note',
       render: (r) => r.overallCoverage ?? r.existingAmbossCoverage ?? '—',
       width: 140,
       verticalAlign: 'top',
@@ -232,6 +225,7 @@ export function ArticlesView({
   titleOriginLookup,
   initialReviews,
   initialReviewers,
+  initialReviewRows,
   initialCommentsByArticle,
   initialNotesByArticle,
   viewerEmail,
@@ -242,6 +236,7 @@ export function ArticlesView({
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
+  initialReviewRows: ArticleReviewRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   initialNotesByArticle: Record<string, string>;
   viewerEmail?: string;
@@ -250,14 +245,38 @@ export function ArticlesView({
     () => buildColumns(categoryLookup, titleOriginLookup),
     [categoryLookup, titleOriginLookup],
   );
-  // 1st-consolidation column shape: keep Category, drop the cross-category
-  // lineage column (the 2nd-pass-only `previousArticleTitles`).
+  // Current candidate column shape: keep Category and hide lineage by default.
   const columns = useMemo(
     () => allColumns.filter((c) => c.key !== 'previousArticleTitles'),
     [allColumns],
   );
-  const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
-  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
+  // Same shared decision hook the other three planning screens use.
+  // Reviews + reviewers are derived from the hook's effective row set,
+  // so optimistic patches from any view (or PB realtime updates from
+  // any client) are reflected here without extra plumbing.
+  const approval = useApprovalState(slug, { articleReviews: initialReviewRows });
+  const reviews = useMemo<ReviewMap>(() => {
+    const out: ReviewMap = {};
+    for (const r of approval.articleReviewRows) {
+      if (r.articleKey) out[r.articleKey] = r.status;
+    }
+    return out;
+  }, [approval.articleReviewRows]);
+  const reviewers = useMemo<ReviewerMap>(() => {
+    const out: ReviewerMap = {};
+    for (const r of approval.articleReviewRows) {
+      if (!r.articleKey) continue;
+      out[r.articleKey] = {
+        reviewerEmail: r.reviewerEmail,
+        reviewedAt: r.reviewedAt,
+      };
+    }
+    return out;
+  }, [approval.articleReviewRows]);
+  // SSR snapshots are seeded into the hook; keep them in the prop
+  // signature so the loader page doesn't have to change shape.
+  void initialReviews;
+  void initialReviewers;
   const [reviewOpen, setReviewOpen] = useState(false);
   // Articles the open review modal walks. Set when the user clicks one
   // of the Start review / Review all buttons — see scope handlers below.
@@ -274,8 +293,8 @@ export function ArticlesView({
   // Approval tints take precedence; otherwise stripe by row index so
   // the table reads as bands instead of an undifferentiated grid.
   const getRowStyle = (r: ArticleRow, i: number) => {
-    if (r.id) {
-      const s = reviews[r.id];
+    if (r.articleKey) {
+      const s = reviews[r.articleKey];
       if (s === 'approved') return { background: APPROVED_TINT };
       if (s === 'rejected') return { background: REJECTED_TINT };
     }
@@ -288,8 +307,8 @@ export function ArticlesView({
     let approved = 0;
     let rejected = 0;
     for (const r of consolidated) {
-      if (!r.id) continue;
-      const s = reviews[r.id];
+      if (!r.articleKey) continue;
+      const s = reviews[r.articleKey];
       if (s === 'approved') approved++;
       else if (s === 'rejected') rejected++;
     }
@@ -365,8 +384,10 @@ export function ArticlesView({
             categoryLookup,
             titleOriginLookup,
             viewerEmail,
-            onReviewsChange: setReviews,
-            onReviewersChange: setReviewers,
+            // Modal routes its per-row decisions through the shared
+            // hook so optimistic patches show up here immediately and
+            // server actions get error-rolled-back together.
+            onDecideArticle: approval.decideArticle,
           }}
           onClose={() => setReviewOpen(false)}
         />

@@ -4,9 +4,7 @@ import {
   deleteArticleBacklogForSpecialtyAsAdmin,
   listArticleBacklog,
 } from '@/lib/data/article-backlog';
-import {
-  deleteArticleReviewsForSpecialtyAsAdmin,
-} from '@/lib/data/article-reviews';
+import { deleteArticleReviewsForSpecialtyAsAdmin } from '@/lib/data/article-reviews';
 import { deleteArticleSourcesByArticleKeyAsAdmin } from '@/lib/data/article-sources';
 import { deleteWritingRunsForArticleAsAdmin } from '@/lib/data/article-writing';
 import {

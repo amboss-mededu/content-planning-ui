@@ -254,6 +254,19 @@ export async function getNewArticleSuggestionByIdAsAdmin(
   }
 }
 
+export async function getConsolidatedArticleByIdAsAdmin(
+  id: string,
+): Promise<ConsolidatedArticleRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getOne(id);
+  } catch {
+    return null;
+  }
+}
+
 export async function listArticleUpdateSuggestionsAsAdmin(
   slug: string,
 ): Promise<Array<ArticleSuggestionRecord>> {

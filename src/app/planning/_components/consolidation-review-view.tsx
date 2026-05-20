@@ -2,27 +2,17 @@
 
 import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import {
-  type CSSProperties,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useTransition,
-} from 'react';
-import type { ReviewCommentRecord } from '@/lib/pb/types';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  ArticleReviewRecord,
+  ReviewCommentRecord,
+  SectionReviewRecord,
+} from '@/lib/pb/types';
+import { useApprovalState } from '@/lib/pb/use-approval-state';
 import {
   deriveReviewCategories,
   getConsolidationActionLabel,
 } from '@/lib/workflows/consolidation/buckets';
-import {
-  bulkApproveAndBacklogArticleReviews,
-  bulkApproveAndBacklogSectionReviews,
-  bulkApproveArticleReviews,
-  bulkApproveSectionReviews,
-  bulkUnapproveArticleReviews,
-  bulkUnapproveSectionReviews,
-} from '../[specialty]/actions';
 import {
   ArticleManagerModalV2,
   type ReviewerMap,
@@ -73,8 +63,10 @@ export function ConsolidationReviewView({
   titleOriginLookup,
   initialArticleReviews,
   initialArticleReviewers,
+  initialArticleReviewRows,
   initialSectionReviews,
   initialSectionReviewers,
+  initialSectionReviewRows,
   initialNotesByArticle,
   initialNotesBySection,
   initialCommentsByArticle,
@@ -102,8 +94,10 @@ export function ConsolidationReviewView({
   titleOriginLookup: TitleOriginLookup;
   initialArticleReviews: ReviewMap;
   initialArticleReviewers: ReviewerMap;
+  initialArticleReviewRows: ArticleReviewRecord[];
   initialSectionReviews: ReviewMap;
   initialSectionReviewers: ReviewerMap;
+  initialSectionReviewRows: SectionReviewRecord[];
   initialNotesByArticle: Record<string, string>;
   initialNotesBySection: Record<string, string>;
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
@@ -111,18 +105,63 @@ export function ConsolidationReviewView({
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail?: string;
 }) {
-  const [articleReviews, setArticleReviews] = useState<ReviewMap>(initialArticleReviews);
-  const [articleReviewers, setArticleReviewers] = useState<ReviewerMap>(
-    initialArticleReviewers,
-  );
-  const [sectionReviews, setSectionReviews] = useState<ReviewMap>(initialSectionReviews);
-  const [sectionReviewers, setSectionReviewers] = useState<ReviewerMap>(
-    initialSectionReviewers,
-  );
+  // Single source of truth for review + backlog state across all four
+  // planning screens. Reads live PB subscriptions, applies optimistic
+  // patches, and exposes action methods that update both immediately and
+  // via the server-action result.
+  const approval = useApprovalState(slug, {
+    articleReviews: initialArticleReviewRows,
+    sectionReviews: initialSectionReviewRows,
+  });
+  // ReviewMaps derived from the hook's effective state. Kept as
+  // useMemo'd derivations so the rest of this component (and the modal
+  // props) keep their existing shape.
+  const articleReviews = useMemo<ReviewMap>(() => {
+    const out: ReviewMap = {};
+    for (const r of approval.articleReviewRows) {
+      if (r.articleKey) out[r.articleKey] = r.status;
+    }
+    return out;
+  }, [approval.articleReviewRows]);
+  const articleReviewers = useMemo<ReviewerMap>(() => {
+    const out: ReviewerMap = {};
+    for (const r of approval.articleReviewRows) {
+      if (!r.articleKey) continue;
+      out[r.articleKey] = {
+        reviewerEmail: r.reviewerEmail,
+        reviewedAt: r.reviewedAt,
+      };
+    }
+    return out;
+  }, [approval.articleReviewRows]);
+  const sectionReviews = useMemo<ReviewMap>(() => {
+    const out: ReviewMap = {};
+    for (const r of approval.sectionReviewRows) {
+      if (r.sectionKey) out[r.sectionKey] = r.status;
+    }
+    return out;
+  }, [approval.sectionReviewRows]);
+  const sectionReviewers = useMemo<ReviewerMap>(() => {
+    const out: ReviewerMap = {};
+    for (const r of approval.sectionReviewRows) {
+      if (!r.sectionKey) continue;
+      out[r.sectionKey] = {
+        reviewerEmail: r.reviewerEmail,
+        reviewedAt: r.reviewedAt,
+      };
+    }
+    return out;
+  }, [approval.sectionReviewRows]);
+  // SSR snapshots are no longer needed at runtime once the hook is
+  // seeded, but the props stay in the signature so the loader page
+  // doesn't have to change shape. Silence unused-var warnings.
+  void initialArticleReviews;
+  void initialArticleReviewers;
+  void initialSectionReviews;
+  void initialSectionReviewers;
   const [selectedArticleIds, setSelectedArticleIds] = useState<Set<string>>(new Set());
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalOpener>(null);
-  const [_pending, startTransition] = useTransition();
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const router = useRouter();
@@ -243,10 +282,12 @@ export function ConsolidationReviewView({
       let articleApproved = 0;
       let sectionApproved = 0;
       for (const a of bucket.articles) {
-        if (a.id && articleReviews[a.id] === 'approved') articleApproved++;
+        if (a.articleKey && articleReviews[a.articleKey] === 'approved')
+          articleApproved++;
       }
       for (const s of bucket.sections) {
-        if (s.id && sectionReviews[s.id] === 'approved') sectionApproved++;
+        if (s.sectionKey && sectionReviews[s.sectionKey] === 'approved')
+          sectionApproved++;
       }
       out[cat] = {
         articleApproved,
@@ -258,175 +299,82 @@ export function ConsolidationReviewView({
   }, [grouped, articleReviews, sectionReviews]);
 
   // ----- Bulk approvals -----
-  // Optimistic state is keyed by articleKey/sectionKey (the stable id);
-  // the server action takes the pair (key, current PB id) so the
-  // legacy `articleRecordId` column on the PB row keeps tracking the
-  // freshest underlying row.
+  // All approve/unapprove paths flow through the shared hook, which
+  // applies optimistic patches immediately and reconciles via the
+  // server-action result. The hook owns retries/error handling — these
+  // wrappers just shape inputs.
 
-  const approveArticles = useCallback(
-    (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      const now = Date.now();
-      // Optimistic mirror — the local maps are keyed by the row's PB
-      // id (`articleRecordId`), so the inline table can do an O(1)
-      // status lookup without crossing into the key space. The server
-      // action persists with the stable key alongside the id.
-      setArticleReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) next[p.articleRecordId] = 'approved';
-        return next;
-      });
-      setArticleReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs)
-          next[p.articleRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
-        return next;
-      });
-      startTransition(async () => {
-        await bulkApproveArticleReviews(slug, pairs);
-      });
-    },
-    [slug, viewerEmail],
-  );
-
-  const approveSections = useCallback(
-    (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      const now = Date.now();
-      setSectionReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) next[p.sectionRecordId] = 'approved';
-        return next;
-      });
-      setSectionReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs)
-          next[p.sectionRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
-        return next;
-      });
-      startTransition(async () => {
-        await bulkApproveSectionReviews(slug, pairs);
-        // The Article Updates tab is server-rendered from sectionReviews,
-        // so refresh after approving sections from this review surface.
-        router.refresh();
-      });
-    },
-    [slug, viewerEmail, router],
+  // Surface server-action failures in the rail's error chip; without
+  // this the optimistic patch silently rolls back and the user sees
+  // their click "undo itself" with no explanation.
+  const surfaceActionError = useCallback(
+    (e: unknown) =>
+      setActionError(
+        e instanceof Error ? e.message : typeof e === 'string' ? e : 'Action failed',
+      ),
+    [],
   );
 
   const approveAndBacklogArticles = useCallback(
     (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      const now = Date.now();
-      setArticleReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) next[p.articleRecordId] = 'approved';
-        return next;
-      });
-      setArticleReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs)
-          next[p.articleRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
-        return next;
-      });
-      startTransition(async () => {
-        await bulkApproveAndBacklogArticleReviews(slug, pairs);
-      });
+      approval.approveArticles(pairs).catch(surfaceActionError);
     },
-    [slug, viewerEmail],
+    [approval, surfaceActionError],
   );
 
   const approveAndBacklogSections = useCallback(
     (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      const now = Date.now();
-      setSectionReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) next[p.sectionRecordId] = 'approved';
-        return next;
-      });
-      setSectionReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs)
-          next[p.sectionRecordId] = { reviewerEmail: viewerEmail, reviewedAt: now };
-        return next;
-      });
-      startTransition(async () => {
-        await bulkApproveAndBacklogSectionReviews(slug, pairs);
-        // Re-render server surfaces (my-backlog, specialty backlog) so
-        // their `articleBacklog` reads pick up the new `type='update'`
-        // row created by the server action.
-        router.refresh();
-      });
+      approval.approveSections(pairs).catch(surfaceActionError);
     },
-    [slug, viewerEmail, router],
+    [approval, surfaceActionError],
   );
 
   const unapproveArticles = useCallback(
     (pairs: Array<{ articleKey: string; articleRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      // Clear status optimistically (drops the row out of /articles
-      // visibility-gating on the next refresh).
-      setArticleReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) delete next[p.articleRecordId];
-        return next;
-      });
-      setArticleReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) delete next[p.articleRecordId];
-        return next;
-      });
-      startTransition(async () => {
-        await bulkUnapproveArticleReviews(
-          slug,
-          pairs.map((p) => ({ articleKey: p.articleKey })),
-        );
-      });
+      approval.unapproveArticles(pairs).catch(surfaceActionError);
     },
-    [slug],
+    [approval, surfaceActionError],
   );
 
   const unapproveSections = useCallback(
     (pairs: Array<{ sectionKey: string; sectionRecordId: string }>) => {
-      if (pairs.length === 0) return;
-      setSectionReviews((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) delete next[p.sectionRecordId];
-        return next;
-      });
-      setSectionReviewers((prev) => {
-        const next = { ...prev };
-        for (const p of pairs) delete next[p.sectionRecordId];
-        return next;
-      });
-      startTransition(async () => {
-        await bulkUnapproveSectionReviews(slug, pairs);
-        router.refresh();
-      });
+      approval.unapproveSections(pairs).catch(surfaceActionError);
     },
-    [slug, router],
+    [approval, surfaceActionError],
   );
+
+  // Modal calls these to persist a single article / section decision
+  // through the hook (optimistic patches + server action + rollback on
+  // failure). Errors propagate so the modal can roll back its own
+  // snapshot.
+  const decideArticleFromModal = approval.decideArticle;
+  const decideSectionFromModal = approval.decideSection;
 
   const approveAllInCategory = useCallback(() => {
     if (!selectedBucket) return;
     const articlePairs = selectedBucket.articles
-      .filter((a) => a.articleKey && a.id && articleReviews[a.id] !== 'approved')
+      .filter((a) => a.articleKey && a.id && articleReviews[a.articleKey] !== 'approved')
       .map((a) => ({
         articleKey: a.articleKey as string,
         articleRecordId: a.id as string,
       }));
     const sectionPairs = selectedBucket.sections
-      .filter((s) => s.sectionKey && s.id && sectionReviews[s.id] !== 'approved')
+      .filter((s) => s.sectionKey && s.id && sectionReviews[s.sectionKey] !== 'approved')
       .map((s) => ({
         sectionKey: s.sectionKey as string,
         sectionRecordId: s.id as string,
       }));
-    approveArticles(articlePairs);
-    approveSections(sectionPairs);
+    approveAndBacklogArticles(articlePairs);
+    approveAndBacklogSections(sectionPairs);
     setSelectedArticleIds(new Set());
     setSelectedSectionIds(new Set());
-  }, [selectedBucket, articleReviews, sectionReviews, approveArticles, approveSections]);
+  }, [
+    selectedBucket,
+    articleReviews,
+    sectionReviews,
+    approveAndBacklogArticles,
+    approveAndBacklogSections,
+  ]);
 
   // ----- Specialty-level consolidation trigger -----
   // Omitting `categories` runs primary for every mapped category in
@@ -558,34 +506,12 @@ export function ConsolidationReviewView({
               onApproveSelectedArticles={() => {
                 if (!selectedBucket) return;
                 const pairs = selectedBucket.articles
-                  .filter((a) => a.id && a.articleKey && selectedArticleIds.has(a.id))
-                  .map((a) => ({
-                    articleKey: a.articleKey as string,
-                    articleRecordId: a.id as string,
-                  }));
-                approveArticles(pairs);
-                setSelectedArticleIds(new Set());
-              }}
-              onApproveSelectedSections={() => {
-                if (!selectedBucket) return;
-                const pairs = selectedBucket.sections
-                  .filter((s) => s.id && s.sectionKey && selectedSectionIds.has(s.id))
-                  .map((s) => ({
-                    sectionKey: s.sectionKey as string,
-                    sectionRecordId: s.id as string,
-                  }));
-                approveSections(pairs);
-                setSelectedSectionIds(new Set());
-              }}
-              onApproveAndBacklogSelectedArticles={() => {
-                if (!selectedBucket) return;
-                const pairs = selectedBucket.articles
                   .filter(
                     (a) =>
                       a.id &&
                       a.articleKey &&
                       selectedArticleIds.has(a.id) &&
-                      articleReviews[a.id] !== 'approved',
+                      articleReviews[a.articleKey] !== 'approved',
                   )
                   .map((a) => ({
                     articleKey: a.articleKey as string,
@@ -594,7 +520,7 @@ export function ConsolidationReviewView({
                 approveAndBacklogArticles(pairs);
                 setSelectedArticleIds(new Set());
               }}
-              onApproveAndBacklogSelectedSections={() => {
+              onApproveSelectedSections={() => {
                 if (!selectedBucket) return;
                 const pairs = selectedBucket.sections
                   .filter(
@@ -602,7 +528,7 @@ export function ConsolidationReviewView({
                       s.id &&
                       s.sectionKey &&
                       selectedSectionIds.has(s.id) &&
-                      sectionReviews[s.id] !== 'approved',
+                      sectionReviews[s.sectionKey] !== 'approved',
                   )
                   .map((s) => ({
                     sectionKey: s.sectionKey as string,
@@ -619,7 +545,7 @@ export function ConsolidationReviewView({
                       a.id &&
                       a.articleKey &&
                       selectedArticleIds.has(a.id) &&
-                      articleReviews[a.id] === 'approved',
+                      articleReviews[a.articleKey] === 'approved',
                   )
                   .map((a) => ({
                     articleKey: a.articleKey as string,
@@ -636,7 +562,7 @@ export function ConsolidationReviewView({
                       s.id &&
                       s.sectionKey &&
                       selectedSectionIds.has(s.id) &&
-                      sectionReviews[s.id] === 'approved',
+                      sectionReviews[s.sectionKey] === 'approved',
                   )
                   .map((s) => ({
                     sectionKey: s.sectionKey as string,
@@ -692,8 +618,7 @@ export function ConsolidationReviewView({
             categoryLookup,
             titleOriginLookup,
             viewerEmail,
-            onReviewsChange: setArticleReviews,
-            onReviewersChange: setArticleReviewers,
+            onDecideArticle: decideArticleFromModal,
           }}
           onClose={closeModal}
         />
@@ -714,8 +639,7 @@ export function ConsolidationReviewView({
             categoryLookup,
             titleOriginLookup,
             viewerEmail,
-            onReviewsChange: setSectionReviews,
-            onReviewersChange: setSectionReviewers,
+            onDecideSection: decideSectionFromModal,
           }}
           onClose={closeModal}
         />
@@ -973,8 +897,6 @@ function CategoryDetailPane({
   categoryLookup,
   onApproveSelectedArticles,
   onApproveSelectedSections,
-  onApproveAndBacklogSelectedArticles,
-  onApproveAndBacklogSelectedSections,
   onUnapproveSelectedArticles,
   onUnapproveSelectedSections,
   onUnapproveArticle,
@@ -999,8 +921,6 @@ function CategoryDetailPane({
   categoryLookup: CategoryLookup;
   onApproveSelectedArticles: () => void;
   onApproveSelectedSections: () => void;
-  onApproveAndBacklogSelectedArticles: () => void;
-  onApproveAndBacklogSelectedSections: () => void;
   onUnapproveSelectedArticles: () => void;
   onUnapproveSelectedSections: () => void;
   onUnapproveArticle: (id: string) => void;
@@ -1013,8 +933,12 @@ function CategoryDetailPane({
   onRowClickSection: (id: string) => void;
 }) {
   const unapprovedCount =
-    bucket.articles.filter((a) => a.id && articleReviews[a.id] !== 'approved').length +
-    bucket.sections.filter((s) => s.id && sectionReviews[s.id] !== 'approved').length;
+    bucket.articles.filter(
+      (a) => a.articleKey && articleReviews[a.articleKey] !== 'approved',
+    ).length +
+    bucket.sections.filter(
+      (s) => s.sectionKey && sectionReviews[s.sectionKey] !== 'approved',
+    ).length;
 
   return (
     <Stack space="m">
@@ -1058,13 +982,13 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const a of bucket.articles) {
-            if (a.id && articleReviews[a.id] !== 'approved') next.add(a.id);
+            if (a.id && a.articleKey && articleReviews[a.articleKey] !== 'approved')
+              next.add(a.id);
           }
           setSelectedArticleIds(next);
         }}
         onRowClick={onRowClickArticle}
         onApproveSelected={onApproveSelectedArticles}
-        onApproveAndBacklogSelected={onApproveAndBacklogSelectedArticles}
         onUnapproveSelected={onUnapproveSelectedArticles}
         onUnapproveRow={onUnapproveArticle}
         categoryLookup={categoryLookup}
@@ -1087,13 +1011,13 @@ function CategoryDetailPane({
           }
           const next = new Set<string>();
           for (const s of bucket.sections) {
-            if (s.id && sectionReviews[s.id] !== 'approved') next.add(s.id);
+            if (s.id && s.sectionKey && sectionReviews[s.sectionKey] !== 'approved')
+              next.add(s.id);
           }
           setSelectedSectionIds(next);
         }}
         onRowClick={onRowClickSection}
         onApproveSelected={onApproveSelectedSections}
-        onApproveAndBacklogSelected={onApproveAndBacklogSelectedSections}
         onUnapproveSelected={onUnapproveSelectedSections}
         onUnapproveRow={onUnapproveSection}
         categoryLookup={categoryLookup}
@@ -1161,7 +1085,6 @@ function ArticleSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
-  onApproveAndBacklogSelected,
   onUnapproveSelected,
   onUnapproveRow,
   categoryLookup,
@@ -1173,20 +1096,26 @@ function ArticleSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
-  onApproveAndBacklogSelected: () => void;
   onUnapproveSelected: () => void;
   onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
+  const keyById = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.id && r.articleKey) out[r.id] = r.articleKey;
+    return out;
+  }, [rows]);
+  const unapprovedRows = rows.filter(
+    (r) => r.articleKey && reviews[r.articleKey] !== 'approved',
+  );
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
   const selectedApprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[id] === 'approved',
+    (id) => reviews[keyById[id]] === 'approved',
   ).length;
   const selectedUnapprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[id] !== 'approved',
+    (id) => reviews[keyById[id]] !== 'approved',
   ).length;
   return (
     <Stack space="xs">
@@ -1199,21 +1128,14 @@ function ArticleSubTable({
           onClick={onApproveSelected}
           disabled={selectedUnapprovedCount === 0}
         >
-          {`Send to new articles (${selectedUnapprovedCount})`}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={onApproveAndBacklogSelected}
-          disabled={selectedUnapprovedCount === 0}
-        >
-          {`Send to backlog (${selectedUnapprovedCount})`}
+          {`Approve selected (${selectedUnapprovedCount})`}
         </Button>
         <Button
           variant="tertiary"
           onClick={onUnapproveSelected}
           disabled={selectedApprovedCount === 0}
         >
-          {`Unapprove selected (${selectedApprovedCount})`}
+          {`Remove approval (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -1245,7 +1167,7 @@ function ArticleSubTable({
             {rows.map((r, i) => {
               if (!r.id) return null;
               const rowId = r.id;
-              const status = reviews[rowId];
+              const status = reviews[r.articleKey ?? ''];
               const tint = rowTint(status);
               const rowStyle: CSSProperties = {
                 ...(tint ?? (i % 2 === 1 ? { background: ZEBRA_TINT } : undefined)),
@@ -1316,7 +1238,6 @@ function SectionSubTable({
   onToggleAll,
   onRowClick,
   onApproveSelected,
-  onApproveAndBacklogSelected,
   onUnapproveSelected,
   onUnapproveRow,
   categoryLookup,
@@ -1328,20 +1249,26 @@ function SectionSubTable({
   onToggleAll: (checked: boolean) => void;
   onRowClick: (id: string) => void;
   onApproveSelected: () => void;
-  onApproveAndBacklogSelected: () => void;
   onUnapproveSelected: () => void;
   onUnapproveRow: (id: string) => void;
   categoryLookup: CategoryLookup;
 }) {
-  const unapprovedRows = rows.filter((r) => r.id && reviews[r.id] !== 'approved');
+  const keyById = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.id && r.sectionKey) out[r.id] = r.sectionKey;
+    return out;
+  }, [rows]);
+  const unapprovedRows = rows.filter(
+    (r) => r.sectionKey && reviews[r.sectionKey] !== 'approved',
+  );
   const allUnapprovedChecked =
     unapprovedRows.length > 0 &&
     unapprovedRows.every((r) => r.id && selectedIds.has(r.id));
   const selectedApprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[id] === 'approved',
+    (id) => reviews[keyById[id]] === 'approved',
   ).length;
   const selectedUnapprovedCount = Array.from(selectedIds).filter(
-    (id) => reviews[id] !== 'approved',
+    (id) => reviews[keyById[id]] !== 'approved',
   ).length;
   // Band by parent-article title so all sections under one article
   // share a tint; the band flips on every article transition. Rows
@@ -1372,21 +1299,14 @@ function SectionSubTable({
           onClick={onApproveSelected}
           disabled={selectedUnapprovedCount === 0}
         >
-          {`Send to article updates (${selectedUnapprovedCount})`}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={onApproveAndBacklogSelected}
-          disabled={selectedUnapprovedCount === 0}
-        >
-          {`Send to backlog (${selectedUnapprovedCount})`}
+          {`Approve selected (${selectedUnapprovedCount})`}
         </Button>
         <Button
           variant="tertiary"
           onClick={onUnapproveSelected}
           disabled={selectedApprovedCount === 0}
         >
-          {`Unapprove selected (${selectedApprovedCount})`}
+          {`Remove approval (${selectedApprovedCount})`}
         </Button>
       </Inline>
       {rows.length === 0 ? (
@@ -1420,7 +1340,7 @@ function SectionSubTable({
             {rows.map((r) => {
               if (!r.id) return null;
               const rowId = r.id;
-              const status = reviews[rowId];
+              const status = reviews[r.sectionKey ?? ''];
               const tint = rowTint(status);
               const band = bandByRowId.get(rowId);
               const rowStyle: CSSProperties = {

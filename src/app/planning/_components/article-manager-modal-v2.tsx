@@ -28,14 +28,8 @@ import type {
 } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
-  bulkApproveAndBacklogArticleReviews,
-  bulkApproveAndBacklogSectionReviews,
   getLatestDraftForArticle,
   resetArticle,
-  resetArticleReview,
-  resetSectionReview,
-  submitArticleReview,
-  submitSectionReview,
   submitSourceCortexId,
   submitSourceReview,
   submitSourcesOrder,
@@ -109,8 +103,19 @@ export type ManagerOpener =
       categoryLookup: CategoryLookup;
       titleOriginLookup: TitleOriginLookup;
       viewerEmail?: string;
-      onReviewsChange: (next: ReviewMap) => void;
-      onReviewersChange: (next: ReviewerMap) => void;
+      /**
+       * Persist a single article decision through the parent's
+       * `useApprovalState` hook. Passing `status: null` clears an
+       * existing decision (reset). The parent applies an optimistic
+       * patch, runs the server action, and rolls back on failure — the
+       * modal awaits to know whether to move to the next row.
+       */
+      onDecideArticle: (
+        articleKey: string,
+        articleRecordId: string,
+        status: ReviewStatus | null,
+        notes?: string,
+      ) => Promise<void>;
     }
   | {
       type: 'new';
@@ -148,8 +153,13 @@ export type ManagerOpener =
       categoryLookup: CategoryLookup;
       titleOriginLookup: TitleOriginLookup;
       viewerEmail?: string;
-      onReviewsChange: (next: ReviewMap) => void;
-      onReviewersChange: (next: ReviewerMap) => void;
+      /** See `onDecideArticle` — same contract for sections. */
+      onDecideSection: (
+        sectionKey: string,
+        sectionRecordId: string,
+        status: ReviewStatus | null,
+        notes?: string,
+      ) => Promise<void>;
     }
   | {
       type: 'update';
@@ -239,21 +249,25 @@ function ReviewManagerView({
     categoryLookup,
     titleOriginLookup,
     viewerEmail,
-    onReviewsChange,
-    onReviewersChange,
+    onDecideArticle,
   } = opener;
 
   const sorted = useMemo(() => sortForReview(articles), [articles]);
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
-  const [notesById, setNotesById] =
+  const [notesByKey, setNotesByKey] =
     useState<Record<string, string>>(initialNotesByArticle);
+  useEffect(() => {
+    setReviews(initialReviews);
+    setReviewers(initialReviewers);
+    setNotesByKey(initialNotesByArticle);
+  }, [initialReviews, initialReviewers, initialNotesByArticle]);
   const [index, setIndex] = useState(() => {
     if (startAtId) {
       const at = sorted.findIndex((r) => r.id === startAtId);
       if (at !== -1) return at;
     }
-    const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
+    const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.articleKey ?? '']);
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;
   });
   const [submitting, setSubmitting] = useState(false);
@@ -265,8 +279,12 @@ function ReviewManagerView({
     if (!current) return null;
     const inBucket = sorted.filter((r) => r.category === current.category);
     const seen = inBucket.findIndex((r) => r.id === current.id);
-    const approved = inBucket.filter((r) => reviews[r.id] === 'approved').length;
-    const rejected = inBucket.filter((r) => reviews[r.id] === 'rejected').length;
+    const approved = inBucket.filter(
+      (r) => reviews[r.articleKey ?? ''] === 'approved',
+    ).length;
+    const rejected = inBucket.filter(
+      (r) => reviews[r.articleKey ?? ''] === 'rejected',
+    ).length;
     return {
       bucketSize: inBucket.length,
       indexInBucket: seen + 1,
@@ -292,8 +310,6 @@ function ReviewManagerView({
       else if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'a' || e.key === 'A' || e.key === 'y' || e.key === 'Y') {
         decide('approved');
-      } else if (e.key === 'b' || e.key === 'B') {
-        decideAndBacklog();
       } else if (e.key === 'r' || e.key === 'R' || e.key === 'n' || e.key === 'N') {
         decide('rejected');
       } else if (e.key === 'Escape') onClose();
@@ -317,64 +333,31 @@ function ReviewManagerView({
       console.error('decide: row has no articleKey — cannot persist review');
       return;
     }
-    const notesValue = notesById[rowId] ?? '';
+    const notesValue = notesByKey[articleKey] ?? '';
     setSubmitting(true);
-    const next: ReviewMap = { ...reviews, [rowId]: status };
+    // Modal-local UI state: flips immediately so the row's badge in the
+    // modal turns green/red without waiting for the network. The parent
+    // is updated via `onDecideArticle` which routes through the shared
+    // `useApprovalState` hook (optimistic patch + server action).
+    const next: ReviewMap = { ...reviews, [articleKey]: status };
     const nextReviewers: ReviewerMap = {
       ...reviewers,
-      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+      [articleKey]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
     };
     setReviews(next);
     setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
     try {
-      await submitArticleReview(slug, articleKey, rowId, status, notesValue);
+      await onDecideArticle(articleKey, rowId, status, notesValue);
     } catch (err) {
-      console.error('submitArticleReview failed', err);
+      console.error('decideArticle failed', err);
+      // Roll back the modal-local snapshot — the hook has already
+      // rolled back its patches.
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
-      delete revertedReviews[rowId];
-      delete revertedReviewers[rowId];
+      delete revertedReviews[articleKey];
+      delete revertedReviewers[articleKey];
       setReviews(revertedReviews);
       setReviewers(revertedReviewers);
-      onReviewsChange(revertedReviews);
-      onReviewersChange(revertedReviewers);
-    } finally {
-      setSubmitting(false);
-      if (index < total - 1) goNext();
-    }
-  }
-
-  async function decideAndBacklog() {
-    if (!current) return;
-    const rowId = current.id;
-    const articleKey = current.articleKey ?? '';
-    if (!articleKey) return;
-    setSubmitting(true);
-    const next: ReviewMap = { ...reviews, [rowId]: 'approved' };
-    const nextReviewers: ReviewerMap = {
-      ...reviewers,
-      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
-    };
-    setReviews(next);
-    setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
-    try {
-      await bulkApproveAndBacklogArticleReviews(slug, [
-        { articleKey, articleRecordId: rowId },
-      ]);
-    } catch (err) {
-      console.error('bulkApproveAndBacklogArticleReviews failed', err);
-      const revertedReviews = { ...reviews };
-      const revertedReviewers = { ...reviewers };
-      delete revertedReviews[rowId];
-      delete revertedReviewers[rowId];
-      setReviews(revertedReviews);
-      setReviewers(revertedReviewers);
-      onReviewsChange(revertedReviews);
-      onReviewersChange(revertedReviewers);
     } finally {
       setSubmitting(false);
       if (index < total - 1) goNext();
@@ -383,22 +366,20 @@ function ReviewManagerView({
 
   async function clearDecision() {
     if (!current) return;
-    const rowId = current.id;
     const articleKey = current.articleKey ?? '';
     if (!articleKey) return;
+    const rowId = current.id;
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
-    delete next[rowId];
-    delete nextReviewers[rowId];
+    delete next[articleKey];
+    delete nextReviewers[articleKey];
     setReviews(next);
     setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
     try {
-      await resetArticleReview(slug, articleKey);
+      await onDecideArticle(articleKey, rowId, null);
     } catch (err) {
-      console.error('resetArticleReview failed', err);
+      console.error('decideArticle (reset) failed', err);
     } finally {
       setSubmitting(false);
     }
@@ -417,11 +398,12 @@ function ReviewManagerView({
     );
   }
 
-  const currentStatus = reviews[current.id];
+  const currentKey = current.articleKey ?? '';
+  const currentStatus = reviews[currentKey];
   const previousTitles = (
     current as ArticleRow & { previousArticleTitleSuggestions?: string[] }
   ).previousArticleTitleSuggestions;
-  const currentNotes = notesById[current.id] ?? '';
+  const currentNotes = notesByKey[currentKey] ?? '';
 
   return (
     <Modal
@@ -458,23 +440,19 @@ function ReviewManagerView({
         >
           <SharedHeader
             title={current.articleTitle ?? '(untitled)'}
-            stageBadge={
-              opener.stage === 'review-1st'
-                ? { text: '1st pass', color: 'gray' }
-                : { text: '2nd pass', color: 'gray' }
-            }
+            stageBadge={{ text: 'Review', color: 'gray' }}
             decisionBadge={
               currentStatus === 'approved'
                 ? {
                     text: 'approved',
                     color: 'green',
-                    tooltip: reviewerLabel(reviewers[current.id], 'approved'),
+                    tooltip: reviewerLabel(reviewers[currentKey], 'approved'),
                   }
                 : currentStatus === 'rejected'
                   ? {
                       text: 'rejected',
                       color: 'red',
-                      tooltip: reviewerLabel(reviewers[current.id], 'rejected'),
+                      tooltip: reviewerLabel(reviewers[currentKey], 'rejected'),
                     }
                   : null
             }
@@ -552,7 +530,7 @@ function ReviewManagerView({
 
           <DecisionNoteField
             value={currentNotes}
-            onChange={(v) => setNotesById((prev) => ({ ...prev, [current.id]: v }))}
+            onChange={(v) => setNotesByKey((prev) => ({ ...prev, [currentKey]: v }))}
             placeholder="Decision rationale (optional — saved when you approve or reject)"
           />
 
@@ -602,13 +580,6 @@ function ReviewManagerView({
             disabled={submitting}
           >
             Approve (A)
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => decideAndBacklog()}
-            disabled={submitting}
-          >
-            Approve to backlog (B)
           </Button>
         </div>
       </div>
@@ -1911,22 +1882,25 @@ function UpdateReviewView({
     categoryLookup,
     titleOriginLookup,
     viewerEmail,
-    onReviewsChange,
-    onReviewersChange,
+    onDecideSection,
   } = opener;
 
-  const router = useRouter();
   const sorted = useMemo(() => sortSectionsForReview(sections), [sections]);
   const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
   const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
-  const [notesById, setNotesById] =
+  const [notesByKey, setNotesByKey] =
     useState<Record<string, string>>(initialNotesBySection);
+  useEffect(() => {
+    setReviews(initialReviews);
+    setReviewers(initialReviewers);
+    setNotesByKey(initialNotesBySection);
+  }, [initialReviews, initialReviewers, initialNotesBySection]);
   const [index, setIndex] = useState(() => {
     if (startAtId) {
       const at = sorted.findIndex((r) => r.id === startAtId);
       if (at !== -1) return at;
     }
-    const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.id]);
+    const firstUnreviewed = sorted.findIndex((r) => !initialReviews[r.sectionKey ?? '']);
     return firstUnreviewed === -1 ? 0 : firstUnreviewed;
   });
   const [submitting, setSubmitting] = useState(false);
@@ -1961,8 +1935,12 @@ function UpdateReviewView({
     if (!current) return null;
     const inBucket = articleSections;
     const seen = inBucket.findIndex((r) => r.id === current.id);
-    const approved = inBucket.filter((r) => reviews[r.id] === 'approved').length;
-    const rejected = inBucket.filter((r) => reviews[r.id] === 'rejected').length;
+    const approved = inBucket.filter(
+      (r) => reviews[r.sectionKey ?? ''] === 'approved',
+    ).length;
+    const rejected = inBucket.filter(
+      (r) => reviews[r.sectionKey ?? ''] === 'rejected',
+    ).length;
     return {
       bucketSize: inBucket.length,
       indexInBucket: seen + 1,
@@ -1994,8 +1972,6 @@ function UpdateReviewView({
       else if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'a' || e.key === 'A' || e.key === 'y' || e.key === 'Y') {
         decide('approved');
-      } else if (e.key === 'b' || e.key === 'B') {
-        decideAndBacklog();
       } else if (e.key === 'r' || e.key === 'R' || e.key === 'n' || e.key === 'N') {
         decide('rejected');
       } else if (e.key === 'Escape') onClose();
@@ -2037,75 +2013,26 @@ function UpdateReviewView({
     }
     setReviewError(null);
     setSubmitting(true);
-    const next: ReviewMap = { ...reviews, [rowId]: status };
+    // Modal-local snappy UI; parent's `useApprovalState` hook is fed
+    // through `onDecideSection` (optimistic patch + server action +
+    // rollback on failure).
+    const next: ReviewMap = { ...reviews, [sectionKey]: status };
     const nextReviewers: ReviewerMap = {
       ...reviewers,
-      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
+      [sectionKey]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
     };
     setReviews(next);
     setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
     try {
-      await submitSectionReview(slug, sectionKey, rowId, status, notes);
-      // Server-rendered surfaces (my-backlog, specialty backlog,
-      // consolidation review) read sectionReviews on the server, so
-      // they need an explicit refresh to reflect the new approval.
-      router.refresh();
+      await onDecideSection(sectionKey, rowId, status, notes);
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : String(err));
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
-      delete revertedReviews[rowId];
-      delete revertedReviewers[rowId];
+      delete revertedReviews[sectionKey];
+      delete revertedReviewers[sectionKey];
       setReviews(revertedReviews);
       setReviewers(revertedReviewers);
-      onReviewsChange(revertedReviews);
-      onReviewersChange(revertedReviewers);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  /**
-   * Approve + create the parent article's `articleBacklog` row (`type='update'`)
-   * in one click. Mirrors `setRowStatus('approved', ...)` plus the
-   * backlog ensure step — used by the "Approve to backlog" button in
-   * the update review modal so editors don't have to bounce to the
-   * consolidation-review screen to queue the article.
-   */
-  async function setRowStatusAndBacklog(rowId: string) {
-    const sectionKey = sectionKeyOf(rowId);
-    if (!sectionKey) {
-      setReviewError("Couldn't approve to backlog: section is missing its stable key.");
-      return;
-    }
-    setReviewError(null);
-    setSubmitting(true);
-    const next: ReviewMap = { ...reviews, [rowId]: 'approved' };
-    const nextReviewers: ReviewerMap = {
-      ...reviewers,
-      [rowId]: { reviewerEmail: viewerEmail, reviewedAt: Date.now() },
-    };
-    setReviews(next);
-    setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
-    try {
-      await bulkApproveAndBacklogSectionReviews(slug, [
-        { sectionKey, sectionRecordId: rowId },
-      ]);
-      router.refresh();
-    } catch (err) {
-      setReviewError(err instanceof Error ? err.message : String(err));
-      const revertedReviews = { ...reviews };
-      const revertedReviewers = { ...reviewers };
-      delete revertedReviews[rowId];
-      delete revertedReviewers[rowId];
-      setReviews(revertedReviews);
-      setReviewers(revertedReviewers);
-      onReviewsChange(revertedReviews);
-      onReviewersChange(revertedReviewers);
     } finally {
       setSubmitting(false);
     }
@@ -2118,15 +2045,12 @@ function UpdateReviewView({
     setSubmitting(true);
     const next = { ...reviews };
     const nextReviewers = { ...reviewers };
-    delete next[rowId];
-    delete nextReviewers[rowId];
+    delete next[sectionKey];
+    delete nextReviewers[sectionKey];
     setReviews(next);
     setReviewers(nextReviewers);
-    onReviewsChange(next);
-    onReviewersChange(nextReviewers);
     try {
-      await resetSectionReview(slug, sectionKey, rowId);
-      router.refresh();
+      await onDecideSection(sectionKey, rowId, null);
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2135,25 +2059,21 @@ function UpdateReviewView({
   }
 
   function toggleApproveRow(rowId: string) {
-    if (reviews[rowId] === 'approved') void clearRowStatus(rowId);
+    const sectionKey = sectionKeyOf(rowId);
+    if (sectionKey && reviews[sectionKey] === 'approved') void clearRowStatus(rowId);
     else void setRowStatus(rowId, 'approved');
   }
   function toggleRejectRow(rowId: string) {
-    if (reviews[rowId] === 'rejected') void clearRowStatus(rowId);
+    const sectionKey = sectionKeyOf(rowId);
+    if (sectionKey && reviews[sectionKey] === 'rejected') void clearRowStatus(rowId);
     else void setRowStatus(rowId, 'rejected');
   }
 
   async function decide(status: ReviewStatus) {
     if (!current) return;
     const rowId = current.id;
-    const notesValue = notesById[rowId] ?? '';
+    const notesValue = notesByKey[current.sectionKey ?? ''] ?? '';
     await setRowStatus(rowId, status, notesValue);
-    if (index < total - 1) goNext();
-  }
-
-  async function decideAndBacklog() {
-    if (!current) return;
-    await setRowStatusAndBacklog(current.id);
     if (index < total - 1) goNext();
   }
 
@@ -2175,10 +2095,11 @@ function UpdateReviewView({
     );
   }
 
-  const currentStatus = reviews[current.id];
+  const currentKey = current.sectionKey ?? '';
+  const currentStatus = reviews[currentKey];
   const previousNames = (current as SectionRow & { previousSectionNames?: string[] })
     .previousSectionNames;
-  const currentNotes = notesById[current.id] ?? '';
+  const currentNotes = notesByKey[currentKey] ?? '';
 
   const headerText =
     viewMode === 'article'
@@ -2189,10 +2110,10 @@ function UpdateReviewView({
       ? `${current.bucket} · ${bucketStats?.bucketSize ?? 0} sections · ${bucketStats?.approved ?? 0} approved · ${bucketStats?.rejected ?? 0} rejected · ${bucketStats?.unreviewed ?? 0} unreviewed`
       : `${current.bucket} — ${bucketStats?.indexInBucket}/${bucketStats?.bucketSize} in article · ${bucketStats?.approved} approved · ${bucketStats?.rejected} rejected · ${bucketStats?.unreviewed} unreviewed`;
 
-  const stageBadge: { text: string; color: BadgeColor } =
-    opener.stage === 'review-1st'
-      ? { text: '1st pass', color: 'gray' }
-      : { text: '2nd pass', color: 'gray' };
+  const stageBadge: { text: string; color: BadgeColor } = {
+    text: 'Review',
+    color: 'gray',
+  };
   const updateChip: { text: string; color: BadgeColor } | null =
     current.updateType === 'new'
       ? { text: 'new section', color: 'blue' }
@@ -2277,13 +2198,13 @@ function UpdateReviewView({
                     ? {
                         text: 'approved',
                         color: 'green',
-                        tooltip: reviewerLabel(reviewers[current.id], 'approved'),
+                        tooltip: reviewerLabel(reviewers[currentKey], 'approved'),
                       }
                     : currentStatus === 'rejected'
                       ? {
                           text: 'rejected',
                           color: 'red',
-                          tooltip: reviewerLabel(reviewers[current.id], 'rejected'),
+                          tooltip: reviewerLabel(reviewers[currentKey], 'rejected'),
                         }
                       : null
                 }
@@ -2358,7 +2279,7 @@ function UpdateReviewView({
 
               <DecisionNoteField
                 value={currentNotes}
-                onChange={(v) => setNotesById((prev) => ({ ...prev, [current.id]: v }))}
+                onChange={(v) => setNotesByKey((prev) => ({ ...prev, [currentKey]: v }))}
                 placeholder="Decision rationale (optional — saved when you approve or reject)"
               />
 
@@ -2432,13 +2353,6 @@ function UpdateReviewView({
                 disabled={submitting}
               >
                 Approve (A)
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => decideAndBacklog()}
-                disabled={submitting}
-              >
-                Approve to backlog (B)
               </Button>
             </>
           ) : (
@@ -2557,8 +2471,12 @@ function UpdateArticleViewBody({
   initialComments: ReviewCommentRecord[];
   viewerEmail?: string;
 }) {
-  const approved = articleSections.filter((s) => reviews[s.id] === 'approved').length;
-  const rejected = articleSections.filter((s) => reviews[s.id] === 'rejected').length;
+  const approved = articleSections.filter(
+    (s) => reviews[s.sectionKey ?? ''] === 'approved',
+  ).length;
+  const rejected = articleSections.filter(
+    (s) => reviews[s.sectionKey ?? ''] === 'rejected',
+  ).length;
   return (
     <>
       <SharedHeader
@@ -2606,7 +2524,8 @@ function UpdateArticleViewBody({
           </thead>
           <tbody>
             {articleSections.map((s) => {
-              const status = reviews[s.id];
+              const sectionKey = s.sectionKey ?? '';
+              const status = reviews[sectionKey];
               const tint =
                 status === 'approved'
                   ? APPROVED_TINT
@@ -2653,7 +2572,7 @@ function UpdateArticleViewBody({
                         type="button"
                         title={
                           status === 'approved'
-                            ? `${reviewerLabel(reviewers[s.id], 'approved')} — click to clear`
+                            ? `${reviewerLabel(reviewers[sectionKey], 'approved')} — click to clear`
                             : 'Approve'
                         }
                         style={decideButton(status === 'approved', 'approve')}
@@ -2666,7 +2585,7 @@ function UpdateArticleViewBody({
                         type="button"
                         title={
                           status === 'rejected'
-                            ? `${reviewerLabel(reviewers[s.id], 'rejected')} — click to clear`
+                            ? `${reviewerLabel(reviewers[sectionKey], 'rejected')} — click to clear`
                             : 'Reject'
                         }
                         style={decideButton(status === 'rejected', 'reject')}

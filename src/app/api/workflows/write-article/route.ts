@@ -14,7 +14,7 @@
  *     }
  *
  * Per-article validation:
- *   - the article exists in newArticleSuggestions
+ *   - the article exists in consolidatedArticles
  *   - at least one source row is attached
  * The chosen model's provider is checked once at the request level.
  *
@@ -29,7 +29,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { listArticleSourcesForArticleAsAdmin } from '@/lib/data/article-sources';
 import { createWritingRunAsAdmin } from '@/lib/data/article-writing';
-import { getNewArticleSuggestionByIdAsAdmin } from '@/lib/data/articles';
+import { getConsolidatedArticleByIdAsAdmin } from '@/lib/data/articles';
 import { getSpecialty } from '@/lib/data/specialties';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
 
   const outcomes: EnqueueOutcome[] = [];
   for (const articleRecordId of ids) {
-    const article = await getNewArticleSuggestionByIdAsAdmin(articleRecordId);
+    const article = await getConsolidatedArticleByIdAsAdmin(articleRecordId);
     if (!article || article.specialtySlug !== slug) {
       outcomes.push({ articleRecordId, status: 'skipped', reason: 'NOT_FOUND' });
       continue;

@@ -71,28 +71,61 @@ export async function getConsolidatedSectionParentArticleId(
 export async function hasOtherApprovedSectionsForParent(
   slug: string,
   parentArticleId: string,
-  excludeSectionId: string,
+  excludeSectionKey: string,
 ): Promise<boolean> {
   const pb = await userClient();
   const sections = await pb
     .collection<ConsolidatedSectionRecord>('consolidatedSections')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
-  const siblingIds = new Set(
+  const siblingKeys = new Set(
     sections
-      .filter((s) => s.articleId === parentArticleId && s.id !== excludeSectionId)
-      .map((s) => s.id),
+      .filter(
+        (s) =>
+          s.articleId === parentArticleId &&
+          s.sectionKey &&
+          s.sectionKey !== excludeSectionKey,
+      )
+      .map((s) => s.sectionKey),
   );
-  if (siblingIds.size === 0) return false;
-  // sectionReviews don't carry articleId, so join via sectionRecordId.
+  if (siblingKeys.size === 0) return false;
+  // sectionReviews don't carry articleId, so join via current siblings'
+  // stable sectionKey. PB row ids can change after consolidation re-runs.
   const reviews = await pb
     .collection<SectionReviewRecord>('sectionReviews')
     .getFullList({ filter: `specialtySlug = "${slug}" && status = "approved"` });
   for (const r of reviews) {
-    if (siblingIds.has(r.sectionRecordId)) {
+    if (siblingKeys.has(r.sectionKey)) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * Returns the list of `sectionKey`s whose review rows were actually
+ * deleted, so the caller can clear matching optimistic patches without
+ * waiting for PB realtime.
+ */
+export async function clearApprovedSectionReviewsForParent(
+  slug: string,
+  parentArticleId: string,
+): Promise<string[]> {
+  const pb = await userClient();
+  const sections = await pb
+    .collection<ConsolidatedSectionRecord>('consolidatedSections')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  const sectionKeys = new Set(
+    sections
+      .filter((s) => s.articleId === parentArticleId && s.sectionKey)
+      .map((s) => s.sectionKey),
+  );
+  if (sectionKeys.size === 0) return [];
+  const reviews = await pb
+    .collection<SectionReviewRecord>('sectionReviews')
+    .getFullList({ filter: `specialtySlug = "${slug}" && status = "approved"` });
+  const toDelete = reviews.filter((r) => sectionKeys.has(r.sectionKey));
+  await Promise.all(toDelete.map((r) => pb.collection('sectionReviews').delete(r.id)));
+  return toDelete.map((r) => r.sectionKey);
 }
 
 export async function listConsolidatedSections(

@@ -2,7 +2,8 @@
 
 import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useMemo, useState } from 'react';
-import type { ReviewCommentRecord } from '@/lib/pb/types';
+import type { ReviewCommentRecord, SectionReviewRecord } from '@/lib/pb/types';
+import { useApprovalState } from '@/lib/pb/use-approval-state';
 import {
   ArticleManagerModalV2,
   type ReviewerMap,
@@ -246,8 +247,8 @@ function buildArticleGroups(
     g.sectionCount++;
     if (s.updateType === 'new') g.newCount++;
     else if (s.updateType === 'update') g.updateCount++;
-    if (s.id) {
-      const r = reviews[s.id];
+    if (s.sectionKey) {
+      const r = reviews[s.sectionKey];
       if (r === 'approved') g.approvedCount++;
       else if (r === 'rejected') g.rejectedCount++;
       else g.unreviewedCount++;
@@ -388,6 +389,7 @@ export function SectionsView({
   titleOriginLookup,
   initialReviews,
   initialReviewers,
+  initialReviewRows,
   initialCommentsBySection,
   initialCommentsByParentArticle,
   initialNotesBySection,
@@ -399,6 +401,7 @@ export function SectionsView({
   titleOriginLookup: TitleOriginLookup;
   initialReviews: ReviewMap;
   initialReviewers: ReviewerMap;
+  initialReviewRows: SectionReviewRecord[];
   initialCommentsBySection: Record<string, ReviewCommentRecord[]>;
   initialCommentsByParentArticle: Record<string, ReviewCommentRecord[]>;
   initialNotesBySection: Record<string, string>;
@@ -409,8 +412,29 @@ export function SectionsView({
   // Local toggle — no URL sync. Defaults to the article-grouped view
   // (editors usually navigate by parent article first).
   const [grouping, setGrouping] = useState<'section' | 'article'>('article');
-  const [reviews, setReviews] = useState<ReviewMap>(initialReviews);
-  const [reviewers, setReviewers] = useState<ReviewerMap>(initialReviewers);
+  const approval = useApprovalState(slug, { sectionReviews: initialReviewRows });
+  const reviews = useMemo<ReviewMap>(() => {
+    const out: ReviewMap = {};
+    for (const r of approval.sectionReviewRows) {
+      if (r.sectionKey) out[r.sectionKey] = r.status;
+    }
+    return out;
+  }, [approval.sectionReviewRows]);
+  const reviewers = useMemo<ReviewerMap>(() => {
+    const out: ReviewerMap = {};
+    for (const r of approval.sectionReviewRows) {
+      if (!r.sectionKey) continue;
+      out[r.sectionKey] = {
+        reviewerEmail: r.reviewerEmail,
+        reviewedAt: r.reviewedAt,
+      };
+    }
+    return out;
+  }, [approval.sectionReviewRows]);
+  // Snapshots are seeded into the hook; keep the props for the loader's
+  // sake.
+  void initialReviews;
+  void initialReviewers;
   const [reviewOpen, setReviewOpen] = useState(false);
   // Sections the open review modal walks. Set when the user clicks
   // Start review / Review all or a row.
@@ -469,7 +493,7 @@ export function SectionsView({
 
   const getRowStyle = (r: SectionRow) => {
     if (!r.id) return undefined;
-    const s = reviews[r.id];
+    const s = reviews[r.sectionKey ?? ''];
     if (s === 'approved') return { background: APPROVED_TINT };
     if (s === 'rejected') return { background: REJECTED_TINT };
     return bandByRowId.get(r.id) === 1 ? { background: ZEBRA_TINT } : undefined;
@@ -480,8 +504,8 @@ export function SectionsView({
     let rejected = 0;
     const unreviewedArticles = new Set<string>();
     for (const r of rows) {
-      if (!r.id) continue;
-      const s = reviews[r.id];
+      if (!r.sectionKey) continue;
+      const s = reviews[r.sectionKey];
       if (s === 'approved') approved++;
       else if (s === 'rejected') rejected++;
       else if (r.articleTitle) unreviewedArticles.add(r.articleTitle);
@@ -602,8 +626,7 @@ export function SectionsView({
             categoryLookup,
             titleOriginLookup,
             viewerEmail,
-            onReviewsChange: setReviews,
-            onReviewersChange: setReviewers,
+            onDecideSection: approval.decideSection,
           }}
           onClose={() => setReviewOpen(false)}
         />

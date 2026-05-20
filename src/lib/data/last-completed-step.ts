@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { createServerClient } from '@/lib/pb/server';
 import type {
   ArticleBacklogRecord,
@@ -40,8 +41,8 @@ const RANK_TABLE: ReadonlyArray<{ label: string; color: LastStepColor }> = [
   { label: 'Milestones extracted', color: 'blue' },
   { label: 'Mapping done', color: 'purple' },
   { label: 'Consolidations done', color: 'yellow' },
-  { label: '2nd consolidation (articles)', color: 'yellow' },
-  { label: '2nd consolidation (sections)', color: 'yellow' },
+  { label: 'Article consolidation done', color: 'yellow' },
+  { label: 'Section consolidation done', color: 'yellow' },
   { label: 'Literature search done', color: 'yellow' },
   { label: 'New articles reviewed', color: 'green' },
   { label: 'Article updates reviewed', color: 'green' },
@@ -57,10 +58,12 @@ type Signals = {
   totalCodeCount: number;
   consolidatedArticleCount: number;
   consolidatedSectionCount: number;
-  approvedArticleCount: number;
-  approvedSectionCount: number;
-  approvedArticleIds: string[];
-  publishedBacklogIds: Set<string>;
+  decidedArticleCount: number;
+  decidedSectionCount: number;
+  articleApprovalsHaveBacklog: boolean;
+  sectionApprovalsHaveBacklog: boolean;
+  currentBacklogKeys: Set<string>;
+  publishedBacklogKeys: Set<string>;
   overrides: Record<string, boolean>;
   skipped: Record<string, boolean>;
 };
@@ -114,13 +117,15 @@ function resolveLastStep(s: Signals): LastStep {
     bool(k.literature_search);
   const r8_articlesReviewed =
     s.consolidatedArticleCount > 0 &&
-    s.approvedArticleCount === s.consolidatedArticleCount;
+    s.decidedArticleCount === s.consolidatedArticleCount &&
+    s.articleApprovalsHaveBacklog;
   const r9_sectionsReviewed =
     s.consolidatedSectionCount > 0 &&
-    s.approvedSectionCount === s.consolidatedSectionCount;
+    s.decidedSectionCount === s.consolidatedSectionCount &&
+    s.sectionApprovalsHaveBacklog;
   const r10_backlogPublished =
-    s.approvedArticleIds.length > 0 &&
-    s.approvedArticleIds.every((id) => s.publishedBacklogIds.has(id));
+    s.currentBacklogKeys.size > 0 &&
+    Array.from(s.currentBacklogKeys).every((key) => s.publishedBacklogKeys.has(key));
 
   const flags = [
     false, // rank 0 ("Not started") is the fallback
@@ -151,6 +156,102 @@ function resolveLastStep(s: Signals): LastStep {
   return { rank: highest, ...RANK_TABLE[highest] };
 }
 
+function reviewCompletionSignals(input: {
+  slug: string;
+  articles: Pick<
+    ConsolidatedArticleRecord,
+    'articleKey' | 'articleTitle' | 'articleId' | 'category'
+  >[];
+  sections: Pick<
+    ConsolidatedSectionRecord,
+    'sectionKey' | 'articleTitle' | 'articleId' | 'sectionName' | 'sectionId' | 'category'
+  >[];
+  articleReviews: ArticleReviewRecord[];
+  sectionReviews: SectionReviewRecord[];
+  backlog: ArticleBacklogRecord[];
+}): Pick<
+  Signals,
+  | 'decidedArticleCount'
+  | 'decidedSectionCount'
+  | 'articleApprovalsHaveBacklog'
+  | 'sectionApprovalsHaveBacklog'
+  | 'currentBacklogKeys'
+  | 'publishedBacklogKeys'
+> {
+  const articleReviewsByKey = new Map(
+    input.articleReviews.filter((r) => r.articleKey).map((r) => [r.articleKey, r]),
+  );
+  const sectionReviewsByKey = new Map(
+    input.sectionReviews.filter((r) => r.sectionKey).map((r) => [r.sectionKey, r]),
+  );
+  const backlogByKey = new Map(
+    input.backlog.filter((r) => r.articleKey).map((r) => [r.articleKey, r]),
+  );
+
+  let decidedArticleCount = 0;
+  let articleApprovalsHaveBacklog = true;
+  for (const article of input.articles) {
+    const key =
+      article.articleKey ||
+      computeArticleKey({
+        specialtySlug: input.slug,
+        articleTitle: article.articleTitle,
+        articleId: article.articleId,
+        category: article.category,
+      });
+    if (!key) continue;
+    const review = articleReviewsByKey.get(key);
+    if (!review) continue;
+    decidedArticleCount += 1;
+    if (review.status === 'approved' && backlogByKey.get(key)?.type !== 'new') {
+      articleApprovalsHaveBacklog = false;
+    }
+  }
+
+  let decidedSectionCount = 0;
+  let sectionApprovalsHaveBacklog = true;
+  for (const section of input.sections) {
+    const key =
+      section.sectionKey ||
+      computeSectionKey({
+        specialtySlug: input.slug,
+        articleTitle: section.articleTitle,
+        articleId: section.articleId,
+        sectionName: section.sectionName,
+        sectionId: section.sectionId,
+        category: section.category,
+      });
+    if (!key) continue;
+    const review = sectionReviewsByKey.get(key);
+    if (!review) continue;
+    decidedSectionCount += 1;
+    if (
+      review.status === 'approved' &&
+      (!section.articleId ||
+        backlogByKey.get(`upd::${section.articleId}`)?.type !== 'update')
+    ) {
+      sectionApprovalsHaveBacklog = false;
+    }
+  }
+
+  const currentBacklogKeys = new Set<string>();
+  const publishedBacklogKeys = new Set<string>();
+  for (const row of input.backlog) {
+    if (!row.articleKey) continue;
+    currentBacklogKeys.add(row.articleKey);
+    if (row.status === 'published') publishedBacklogKeys.add(row.articleKey);
+  }
+
+  return {
+    decidedArticleCount,
+    decidedSectionCount,
+    articleApprovalsHaveBacklog,
+    sectionApprovalsHaveBacklog,
+    currentBacklogKeys,
+    publishedBacklogKeys,
+  };
+}
+
 /**
  * Compute the highest-ranked completed step for a single specialty.
  * Parallel-fetches all the per-specialty signals + the override blob,
@@ -177,12 +278,14 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
     pb
       .collection<CodeRecord>('codes')
       .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,mappedAt' }),
-    pb
-      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
-      .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id' }),
-    pb
-      .collection<ConsolidatedSectionRecord>('consolidatedSections')
-      .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id' }),
+    pb.collection<ConsolidatedArticleRecord>('consolidatedArticles').getFullList({
+      filter: `specialtySlug = "${slug}"`,
+      fields: 'articleKey,articleTitle,articleId,category',
+    }),
+    pb.collection<ConsolidatedSectionRecord>('consolidatedSections').getFullList({
+      filter: `specialtySlug = "${slug}"`,
+      fields: 'sectionKey,articleTitle,articleId,sectionName,sectionId,category',
+    }),
     pb
       .collection<ArticleReviewRecord>('articleReviews')
       .getFullList({ filter: `specialtySlug = "${slug}"` }),
@@ -206,9 +309,14 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
     if (row.status === 'completed') stageCompleted[row.stage] = true;
   }
 
-  const approvedArticleIds = reviews
-    .filter((r) => r.status === 'approved')
-    .map((r) => r.articleRecordId);
+  const reviewSignals = reviewCompletionSignals({
+    slug,
+    articles,
+    sections,
+    articleReviews: reviews,
+    sectionReviews,
+    backlog,
+  });
 
   return resolveLastStep({
     hasRun: latestRun !== null,
@@ -219,12 +327,7 @@ export async function getLastCompletedStep(slug: string): Promise<LastStep> {
     totalCodeCount: codeRows.length,
     consolidatedArticleCount: articles.length,
     consolidatedSectionCount: sections.length,
-    approvedArticleCount: approvedArticleIds.length,
-    approvedSectionCount: sectionReviews.filter((s) => s.status === 'approved').length,
-    approvedArticleIds,
-    publishedBacklogIds: new Set(
-      backlog.filter((b) => b.status === 'published').map((b) => b.articleRecordId),
-    ),
+    ...reviewSignals,
     overrides: (specialty?.pipelineStageOverrides ?? {}) as Record<string, boolean>,
     skipped: (specialty?.pipelineStageSkipped ?? {}) as Record<string, boolean>,
   });
@@ -262,12 +365,13 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
       pb
         .collection<CodeRecord>('codes')
         .getFullList({ fields: 'specialtySlug,mappedAt' }),
-      pb
-        .collection<ConsolidatedArticleRecord>('consolidatedArticles')
-        .getFullList({ fields: 'id,specialtySlug' }),
-      pb
-        .collection<ConsolidatedSectionRecord>('consolidatedSections')
-        .getFullList({ fields: 'id,specialtySlug' }),
+      pb.collection<ConsolidatedArticleRecord>('consolidatedArticles').getFullList({
+        fields: 'specialtySlug,articleKey,articleTitle,articleId,category',
+      }),
+      pb.collection<ConsolidatedSectionRecord>('consolidatedSections').getFullList({
+        fields:
+          'specialtySlug,sectionKey,articleTitle,articleId,sectionName,sectionId,category',
+      }),
       pb.collection<ArticleReviewRecord>('articleReviews').getFullList(),
       pb.collection<SectionReviewRecord>('sectionReviews').getFullList(),
       pb.collection<ArticleBacklogRecord>('articleBacklog').getFullList(),
@@ -310,43 +414,39 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
   }
 
   const articleCount = new Map<string, number>();
+  const articlesBySlug = new Map<string, ConsolidatedArticleRecord[]>();
   for (const a of articles) {
     articleCount.set(a.specialtySlug, (articleCount.get(a.specialtySlug) ?? 0) + 1);
+    const list = articlesBySlug.get(a.specialtySlug) ?? [];
+    list.push(a);
+    articlesBySlug.set(a.specialtySlug, list);
   }
   const sectionCount = new Map<string, number>();
+  const sectionsBySlug = new Map<string, ConsolidatedSectionRecord[]>();
   for (const s of sections) {
     sectionCount.set(s.specialtySlug, (sectionCount.get(s.specialtySlug) ?? 0) + 1);
+    const list = sectionsBySlug.get(s.specialtySlug) ?? [];
+    list.push(s);
+    sectionsBySlug.set(s.specialtySlug, list);
   }
 
-  const approvedArticleIdsBySlug = new Map<string, string[]>();
-  const approvedArticleCount = new Map<string, number>();
+  const reviewsBySlug = new Map<string, ArticleReviewRecord[]>();
   for (const r of reviews) {
-    if (r.status === 'approved') {
-      approvedArticleCount.set(
-        r.specialtySlug,
-        (approvedArticleCount.get(r.specialtySlug) ?? 0) + 1,
-      );
-      const arr = approvedArticleIdsBySlug.get(r.specialtySlug) ?? [];
-      arr.push(r.articleRecordId);
-      approvedArticleIdsBySlug.set(r.specialtySlug, arr);
-    }
+    const list = reviewsBySlug.get(r.specialtySlug) ?? [];
+    list.push(r);
+    reviewsBySlug.set(r.specialtySlug, list);
   }
-  const approvedSectionCount = new Map<string, number>();
+  const sectionReviewsBySlug = new Map<string, SectionReviewRecord[]>();
   for (const r of sectionReviews) {
-    if (r.status === 'approved') {
-      approvedSectionCount.set(
-        r.specialtySlug,
-        (approvedSectionCount.get(r.specialtySlug) ?? 0) + 1,
-      );
-    }
+    const list = sectionReviewsBySlug.get(r.specialtySlug) ?? [];
+    list.push(r);
+    sectionReviewsBySlug.set(r.specialtySlug, list);
   }
-  const publishedBacklogBySlug = new Map<string, Set<string>>();
+  const backlogBySlug = new Map<string, ArticleBacklogRecord[]>();
   for (const b of backlog) {
-    if (b.status === 'published') {
-      const set = publishedBacklogBySlug.get(b.specialtySlug) ?? new Set<string>();
-      set.add(b.articleRecordId);
-      publishedBacklogBySlug.set(b.specialtySlug, set);
-    }
+    const list = backlogBySlug.get(b.specialtySlug) ?? [];
+    list.push(b);
+    backlogBySlug.set(b.specialtySlug, list);
   }
 
   const out: Record<string, LastStep> = {};
@@ -358,6 +458,14 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
     for (const row of stageRows) {
       if (row.status === 'completed') stageCompleted[row.stage] = true;
     }
+    const reviewSignals = reviewCompletionSignals({
+      slug,
+      articles: articlesBySlug.get(slug) ?? [],
+      sections: sectionsBySlug.get(slug) ?? [],
+      articleReviews: reviewsBySlug.get(slug) ?? [],
+      sectionReviews: sectionReviewsBySlug.get(slug) ?? [],
+      backlog: backlogBySlug.get(slug) ?? [],
+    });
     out[slug] = resolveLastStep({
       hasRun: latestRun !== null,
       stageCompleted,
@@ -366,10 +474,7 @@ export async function listSpecialtyLastSteps(): Promise<Record<string, LastStep>
       totalCodeCount: totalCount.get(slug) ?? 0,
       consolidatedArticleCount: articleCount.get(slug) ?? 0,
       consolidatedSectionCount: sectionCount.get(slug) ?? 0,
-      approvedArticleCount: approvedArticleCount.get(slug) ?? 0,
-      approvedSectionCount: approvedSectionCount.get(slug) ?? 0,
-      approvedArticleIds: approvedArticleIdsBySlug.get(slug) ?? [],
-      publishedBacklogIds: publishedBacklogBySlug.get(slug) ?? new Set<string>(),
+      ...reviewSignals,
       overrides: (sp.pipelineStageOverrides ?? {}) as Record<string, boolean>,
       skipped: (sp.pipelineStageSkipped ?? {}) as Record<string, boolean>,
     });

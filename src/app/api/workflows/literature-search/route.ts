@@ -10,7 +10,7 @@
  * Responsibility:
  *   1. Verify auth + specialty.
  *   2. Resolve the Google API key (Gemini-only workflow).
- *   3. Find approved 2nd-pass new-article suggestions whose effective
+ *   3. Find approved new-article candidates whose effective
  *      backlog status is `waiting-for-sources` (no PB row, status=
  *      `unassigned`, or status=`waiting-for-sources` are all treated
  *      as waiting). When `articleRecordIds` is provided, the eligible
@@ -27,7 +27,7 @@ import { extractCodes } from '@/app/planning/_components/code-utils';
 import { requireUserResponse } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listNewArticleSuggestions } from '@/lib/data/articles';
+import { listConsolidatedArticles } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
@@ -61,16 +61,16 @@ export async function POST(req: NextRequest) {
   }
 
   const [suggestions, reviews, backlog] = await Promise.all([
-    listNewArticleSuggestions(slug),
+    listConsolidatedArticles(slug),
     listArticleReviews(slug),
     listArticleBacklog(slug),
   ]);
 
-  // Eligible articles: approved 2nd-pass + effective status is
+  // Eligible articles: approved new-article candidates whose effective status is
   // waiting-for-sources (no row, unassigned, or explicit waiting).
   // Reviews and backlog are keyed by stable `articleKey` (survives
   // consolidation re-runs); `filterIds` keeps using PB id because the
-  // frontend sends `articleRecordId` from the suggestion row.
+  // frontend sends `articleRecordId` from the consolidated row.
   const filterIds = Array.isArray(body.articleRecordIds)
     ? new Set(body.articleRecordIds.filter((s) => typeof s === 'string' && s.length > 0))
     : null;

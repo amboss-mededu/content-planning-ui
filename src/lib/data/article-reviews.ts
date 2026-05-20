@@ -51,7 +51,7 @@ export async function setArticleReview(
   status: ArticleReviewStatus,
   reviewerEmail: string | null,
   notes?: string,
-): Promise<void> {
+): Promise<string> {
   if (!articleKey) {
     throw new Error('setArticleReview: articleKey is required');
   }
@@ -75,17 +75,23 @@ export async function setArticleReview(
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
       await pb.collection('articleReviews').create(payload);
-      return;
+      return articleKey;
     }
     throw e;
   }
+  return articleKey;
 }
 
+/**
+ * Returns the articleKey that was deleted (or null if no row existed).
+ * Callers use this to clear matching optimistic patches without waiting
+ * for PB realtime to confirm.
+ */
 export async function clearArticleReview(
   slug: string,
   articleKey: string,
-): Promise<void> {
-  if (!articleKey) return;
+): Promise<string | null> {
+  if (!articleKey) return null;
   const pb = await userClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
@@ -93,8 +99,9 @@ export async function clearArticleReview(
       .collection<ArticleReviewRecord>('articleReviews')
       .getFirstListItem(filter);
     await pb.collection('articleReviews').delete(existing.id);
+    return articleKey;
   } catch (e) {
-    if (e instanceof ClientResponseError && e.status === 404) return;
+    if (e instanceof ClientResponseError && e.status === 404) return null;
     throw e;
   }
 }
