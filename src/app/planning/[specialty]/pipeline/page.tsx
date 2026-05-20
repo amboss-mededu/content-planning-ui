@@ -5,12 +5,7 @@ import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourceCount } from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
-import {
-  listCodeCategories,
-  listCodeCount,
-  listUnmappedCodeCount,
-  listUnmappedCodesForPicker,
-} from '@/lib/data/codes';
+import { deriveCodeCategories, listCodes } from '@/lib/data/codes';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import {
   getCurrentPipelineRun,
@@ -79,17 +74,14 @@ async function PipelineData({ slug }: { slug: string }) {
     sources,
     milestoneSources,
     stageCtxs,
-    unmappedCodeCount,
+    codes,
     libraryStats,
     specialty,
-    codeCategories,
-    unmappedCodePicker,
     mapCodesHistory,
     consolidatedArticleRecs,
     consolidatedSectionRecs,
     articleReviewRecs,
     articleBacklogRecs,
-    codeCount,
     articleSourceCount,
     stageOverrides,
     stageSkipped,
@@ -98,21 +90,30 @@ async function PipelineData({ slug }: { slug: string }) {
     listCodeSources(),
     listMilestoneSources(),
     getLatestStageContexts(slug),
-    listUnmappedCodeCount(slug),
+    listCodes(slug),
     getAmbossLibraryStats(),
     getSpecialty(slug),
-    listCodeCategories(slug),
-    listUnmappedCodesForPicker(slug),
     getMapCodesHistory(slug),
     listConsolidatedArticles(slug),
     listConsolidatedSections(slug),
     listArticleReviews(slug),
     listArticleBacklog(slug),
-    listCodeCount(slug),
     listArticleSourceCount(slug),
     getPipelineStageOverrides(slug),
     getPipelineStageSkipped(slug),
   ]);
+
+  // Derive variables in memory from the single codes list
+  const codeCount = codes.length;
+  const unmappedCodeCount = codes.filter((r) => !r.mappedAt || r.mappedAt === 0).length;
+  const codeCategories = deriveCodeCategories(codes);
+  const unmappedCodePicker = codes
+    .filter((r) => !r.mappedAt || r.mappedAt === 0)
+    .map((r) => ({
+      code: r.code,
+      description: r.description ?? null,
+      category: r.category ?? null,
+    }));
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,

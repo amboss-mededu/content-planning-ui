@@ -111,12 +111,7 @@ export type CodeCategorySummary = {
   readyForConsolidation: boolean;
 };
 
-export async function listCodeCategories(slug: string): Promise<CodeCategorySummary[]> {
-  await connection();
-  const pb = await userClient();
-  const rows = await pb
-    .collection<CodeRecord>('codes')
-    .getFullList({ filter: `specialtySlug = "${slug}"` });
+export function deriveCodeCategories(rows: CodeRecord[]): CodeCategorySummary[] {
   const totals = new Map<string, { total: number; unmapped: number }>();
   for (const r of rows) {
     const cat = r.category ?? '(uncategorized)';
@@ -137,6 +132,11 @@ export async function listCodeCategories(slug: string): Promise<CodeCategorySumm
       };
     })
     .sort((a, b) => a.category.localeCompare(b.category));
+}
+
+export async function listCodeCategories(slug: string): Promise<CodeCategorySummary[]> {
+  const codes = await listCodes(slug);
+  return deriveCodeCategories(codes);
 }
 
 // --- Writes (request-scoped: user edits) -----------------------------------

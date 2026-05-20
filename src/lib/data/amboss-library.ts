@@ -59,20 +59,21 @@ export async function listAmbossSectionIds(): Promise<Set<string>> {
 export async function getAmbossLibraryStats(): Promise<AmbossLibraryStats> {
   await connection();
   const pb = await userClient();
-  const [articles, sections] = await Promise.all([
+  const [articlesList, sectionsList] = await Promise.all([
     pb
       .collection<AmbossArticleRecord>('ambossArticles')
-      .getFullList({ fields: 'updatedAt' }),
+      .getList(1, 1, { sort: '-updatedAt', fields: 'updatedAt' }),
     pb
       .collection<AmbossSectionRecord>('ambossSections')
-      .getFullList({ fields: 'updatedAt' }),
+      .getList(1, 1, { sort: '-updatedAt', fields: 'updatedAt' }),
   ]);
-  let lastSyncedAt = 0;
-  for (const r of articles) if (r.updatedAt > lastSyncedAt) lastSyncedAt = r.updatedAt;
-  for (const r of sections) if (r.updatedAt > lastSyncedAt) lastSyncedAt = r.updatedAt;
+  const articleMax = articlesList.items[0]?.updatedAt ?? 0;
+  const sectionMax = sectionsList.items[0]?.updatedAt ?? 0;
+  const lastSyncedAt = Math.max(articleMax, sectionMax);
+
   return {
-    articles: articles.length,
-    sections: sections.length,
+    articles: articlesList.totalItems,
+    sections: sectionsList.totalItems,
     lastSyncedAt: lastSyncedAt ? new Date(lastSyncedAt) : null,
   };
 }
