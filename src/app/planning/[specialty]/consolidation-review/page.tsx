@@ -49,17 +49,99 @@ export default async function ConsolidationReviewPage({
 
 type CodeMetadataLookup = Record<
   string,
-  { description?: string; category?: string | undefined } | undefined
+  | {
+      description?: string;
+      category?: string | undefined;
+      coverageScore?: number;
+      existingArticleUpdates?: Array<{
+        articleTitle?: string;
+        articleId?: string;
+        sections?: Array<{
+          sectionTitle?: string;
+          sectionId?: string;
+          importance?: number;
+        }>;
+      }>;
+      newArticlesNeeded?: Array<{ articleTitle?: string; importance?: number }>;
+    }
+  | undefined
 >;
 
-function enrichCodes(codes: EmbeddedCode[], lookup: CodeMetadataLookup): EmbeddedCode[] {
+function firstCodeSuggestion(
+  metadata: NonNullable<CodeMetadataLookup[string]>,
+  context: {
+    articleTitle?: string;
+    articleId?: string;
+    sectionName?: string;
+    sectionId?: string;
+  },
+): Pick<EmbeddedCode, 'importance' | 'previouslySuggestedArticleTitle'> {
+  if (context.sectionName || context.sectionId) {
+    for (const update of metadata.existingArticleUpdates ?? []) {
+      const articleMatches = context.articleId
+        ? update.articleId === context.articleId ||
+          update.articleTitle === context.articleTitle
+        : !context.articleTitle || update.articleTitle === context.articleTitle;
+      if (!articleMatches) continue;
+      for (const section of update.sections ?? []) {
+        const sectionMatches = context.sectionId
+          ? section.sectionId === context.sectionId
+          : section.sectionTitle === context.sectionName;
+        if (!sectionMatches) continue;
+        return {
+          importance: section.importance,
+          previouslySuggestedArticleTitle: update.articleTitle,
+        };
+      }
+      return {
+        previouslySuggestedArticleTitle: update.articleTitle,
+      };
+    }
+  }
+
+  const articleSuggestion =
+    metadata.newArticlesNeeded?.find(
+      (article) => article.articleTitle === context.articleTitle,
+    ) ?? metadata.newArticlesNeeded?.[0];
+  if (articleSuggestion) {
+    return {
+      importance: articleSuggestion.importance,
+      previouslySuggestedArticleTitle: articleSuggestion.articleTitle,
+    };
+  }
+
+  const updateSuggestion = metadata.existingArticleUpdates?.[0];
+  return {
+    previouslySuggestedArticleTitle: updateSuggestion?.articleTitle,
+    importance: updateSuggestion?.sections?.find(
+      (section) => typeof section.importance === 'number',
+    )?.importance,
+  };
+}
+
+function enrichCodes(
+  codes: EmbeddedCode[],
+  lookup: CodeMetadataLookup,
+  context: {
+    articleTitle?: string;
+    articleId?: string;
+    sectionName?: string;
+    sectionId?: string;
+  },
+): EmbeddedCode[] {
   return codes.map((code) => {
     const metadata = lookup[code.code];
     if (!metadata) return code;
+    const suggestion = firstCodeSuggestion(metadata, context);
     return {
       ...code,
       description: code.description ?? metadata.description,
       category: code.category ?? metadata.category,
+      coverageScore: code.coverageScore ?? metadata.coverageScore,
+      importance: code.importance ?? suggestion.importance,
+      previouslySuggestedArticleTitle:
+        code.previouslySuggestedArticleTitle ??
+        suggestion.previouslySuggestedArticleTitle,
     };
   });
 }
@@ -69,7 +151,10 @@ function projectArticle(
   r: ConsolidatedArticle,
   codeMetadataLookup: CodeMetadataLookup,
 ): ArticleRow {
-  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup);
+  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup, {
+    articleTitle: r.articleTitle,
+    articleId: r.articleId,
+  });
   return {
     id: r.id,
     articleKey:
@@ -98,7 +183,12 @@ function projectSection(
   r: ConsolidatedSection,
   codeMetadataLookup: CodeMetadataLookup,
 ): SectionRow {
-  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup);
+  const codes = enrichCodes(extractCodes(r.codes), codeMetadataLookup, {
+    articleTitle: r.articleTitle,
+    articleId: r.articleId,
+    sectionName: r.sectionName,
+    sectionId: r.sectionId,
+  });
   const updateType: 'new' | 'update' | null =
     r.exists === true ? 'update' : r.exists === false ? 'new' : null;
   return {
@@ -162,6 +252,9 @@ async function ConsolidationReviewData({
     codeMetadataLookup[c.code] = {
       description: c.description,
       category: c.category,
+      coverageScore: c.depthOfCoverage,
+      existingArticleUpdates: c.existingArticleUpdates,
+      newArticlesNeeded: c.newArticlesNeeded,
     };
   }
 

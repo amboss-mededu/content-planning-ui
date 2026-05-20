@@ -52,19 +52,19 @@ export function CodeChip({
             <Text size="xs">{category}</Text>
           </Stack>
         )}
-        {entry.previouslySuggestedArticleTitle && (
-          <Stack space="xxs">
-            <Text size="xs" color="secondary" weight="bold">
-              Previously suggested article
-            </Text>
-            <Text size="xs">{entry.previouslySuggestedArticleTitle}</Text>
-          </Stack>
-        )}
         {entry.coverageScore !== undefined && (
-          <Text size="xs">Coverage score: {String(entry.coverageScore)}</Text>
+          <Text size="xs">Coverage: {String(entry.coverageScore)}</Text>
         )}
         {entry.importance !== undefined && (
           <Text size="xs">Importance: {String(entry.importance)}</Text>
+        )}
+        {entry.previouslySuggestedArticleTitle && (
+          <Stack space="xxs">
+            <Text size="xs" color="secondary" weight="bold">
+              Previously suggested article title
+            </Text>
+            <Text size="xs">{entry.previouslySuggestedArticleTitle}</Text>
+          </Stack>
         )}
       </Stack>
     </div>
@@ -184,23 +184,26 @@ function CategoryGroupChip({
           <thead>
             <tr>
               <th style={tableHeadStyle}>Code</th>
-              <th style={tableHeadStyle}>Previously suggested</th>
               <th style={{ ...tableHeadStyle, textAlign: 'right' }}>Coverage</th>
               <th style={{ ...tableHeadStyle, textAlign: 'right' }}>Importance</th>
+              <th style={tableHeadStyle}>Previous article title</th>
             </tr>
           </thead>
           <tbody>
             {entries.map((e) => (
               <tr key={e.code}>
                 <td style={tableCellStyle}>
-                  <div style={{ fontFamily: 'monospace', fontSize: 11 }}>{e.code}</div>
+                  <div>{e.description ?? e.code}</div>
                   {e.description && (
-                    <div style={{ color: 'rgb(80, 84, 100)' }}>{e.description}</div>
-                  )}
-                </td>
-                <td style={tableCellStyle}>
-                  {e.previouslySuggestedArticleTitle ?? (
-                    <span style={{ color: 'rgb(150, 152, 165)' }}>—</span>
+                    <div
+                      style={{
+                        color: 'rgb(120, 124, 138)',
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                      }}
+                    >
+                      {e.code}
+                    </div>
                   )}
                 </td>
                 <td style={{ ...tableCellStyle, textAlign: 'right' }}>
@@ -208,6 +211,11 @@ function CategoryGroupChip({
                 </td>
                 <td style={{ ...tableCellStyle, textAlign: 'right' }}>
                   {e.importance !== undefined ? String(e.importance) : '—'}
+                </td>
+                <td style={tableCellStyle}>
+                  {e.previouslySuggestedArticleTitle ?? (
+                    <span style={{ color: 'rgb(150, 152, 165)' }}>—</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -242,7 +250,7 @@ function CategoryGroupChip({
  * Collapsed chip-by-category renderer. Use when the flat code list is too
  * dense to scan (>= ~15 codes). Each category becomes one chip; hovering
  * reveals a per-code table with the same metadata the flat CodeChip popover
- * shows (code, previously suggested article title, coverage, importance).
+ * shows (description/code, coverage, importance, previous article title).
  */
 export function CategoryGroupedCodeList({
   codes,

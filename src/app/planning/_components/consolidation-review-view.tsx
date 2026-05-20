@@ -31,6 +31,7 @@ import {
 import type { ArticleRow } from './articles-view';
 import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
+import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import type { SectionRow } from './sections-view';
 import {
@@ -912,25 +913,21 @@ function CategoryRail({
                 <Text size="s" weight={isActive ? 'bold' : 'normal'}>
                   {cat}
                 </Text>
-                <Inline space="xxs" vAlignItems="center">
-                  {isConsolidating ? (
-                    <Badge text="Rebuilding…" color="yellow" />
-                  ) : (
-                    <>
-                      {allApproved && <Badge text="all approved" color="green" />}
-                      {!allApproved && hasOutput && (
-                        <Text size="xs" color="secondary">
-                          {approved}/{c.total} approved
-                        </Text>
-                      )}
-                      {mapping && !mapping.ready ? (
-                        <Text size="xs" color="secondary">
-                          {mapping.mapped}/{mapping.total} mapped
-                        </Text>
-                      ) : null}
-                    </>
-                  )}
-                </Inline>
+                {!isConsolidating ? (
+                  <Inline space="xxs" vAlignItems="center">
+                    {allApproved && <Badge text="all approved" color="green" />}
+                    {!allApproved && hasOutput && (
+                      <Text size="xs" color="secondary">
+                        {approved}/{c.total} approved
+                      </Text>
+                    )}
+                    {mapping && !mapping.ready ? (
+                      <Text size="xs" color="secondary">
+                        {mapping.mapped}/{mapping.total} mapped
+                      </Text>
+                    ) : null}
+                  </Inline>
+                ) : null}
               </button>
               {mapping?.ready ? (
                 <Button
@@ -939,7 +936,11 @@ function CategoryRail({
                   onClick={() => onStartConsolidation(cat, { hasOutput })}
                   disabled={isConsolidating}
                 >
-                  {getConsolidationActionLabel({ hasOutput, isConsolidating })}
+                  {isConsolidating ? (
+                    <ConsolidationProgressBadge />
+                  ) : (
+                    getConsolidationActionLabel({ hasOutput, isConsolidating })
+                  )}
                 </Button>
               ) : null}
             </div>
@@ -1011,37 +1012,6 @@ function CategoryDetailPane({
     bucket.articles.filter((a) => a.id && articleReviews[a.id] !== 'approved').length +
     bucket.sections.filter((s) => s.id && sectionReviews[s.id] !== 'approved').length;
 
-  if (isConsolidating) {
-    return (
-      <Stack space="m">
-        <Inline space="s" vAlignItems="center">
-          <Text size="m" weight="bold">
-            {category}
-          </Text>
-          <Badge text="Rebuilding…" color="yellow" />
-        </Inline>
-        <div
-          style={{
-            padding: 24,
-            border: '1px dashed rgb(228, 228, 234)',
-            borderRadius: 6,
-            background: 'rgb(252, 252, 254)',
-          }}
-        >
-          <Stack space="xs">
-            <Text size="s" weight="bold">
-              Rebuilding consolidation for this category…
-            </Text>
-            <Text size="xs" color="secondary">
-              Previous output has been cleared. The new rows will appear here once the run
-              finishes (usually a few seconds).
-            </Text>
-          </Stack>
-        </div>
-      </Stack>
-    );
-  }
-
   return (
     <Stack space="m">
       <Inline space="s" vAlignItems="center">
@@ -1059,7 +1029,11 @@ function CategoryDetailPane({
           onClick={() => onStartConsolidation(category, { hasOutput })}
           disabled={isConsolidating}
         >
-          {getConsolidationActionLabel({ hasOutput, isConsolidating })}
+          {isConsolidating ? (
+            <ConsolidationProgressBadge />
+          ) : (
+            getConsolidationActionLabel({ hasOutput, isConsolidating })
+          )}
         </Button>
       </Inline>
 
