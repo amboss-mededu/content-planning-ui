@@ -21,6 +21,7 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleLitSearchRunRecord,
   ArticleSourceRecord,
   PredatoryJournalRisk,
   ReviewCommentRecord,
@@ -45,6 +46,7 @@ import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import { LitSearchPhase1Panel } from './lit-search-phase1-panel';
 import {
   canApproveSources,
   canDraft,
@@ -53,7 +55,6 @@ import {
   missingCortexIdCount,
   phaseFromStatus,
 } from './pipeline-stage-gates';
-import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
 
@@ -129,6 +130,7 @@ export type ManagerOpener =
        *  clicks). Falls back to `currentStatus` if missing. */
       currentBacklogRow?: ArticleBacklogRecord;
       sources: ArticleSourceRecord[];
+      litSearchRuns?: ArticleLitSearchRunRecord[];
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
       categoryLookup: CategoryLookup;
@@ -608,6 +610,7 @@ function BacklogManagerView({
     currentStatus: openerCurrentStatus,
     currentBacklogRow,
     sources: openerSources,
+    litSearchRuns: openerLitSearchRuns,
     initialComments,
     initialNotes,
     categoryLookup,
@@ -743,7 +746,9 @@ function BacklogManagerView({
             phase={viewedPhase}
             status={currentStatus}
             sources={sources}
+            litSearchRuns={openerLitSearchRuns ?? []}
             slug={slug}
+            articleKey={article.articleKey}
             articleRecordId={article.id}
             viewerEmail={viewerEmail}
             onAdvance={pickStatus}
@@ -1669,7 +1674,9 @@ function PhaseBody({
   phase,
   status,
   sources,
+  litSearchRuns,
   slug,
+  articleKey,
   articleRecordId,
   viewerEmail,
   onAdvance,
@@ -1684,7 +1691,9 @@ function PhaseBody({
    *  no-op anyway. */
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
+  litSearchRuns: ArticleLitSearchRunRecord[];
   slug: string;
+  articleKey: string;
   articleRecordId: string;
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
@@ -1693,18 +1702,22 @@ function PhaseBody({
 
   if (phase === 1) {
     const litEligible = canRunLitSearch(status, sources.length);
+    if (litEligible) {
+      return (
+        <LitSearchPhase1Panel
+          slug={slug}
+          articleKey={articleKey}
+          articleRecordId={articleRecordId}
+          copy={copy}
+          initialRuns={litSearchRuns}
+        />
+      );
+    }
     return (
       <Stack space="m">
         <Text color="secondary">
-          {litEligible
-            ? copy
-            : `Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
+          {`Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
         </Text>
-        {litEligible ? (
-          <Inline space="s" vAlignItems="center">
-            <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
-          </Inline>
-        ) : null}
       </Stack>
     );
   }

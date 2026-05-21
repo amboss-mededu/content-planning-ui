@@ -7,6 +7,7 @@ import { setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleLitSearchRunRecord,
   ArticleReviewRecord,
   ArticleSourceRecord,
   ArticleWritingRunRecord,
@@ -14,6 +15,7 @@ import type {
   SectionReviewRecord,
 } from '@/lib/pb/types';
 import { useApprovalState } from '@/lib/pb/use-approval-state';
+import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
@@ -28,11 +30,13 @@ import {
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { canRunLitSearch } from './pipeline-stage-gates';
 import { RegisterCortexButton } from './register-cortex-button';
 import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
+import { useLitSearchState } from './use-running-lit-search-articles';
 
 export type BacklogRow = {
   /** For type='new': PB id of the underlying newArticleSuggestions row.
@@ -102,6 +106,7 @@ export function BacklogView({
   initialArticleReviewRows,
   initialSectionReviewRows,
   initialSourcesByArticleKey,
+  initialLitSearchRuns,
   initialCommentsByArticle,
   initialWritingRuns,
   viewerEmail,
@@ -114,6 +119,7 @@ export function BacklogView({
   initialArticleReviewRows: ArticleReviewRecord[];
   initialSectionReviewRows: SectionReviewRecord[];
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
+  initialLitSearchRuns: ArticleLitSearchRunRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
   viewerEmail?: string;
@@ -144,6 +150,36 @@ export function BacklogView({
   const backlog = approval.backlogByKey;
   const articleReviews = approval.articleReviewByKey;
   const sectionReviews = approval.sectionReviewByKey;
+  const initialSources = useMemo(
+    () => Object.values(initialSourcesByArticleKey).flat(),
+    [initialSourcesByArticleKey],
+  );
+  const liveSources = useLiveCollection<ArticleSourceRecord>(
+    'articleSources',
+    initialSources,
+    { filter: `specialtySlug = "${slug}"` },
+  );
+  const sourcesByArticleKey = useMemo(() => {
+    const out: Record<string, ArticleSourceRecord[]> = {};
+    for (const source of liveSources) {
+      const key = source.articleKey;
+      if (!key) continue;
+      if (!out[key]) out[key] = [];
+      out[key].push(source);
+    }
+    for (const key of Object.keys(out)) {
+      out[key].sort((a, b) => {
+        const ar = a.rank ?? Number.POSITIVE_INFINITY;
+        const br = b.rank ?? Number.POSITIVE_INFINITY;
+        if (ar !== br) return ar - br;
+        return a.title.localeCompare(b.title);
+      });
+    }
+    return out;
+  }, [liveSources]);
+  const litSearchState = useLitSearchState(initialLitSearchRuns, {
+    filter: `specialtySlug = "${slug}"`,
+  });
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
   // Inline banner for Remove-approval / status-change failures. Without
@@ -177,6 +213,10 @@ export function BacklogView({
     (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
+  const isLitSearchRunning = useCallback(
+    (articleKey: string): boolean => litSearchState.inFlight.has(articleKey),
+    [litSearchState.inFlight],
+  );
 
   const memberRows = useMemo(() => {
     const out: BacklogRow[] = [];
@@ -186,7 +226,12 @@ export function BacklogView({
       if (row.type === 'new') {
         if ((membership.type ?? 'new') !== 'new') continue;
         if (articleReviews[row.articleKey]?.status !== 'approved') continue;
-        out.push(row);
+        const sources = sourcesByArticleKey[row.articleKey] ?? [];
+        out.push({
+          ...row,
+          sourcesCount: sources.length,
+          registeredSourcesCount: sources.filter((s) => !!s.cortexSourceId).length,
+        });
         continue;
       }
       if (membership.type !== 'update') continue;
@@ -198,7 +243,7 @@ export function BacklogView({
       out.push({ ...row, sections: approvedSections });
     }
     return out;
-  }, [rows, backlog, articleReviews, sectionReviews]);
+  }, [rows, backlog, articleReviews, sectionReviews, sourcesByArticleKey]);
 
   const filtered = useMemo(() => {
     let out = memberRows;
@@ -220,13 +265,17 @@ export function BacklogView({
     let inProgress = 0;
     let waiting = 0;
     for (const r of memberRows) {
+      if (isLitSearchRunning(r.articleKey)) {
+        inProgress++;
+        continue;
+      }
       const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
     }
     return { published, inProgress, waiting };
-  }, [memberRows, statusOf]);
+  }, [memberRows, statusOf, isLitSearchRunning]);
 
   // Optimistic state was removed when this view moved to PB realtime.
   // The handlers below are thin: write, log on failure, let realtime
@@ -379,13 +428,22 @@ export function BacklogView({
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => STATUS_LABEL[statusOf(r.articleKey)],
+      accessor: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
-      filterValue: (r) => STATUS_LABEL[statusOf(r.articleKey)],
+      filterValue: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
         const s = statusOf(r.articleKey);
+        if (isLitSearchRunning(r.articleKey)) {
+          return <LitSearchProgressBadge />;
+        }
         return (
           <span
             style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
@@ -444,14 +502,26 @@ export function BacklogView({
       width: 180,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => NEXT_ACTION[statusOf(r.articleKey)],
+      accessor: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : NEXT_ACTION[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: Array.from(
         new Set(Object.values(NEXT_ACTION).filter((v) => v !== '—')),
       ).map((v) => ({ value: v, label: v })),
-      filterValue: (r) => NEXT_ACTION[statusOf(r.articleKey)],
-      render: (r) => <Text>{NEXT_ACTION[statusOf(r.articleKey)]}</Text>,
+      filterValue: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : NEXT_ACTION[statusOf(r.articleKey)],
+      render: (r) => (
+        <Text>
+          {isLitSearchRunning(r.articleKey)
+            ? 'Search in progress...'
+            : NEXT_ACTION[statusOf(r.articleKey)]}
+        </Text>
+      ),
     },
     {
       key: 'assignee',
@@ -518,6 +588,9 @@ export function BacklogView({
             </Text>
           );
         }
+        if (isLitSearchRunning(r.articleKey)) {
+          return <LitSearchProgressBadge />;
+        }
         if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
           return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
         }
@@ -582,11 +655,17 @@ export function BacklogView({
     ? memberRows.find((r) => r.id === drawerArticleId)
     : null;
   const drawerSources = drawerRow?.articleKey
-    ? (initialSourcesByArticleKey[drawerRow.articleKey] ?? [])
+    ? (sourcesByArticleKey[drawerRow.articleKey] ?? [])
     : [];
   const managerRow = managerArticleId
     ? (memberRows.find((r) => r.id === managerArticleId) ?? null)
     : null;
+  const managerLatestLitSearchRun = managerRow?.articleKey
+    ? litSearchState.latestByArticleKey.get(managerRow.articleKey)
+    : undefined;
+  const managerLitSearchRuns = managerLatestLitSearchRun
+    ? [managerLatestLitSearchRun]
+    : initialLitSearchRuns.filter((run) => run.articleKey === managerRow?.articleKey);
 
   return (
     <Stack space="m">
@@ -673,7 +752,8 @@ export function BacklogView({
             article: managerRow,
             currentStatus: statusOf(managerRow.articleKey),
             currentBacklogRow: backlog[managerRow.articleKey],
-            sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
+            sources: sourcesByArticleKey[managerRow.articleKey] ?? [],
+            litSearchRuns: managerLitSearchRuns,
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,

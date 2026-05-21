@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Modal, Stack, Text } from '@amboss/design-system';
+import { Badge, Modal, Text } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
 import type { ArticleSourceRecord, PredatoryJournalRisk } from '@/lib/pb/types';
 
@@ -75,14 +75,7 @@ export function ArticleSourcesDrawer({
     >
       <Modal.Stack>
         {sources.length === 0 ? (
-          <Stack space="s">
-            <Text>No sources attached yet.</Text>
-            <Text size="s" color="secondary">
-              The literature-search action will be wired up in a follow-up. For now
-              sources can be inserted directly via the PocketBase admin UI keyed by this
-              article's record id.
-            </Text>
-          </Stack>
+          <Text>No sources attached yet.</Text>
         ) : (
           <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
             <table style={tableStyle}>

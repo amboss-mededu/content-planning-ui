@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
+import { listArticleLitSearchRuns } from '@/lib/data/article-lit-search-runs';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
 import { listLatestWritingRunsForArticles } from '@/lib/data/article-writing';
@@ -120,6 +121,7 @@ async function BacklogData({ slug }: { slug: string }) {
     sectionReviewRecs,
     backlogRecs,
     sourcesByKey,
+    litSearchRuns,
     codeRecs,
     users,
     commentsByArticleKind,
@@ -132,6 +134,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listSectionReviews(slug),
     listArticleBacklog(slug),
     listArticleSourcesByArticleKey(slug),
+    listArticleLitSearchRuns(slug),
     listCodes(slug),
     listAssignableUsers(),
     listReviewComments(slug, 'article'),
@@ -213,6 +216,7 @@ async function BacklogData({ slug }: { slug: string }) {
       initialArticleReviewRows={Object.values(reviewRecs)}
       initialSectionReviewRows={Object.values(sectionReviewRecs)}
       initialSourcesByArticleKey={sourcesByKey}
+      initialLitSearchRuns={litSearchRuns}
       initialCommentsByArticle={initialCommentsByArticle}
       initialWritingRuns={writingRunsByArticle}
       viewerEmail={user?.email ?? undefined}

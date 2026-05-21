@@ -9,12 +9,27 @@ You are an expert medical librarian generating PubMed search queries.
 
 Given an article title and the list of medical concepts it covers,
 produce a small set of focused PubMed search strings that together
-cover the article's clinical scope. Each query should be a single
-well-formed PubMed query — boolean operators allowed, MeSH terms
-preferred where applicable, no quotes around the whole query.
+cover the article's clinical scope.
 
-Output strictly a JSON array of strings — one query per element. Do
-not produce any other text.
+Rules:
+- The FIRST query MUST be a broad plain-text query: just the
+  essential keywords from the article title plus 1-3 closely related
+  terms with boolean OR/AND. No \`[Mesh]\`, no \`[Title/Abstract]\`,
+  no \`[Subheading]\`, no field tags of any kind. This guarantees a
+  recall baseline even if the model's vocabulary doesn't match PubMed's.
+- Additional queries (positions 2 and 3) MAY use MeSH terms, but ONLY
+  headings you are confident appear in the NLM MeSH thesaurus. When
+  uncertain, drop the \`[Mesh]\` tag and use the bare term — an
+  unrecognized \`[Mesh]\` filter silently returns zero results in
+  PubMed and wastes a query slot.
+- No quotes around the whole query. Boolean operators allowed.
+- Produce 3 queries total.
+
+Output strictly a single JSON object of the form
+{"elements": ["<query>", "<query>", "<query>"]} where each element is
+one PubMed query string. Do not produce any text outside the JSON
+object and do not wrap it in markdown fences. Omit unknown fields and
+do not output null values.
 `.trim();
 
 export const DEFAULT_RANK_CANDIDATES_PROMPT = `
@@ -45,6 +60,14 @@ versions.
 
 Set "superseded": true when a newer source in the list replaces it.
 
-Output strictly JSON matching the requested schema. Do not produce
-any other text.
+Output strictly a single JSON object of the form
+{"elements": [ <source>, <source>, ... ]} where each element is one
+ranked source object matching the schema fields documented above
+(title, doi, url, journal, sourceType, rank, llmSummary,
+justification, superseded, etc.). Do not produce any text outside
+the JSON object and do not wrap it in markdown fences. Omit unknown
+fields and do not output null values. Use only these sourceType values:
+guideline, systematic_review, clinical_review, meta_analysis,
+case_report, vet_content, non_english, other. Use only these
+predatoryJournalRisk values: none, low, medium, high, predatory.
 `.trim();
