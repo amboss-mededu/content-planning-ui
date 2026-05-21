@@ -25,8 +25,10 @@ export type ReviewPatch = {
 
 export type BacklogPatch = {
   key: string;
-  /** null = tombstone. Object = synthetic backlog row of this type. */
-  override: { type: 'new' | 'update' } | null;
+  /** null = tombstone. Object = override fields onto the live row (or
+   *  synthesize a row with these fields if none exists yet). At least
+   *  one of `type` / `assigneeEmail` must be set. */
+  override: { type?: 'new' | 'update'; assigneeEmail?: string } | null;
   appliedAt: number;
 };
 
@@ -88,12 +90,18 @@ export function applyBacklogPatches(
       continue;
     }
     if (p.override === null) continue;
-    out.push({ ...row, type: p.override.type });
+    out.push({
+      ...row,
+      ...(p.override.type !== undefined ? { type: p.override.type } : {}),
+      ...(p.override.assigneeEmail !== undefined
+        ? { assigneeEmail: p.override.assigneeEmail }
+        : {}),
+    });
   }
   for (const [k, p] of latest.entries()) {
     if (seen.has(k)) continue;
     if (p.override === null) continue;
-    out.push(synthesizeBacklogRow(k, p.override.type));
+    out.push(synthesizeBacklogRow(k, p.override));
   }
   return out;
 }
@@ -176,7 +184,20 @@ export function reconcileBacklogPatches(
       if (live !== undefined) keep.add(p);
       continue;
     }
-    if (!live || live.type !== p.override.type) keep.add(p);
+    if (!live) {
+      keep.add(p);
+      continue;
+    }
+    if (p.override.type !== undefined && live.type !== p.override.type) {
+      keep.add(p);
+      continue;
+    }
+    if (
+      p.override.assigneeEmail !== undefined &&
+      (live.assigneeEmail ?? '') !== p.override.assigneeEmail
+    ) {
+      keep.add(p);
+    }
   }
   const next = patches.filter((p) => keep.has(p));
   return next.length === patches.length ? patches : next;
@@ -224,7 +245,10 @@ function synthesizeReviewRow(
   } as unknown as SectionReviewRecord;
 }
 
-function synthesizeBacklogRow(key: string, type: 'new' | 'update'): ArticleBacklogRecord {
+function synthesizeBacklogRow(
+  key: string,
+  override: { type?: 'new' | 'update'; assigneeEmail?: string },
+): ArticleBacklogRecord {
   return {
     id: `__pending::articleBacklog::${key}`,
     collectionId: 'articleBacklog',
@@ -234,9 +258,9 @@ function synthesizeBacklogRow(key: string, type: 'new' | 'update'): ArticleBackl
     specialtySlug: '',
     articleKey: key,
     articleRecordId: '',
-    type,
+    type: override.type ?? 'new',
     status: 'waiting-for-sources',
-    assigneeEmail: '',
+    assigneeEmail: override.assigneeEmail ?? '',
     lastChangedByEmail: '',
     lastChangedAt: Date.now(),
     notes: '',

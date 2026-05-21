@@ -10,6 +10,7 @@ import {
   clearBacklogRow,
   resetArticleReview,
   resetSectionReview,
+  setBacklogAssignee,
   submitArticleReview,
   submitSectionReview,
 } from '@/app/planning/[specialty]/actions';
@@ -98,6 +99,17 @@ export type ApprovalActions = {
     notes?: string,
   ): Promise<void>;
   clearBacklog(articleKey: string): Promise<void>;
+  /**
+   * Set (or clear with `email: null`) the editor assigned to the backlog
+   * row for `articleKey`. Pushes an optimistic assignee patch so the
+   * dropdown reflects the new selection on the next render without
+   * waiting for PB realtime to land.
+   */
+  setAssignee(
+    articleKey: string,
+    articleRecordId: string,
+    email: string | null,
+  ): Promise<void>;
 };
 
 export type ApprovalState = ApprovalActions & {
@@ -485,6 +497,30 @@ export function useApprovalState(
     [slug, router, rollbackReviewPatches],
   );
 
+  const setAssignee = useCallback<ApprovalActions['setAssignee']>(
+    async (articleKey, articleRecordId, email) => {
+      if (!articleKey) return;
+      const now = Date.now();
+      const assigneeEmail = email ?? '';
+      setBacklogPatches((prev) => [
+        ...prev,
+        {
+          key: articleKey,
+          override: { assigneeEmail },
+          appliedAt: now,
+        },
+      ]);
+      try {
+        await setBacklogAssignee(slug, articleKey, articleRecordId, email);
+        router.refresh();
+      } catch (e) {
+        rollbackBacklogPatches([articleKey], now);
+        throw e;
+      }
+    },
+    [slug, router, rollbackBacklogPatches],
+  );
+
   const clearBacklog = useCallback<ApprovalActions['clearBacklog']>(
     async (articleKey) => {
       if (!articleKey) return;
@@ -556,6 +592,7 @@ export function useApprovalState(
       decideArticle,
       decideSection,
       clearBacklog,
+      setAssignee,
     }),
     [
       articleReviewRows,
@@ -574,6 +611,7 @@ export function useApprovalState(
       decideArticle,
       decideSection,
       clearBacklog,
+      setAssignee,
     ],
   );
 }
