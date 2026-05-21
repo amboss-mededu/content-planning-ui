@@ -2,10 +2,10 @@
 
 import { Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ArticleLitSearchRunRecord } from '@/lib/pb/types';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
-import { useLitSearchState } from './use-running-lit-search-articles';
+import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
 // Local optimistic flag falls off after this many ms even if no `end`
 // event lands — protects against worker death so the button doesn't
@@ -34,9 +34,13 @@ export function LitSearchPhase1Panel({
   onTriggered,
 }: Props) {
   const router = useRouter();
-  const litState = useLitSearchState(initialRuns, {
-    filter: `specialtySlug = "${slug}" && articleKey = "${articleKey}"`,
-  });
+  // Drive lit-search state from the opener prop directly. The parent's
+  // polling pulse refreshes `initialRuns` on every router.refresh; the
+  // useMemo recomputes; `liveInFlight` flips when the latest run row
+  // moves from `running` to `completed/failed`. Using the prop instead
+  // of the hook eliminates a stale-snapshot-token failure mode where
+  // `liveInFlight` could stick true even after the worker landed.
+  const litState = useMemo(() => deriveLitSearchSnapshot(initialRuns), [initialRuns]);
   const liveInFlight = litState.inFlight.has(articleKey);
   const liveError = litState.errors.get(articleKey) ?? null;
   const [optimisticBusy, setOptimisticBusy] = useState(false);
