@@ -141,6 +141,10 @@ export type ManagerOpener =
         next: ArticleBacklogStatus,
         notes?: string,
       ) => void | Promise<void>;
+      /** Called when the user clicks "Search sources" in the Phase 1
+       *  panel. Polls the parent page so the badge + table reflect the
+       *  new running row even when PB realtime is anonymous-blocked. */
+      onLitSearchTriggered?: () => void;
     }
   | {
       type: 'update';
@@ -618,6 +622,7 @@ function BacklogManagerView({
     categoryLookup,
     viewerEmail,
     onStatusChange,
+    onLitSearchTriggered,
   } = opener;
   const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
@@ -765,6 +770,7 @@ function BacklogManagerView({
             articleRecordId={article.id}
             viewerEmail={viewerEmail}
             onAdvance={pickStatus}
+            onLitSearchTriggered={onLitSearchTriggered}
           />
 
           <DecisionNoteField
@@ -1704,6 +1710,7 @@ function PhaseBody({
   articleRecordId,
   viewerEmail,
   onAdvance,
+  onLitSearchTriggered,
 }: {
   /** The phase the user is *viewing* — drives which panel renders. May lag
    *  behind `status` when the editor has chip-navigated to an earlier
@@ -1721,6 +1728,7 @@ function PhaseBody({
   articleRecordId: string;
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
+  onLitSearchTriggered?: () => void;
 }) {
   const copy = PHASE_COPY[phase];
 
@@ -1734,6 +1742,7 @@ function PhaseBody({
           articleRecordId={articleRecordId}
           copy={copy}
           initialRuns={litSearchRuns}
+          onTriggered={onLitSearchTriggered}
         />
       );
     }

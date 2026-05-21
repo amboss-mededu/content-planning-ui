@@ -202,12 +202,25 @@ Produce 3 PubMed queries.
       }
     }
     const msg = e instanceof Error ? e.message : String(e);
+    const rawText = objectError?.text;
     await logEvent({
       runId: args.runId,
       stage: args.stage,
       level: 'error',
       message: `Query generation failed for ${title}: ${msg}`,
-      metrics: { durationMs: Date.now() - started, model: resolved.modelId },
+      metrics: {
+        durationMs: Date.now() - started,
+        model: resolved.modelId,
+        provider: resolved.provider,
+        textLength: rawText?.length ?? 0,
+        jsonShape: rawText ? describeJsonShape(rawText) : undefined,
+        // Truncate the model output before persisting — pipelineEvents.metrics
+        // is JSON in PB and we don't need multi-KB completions to debug shape
+        // mismatches.
+        rawTextSample: rawText?.slice(0, 500),
+        finishReason: objectError?.finishReason,
+        validationIssue: objectError ? validationSummary(objectError) : undefined,
+      },
     });
     throw e;
   }
@@ -325,16 +338,27 @@ Rank the candidates and return the top sources only.
           finishReason: objectError.finishReason,
           validationIssue: validationSummary(objectError),
           jsonShape: describeJsonShape(objectError.text),
+          rawTextSample: objectError.text?.slice(0, 500),
         },
       });
     }
     const msg = e instanceof Error ? e.message : String(e);
+    const rawText = objectError?.text;
     await logEvent({
       runId: args.runId,
       stage: args.stage,
       level: 'error',
       message: `Ranking failed for ${title}: ${msg}`,
-      metrics: { durationMs: Date.now() - started, model: resolved.modelId },
+      metrics: {
+        durationMs: Date.now() - started,
+        model: resolved.modelId,
+        provider: resolved.provider,
+        textLength: rawText?.length ?? 0,
+        jsonShape: rawText ? describeJsonShape(rawText) : undefined,
+        rawTextSample: rawText?.slice(0, 500),
+        finishReason: objectError?.finishReason,
+        validationIssue: objectError ? validationSummary(objectError) : undefined,
+      },
     });
     throw e;
   }

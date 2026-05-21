@@ -2,7 +2,14 @@
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
@@ -180,6 +187,37 @@ export function BacklogView({
   const litSearchState = useLitSearchState(initialLitSearchRuns, {
     filter: `specialtySlug = "${slug}"`,
   });
+
+  // Browser PB realtime drops events for auth-gated collections (httpOnly
+  // pb_auth cookie isn't readable from JS, so the browser PB client
+  // connects anonymously). Mirror the polling fallback established in
+  // codes-view-client.tsx so badge swaps + sources updates land without a
+  // hard refresh.
+  const lastLitSearchClickAt = useRef<number>(0);
+  const onLitSearchTriggered = useCallback(() => {
+    lastLitSearchClickAt.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
+    const isInClickWindow = () => Date.now() - lastLitSearchClickAt.current < 30_000;
+    if (!hasRunningRow && !isInClickWindow()) return;
+    const tick = () => {
+      router.refresh();
+      const stillRunning = initialLitSearchRuns.some((r) => r.status === 'running');
+      if (!stillRunning && !isInClickWindow()) {
+        window.clearInterval(id);
+      }
+    };
+    const id = window.setInterval(tick, 2500);
+    const onFocus = () => router.refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [initialLitSearchRuns, router]);
+
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
   // Inline banner for Remove-approval / status-change failures. Without
@@ -760,6 +798,7 @@ export function BacklogView({
             viewerEmail,
             onStatusChange: (next, notes) =>
               handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
+            onLitSearchTriggered,
           }}
           onClose={() => setManagerArticleId(null)}
         />

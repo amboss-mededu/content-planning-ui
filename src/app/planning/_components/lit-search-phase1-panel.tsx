@@ -19,6 +19,10 @@ type Props = {
   articleRecordId: string;
   copy: string;
   initialRuns?: ArticleLitSearchRunRecord[];
+  /** Fired right after the POST goes out. Parent uses this as a polling
+   *  pulse so the surrounding views refresh while PB realtime is dead
+   *  for anonymous browser clients. */
+  onTriggered?: () => void;
 };
 
 export function LitSearchPhase1Panel({
@@ -27,6 +31,7 @@ export function LitSearchPhase1Panel({
   articleRecordId,
   copy,
   initialRuns = [],
+  onTriggered,
 }: Props) {
   const router = useRouter();
   const litState = useLitSearchState(initialRuns, {
@@ -75,6 +80,7 @@ export function LitSearchPhase1Panel({
     if (isRunning) return;
     setOptimisticBusy(true);
     setClickError(null);
+    onTriggered?.();
     try {
       const res = await fetch('/api/workflows/literature-search', {
         method: 'POST',
@@ -107,7 +113,7 @@ export function LitSearchPhase1Panel({
       setClickError(e instanceof Error ? e.message : String(e));
       setOptimisticBusy(false);
     }
-  }, [isRunning, slug, articleRecordId]);
+  }, [isRunning, slug, articleRecordId, onTriggered]);
 
   return (
     <Stack space="m">

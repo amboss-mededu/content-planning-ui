@@ -56,6 +56,10 @@ export type EventMetrics = {
   topLevelKeys?: string[];
   /** Compact top-level JSON shape observed during malformed-object recovery. */
   jsonShape?: string;
+  /** First N chars of the raw model output, captured when JSON recovery fails
+   *  so the persisted error event is enough to debug a shape mismatch
+   *  without re-running the call. */
+  rawTextSample?: string;
   /** Number of rows recovered from malformed-object output. */
   recoveredRows?: number;
   /** Per-code metadata for `map` events. */

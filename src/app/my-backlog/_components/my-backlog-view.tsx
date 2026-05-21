@@ -2,7 +2,14 @@
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ArticleManagerModalV2 } from '@/app/planning/_components/article-manager-modal-v2';
 import { ArticleSourcesDrawer } from '@/app/planning/_components/article-sources-drawer';
 import {
@@ -160,6 +167,35 @@ export function MyBacklogView({
     return out;
   }, [liveSources, rows]);
   const litSearchState = useLitSearchState(initialLitSearchRuns);
+
+  // Browser PB realtime drops events for auth-gated collections (httpOnly
+  // pb_auth cookie isn't readable from JS). Mirror the polling fallback in
+  // `codes-view-client.tsx` so badge swaps land for the cross-specialty
+  // backlog too.
+  const lastLitSearchClickAt = useRef<number>(0);
+  const onLitSearchTriggered = useCallback(() => {
+    lastLitSearchClickAt.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
+    const isInClickWindow = () => Date.now() - lastLitSearchClickAt.current < 30_000;
+    if (!hasRunningRow && !isInClickWindow()) return;
+    const tick = () => {
+      router.refresh();
+      const stillRunning = initialLitSearchRuns.some((r) => r.status === 'running');
+      if (!stillRunning && !isInClickWindow()) {
+        window.clearInterval(id);
+      }
+    };
+    const id = window.setInterval(tick, 2500);
+    const onFocus = () => router.refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [initialLitSearchRuns, router]);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -597,6 +633,7 @@ export function MyBacklogView({
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) => handleStatusChange(managerRow, next, notes),
+            onLitSearchTriggered,
           }}
           onClose={() => setManagerArticleId(null)}
         />
