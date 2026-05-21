@@ -169,16 +169,16 @@ export function MyBacklogView({
   // State (not a ref) for the click timestamp: useRef mutations don't
   // trigger a re-render, so the polling effect would never re-run when
   // the click fires.
-  const [litSearchClickPulse, setLitSearchClickPulse] = useState(0);
-  const onLitSearchTriggered = useCallback(() => {
-    setLitSearchClickPulse(Date.now());
+  const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
+  const onPipelineActionTriggered = useCallback(() => {
+    setPipelineActionPulse(Date.now());
     router.refresh();
   }, [router]);
 
   useEffect(() => {
     const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
     const isInClickWindow = () =>
-      litSearchClickPulse > 0 && Date.now() - litSearchClickPulse < 30_000;
+      pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
       router.refresh();
@@ -194,7 +194,7 @@ export function MyBacklogView({
       window.clearInterval(id);
       window.removeEventListener('focus', onFocus);
     };
-  }, [initialLitSearchRuns, litSearchClickPulse, router]);
+  }, [initialLitSearchRuns, pipelineActionPulse, router]);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -632,7 +632,7 @@ export function MyBacklogView({
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) => handleStatusChange(managerRow, next, notes),
-            onLitSearchTriggered,
+            onPipelineActionTriggered,
           }}
           onClose={() => setManagerArticleId(null)}
         />

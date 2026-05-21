@@ -144,7 +144,7 @@ export type ManagerOpener =
       /** Called when the user clicks "Search sources" in the Phase 1
        *  panel. Polls the parent page so the badge + table reflect the
        *  new running row even when PB realtime is anonymous-blocked. */
-      onLitSearchTriggered?: () => void;
+      onPipelineActionTriggered?: () => void;
     }
   | {
       type: 'update';
@@ -622,7 +622,7 @@ function BacklogManagerView({
     categoryLookup,
     viewerEmail,
     onStatusChange,
-    onLitSearchTriggered,
+    onPipelineActionTriggered,
   } = opener;
   const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
@@ -770,7 +770,7 @@ function BacklogManagerView({
             articleRecordId={article.id}
             viewerEmail={viewerEmail}
             onAdvance={pickStatus}
-            onLitSearchTriggered={onLitSearchTriggered}
+            onPipelineActionTriggered={onPipelineActionTriggered}
           />
 
           <DecisionNoteField
@@ -837,16 +837,20 @@ function BacklogManagerView({
                     setResetting(true);
                     try {
                       await resetArticle(slug, article.articleKey, article.id);
-                      // Force the page's server-rendered data to refresh
-                      // so the underlying rows array picks up the new
-                      // status. The PB realtime sub on the parent backlog
-                      // map already reflects the change, but the server-
-                      // rendered `rows` (sourcesCount, etc.) needs a
-                      // re-fetch. Keep the modal open so the user sees
-                      // the article is still here, just back at phase 1
-                      // — addresses the "reset removed the article"
-                      // report.
-                      router.refresh();
+                      // Pulse the parent's polling window. A single
+                      // `router.refresh()` here used to race the
+                      // `revalidatePath` cache commit and sometimes pulled
+                      // the pre-reset snapshot; the parent pulse fires an
+                      // immediate refresh AND polls for 30s, so the modal
+                      // header badge + the backlog table row both catch
+                      // up without a manual reload. Keep the modal open
+                      // so the user sees the article is still here, just
+                      // back at phase 1.
+                      if (onPipelineActionTriggered) {
+                        onPipelineActionTriggered();
+                      } else {
+                        router.refresh();
+                      }
                       setResetting(false);
                     } catch (e) {
                       console.error('[reset-article] failed', e);
@@ -1710,7 +1714,7 @@ function PhaseBody({
   articleRecordId,
   viewerEmail,
   onAdvance,
-  onLitSearchTriggered,
+  onPipelineActionTriggered,
 }: {
   /** The phase the user is *viewing* — drives which panel renders. May lag
    *  behind `status` when the editor has chip-navigated to an earlier
@@ -1728,7 +1732,7 @@ function PhaseBody({
   articleRecordId: string;
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
-  onLitSearchTriggered?: () => void;
+  onPipelineActionTriggered?: () => void;
 }) {
   const copy = PHASE_COPY[phase];
 
@@ -1742,7 +1746,7 @@ function PhaseBody({
           articleRecordId={articleRecordId}
           copy={copy}
           initialRuns={litSearchRuns}
-          onTriggered={onLitSearchTriggered}
+          onTriggered={onPipelineActionTriggered}
         />
       );
     }

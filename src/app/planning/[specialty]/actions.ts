@@ -545,6 +545,9 @@ export async function resetArticle(
     user?.email ?? null,
   );
   revalidatePath(`/planning/${slug}`, 'layout');
+  // Cross-specialty backlog reads the same data; without this, /my-backlog
+  // shows stale sources/status until the user navigates away and back.
+  revalidatePath('/my-backlog', 'layout');
 }
 
 /**
