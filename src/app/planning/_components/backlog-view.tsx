@@ -2,14 +2,7 @@
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  type CSSProperties,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
@@ -193,14 +186,25 @@ export function BacklogView({
   // connects anonymously). Mirror the polling fallback established in
   // codes-view-client.tsx so badge swaps + sources updates land without a
   // hard refresh.
-  const lastLitSearchClickAt = useRef<number>(0);
+  //
+  // State (not a ref) for the click timestamp: useRef mutations don't
+  // trigger a re-render, so the polling effect would never re-run when
+  // the click fires — it would stay early-returned until something else
+  // forced a re-render. The pulse value is just the click time; the
+  // effect uses it both as a dep (to wake up) and to compute the 30s
+  // window.
+  const [litSearchClickPulse, setLitSearchClickPulse] = useState(0);
   const onLitSearchTriggered = useCallback(() => {
-    lastLitSearchClickAt.current = Date.now();
-  }, []);
+    setLitSearchClickPulse(Date.now());
+    // Run one refresh immediately so the badge swap happens within ~1s
+    // instead of waiting up to 2.5s for the first interval tick.
+    router.refresh();
+  }, [router]);
 
   useEffect(() => {
     const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
-    const isInClickWindow = () => Date.now() - lastLitSearchClickAt.current < 30_000;
+    const isInClickWindow = () =>
+      litSearchClickPulse > 0 && Date.now() - litSearchClickPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
       router.refresh();
@@ -216,7 +220,7 @@ export function BacklogView({
       window.clearInterval(id);
       window.removeEventListener('focus', onFocus);
     };
-  }, [initialLitSearchRuns, router]);
+  }, [initialLitSearchRuns, litSearchClickPulse, router]);
 
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);

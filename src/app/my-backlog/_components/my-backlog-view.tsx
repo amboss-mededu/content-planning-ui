@@ -2,14 +2,7 @@
 
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  type CSSProperties,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArticleManagerModalV2 } from '@/app/planning/_components/article-manager-modal-v2';
 import { ArticleSourcesDrawer } from '@/app/planning/_components/article-sources-drawer';
 import {
@@ -172,14 +165,20 @@ export function MyBacklogView({
   // pb_auth cookie isn't readable from JS). Mirror the polling fallback in
   // `codes-view-client.tsx` so badge swaps land for the cross-specialty
   // backlog too.
-  const lastLitSearchClickAt = useRef<number>(0);
+  //
+  // State (not a ref) for the click timestamp: useRef mutations don't
+  // trigger a re-render, so the polling effect would never re-run when
+  // the click fires.
+  const [litSearchClickPulse, setLitSearchClickPulse] = useState(0);
   const onLitSearchTriggered = useCallback(() => {
-    lastLitSearchClickAt.current = Date.now();
-  }, []);
+    setLitSearchClickPulse(Date.now());
+    router.refresh();
+  }, [router]);
 
   useEffect(() => {
     const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
-    const isInClickWindow = () => Date.now() - lastLitSearchClickAt.current < 30_000;
+    const isInClickWindow = () =>
+      litSearchClickPulse > 0 && Date.now() - litSearchClickPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
       router.refresh();
@@ -195,7 +194,7 @@ export function MyBacklogView({
       window.clearInterval(id);
       window.removeEventListener('focus', onFocus);
     };
-  }, [initialLitSearchRuns, router]);
+  }, [initialLitSearchRuns, litSearchClickPulse, router]);
 
   useEffect(() => {
     const p = new URLSearchParams();

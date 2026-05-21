@@ -110,3 +110,23 @@ export async function attachPipelineRunToLitSearchRunsAsAdmin(
     runRecordIds.map((id) => pb.collection('articleLitSearchRuns').update(id, { runId })),
   );
 }
+
+/**
+ * Wipe every `articleLitSearchRuns` row for one article. Called from
+ * `resetArticle()` so the modal's Phase 1 panel doesn't surface stale
+ * "Last run failed" errors from before the reset.
+ */
+export async function deleteArticleLitSearchRunsByArticleKeyAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<number> {
+  if (!articleKey) return 0;
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<ArticleLitSearchRunRecord>('articleLitSearchRuns')
+    .getFullList({
+      filter: `specialtySlug = "${slug}" && articleKey = "${articleKey}"`,
+    });
+  await Promise.all(rows.map((r) => pb.collection('articleLitSearchRuns').delete(r.id)));
+  return rows.length;
+}
