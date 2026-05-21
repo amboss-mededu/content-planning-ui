@@ -222,6 +222,63 @@ describe('applyBacklogPatches', () => {
     const live = [backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' })];
     expect(applyBacklogPatches(live, [])).toBe(live);
   });
+
+  it('overrides assigneeEmail on a live row while preserving other fields', () => {
+    const live = [backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' })];
+    const next = applyBacklogPatches(live, [
+      {
+        key: 'upd::a-1',
+        override: { assigneeEmail: 'new@amboss.com' },
+        appliedAt: 100,
+      },
+    ]);
+    expect(next).toHaveLength(1);
+    expect(next[0]?.assigneeEmail).toBe('new@amboss.com');
+    // Other fields untouched.
+    expect(next[0]?.type).toBe('update');
+    expect(next[0]?.id).toBe('pb-1');
+  });
+
+  it('clears assigneeEmail via empty-string override', () => {
+    const live = [
+      {
+        ...backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' }),
+        assigneeEmail: 'prev@amboss.com',
+      },
+    ];
+    const next = applyBacklogPatches(live, [
+      { key: 'upd::a-1', override: { assigneeEmail: '' }, appliedAt: 100 },
+    ]);
+    expect(next[0]?.assigneeEmail).toBe('');
+  });
+
+  it('combines type and assigneeEmail in a single patch', () => {
+    const live = [backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' })];
+    const next = applyBacklogPatches(live, [
+      {
+        key: 'upd::a-1',
+        override: { type: 'update', assigneeEmail: 'new@amboss.com' },
+        appliedAt: 100,
+      },
+    ]);
+    expect(next[0]?.type).toBe('update');
+    expect(next[0]?.assigneeEmail).toBe('new@amboss.com');
+  });
+
+  it('synthesizes a pending row carrying the patched assigneeEmail', () => {
+    const next = applyBacklogPatches(
+      [],
+      [
+        {
+          key: 'new::cardiology::heart-failure',
+          override: { assigneeEmail: 'new@amboss.com' },
+          appliedAt: 100,
+        },
+      ],
+    );
+    expect(next).toHaveLength(1);
+    expect(next[0]?.assigneeEmail).toBe('new@amboss.com');
+  });
 });
 
 describe('reconcileReviewPatches', () => {
@@ -376,6 +433,63 @@ describe('reconcileBacklogPatches', () => {
         type: 'new',
       }),
     ];
+    expect(reconcileBacklogPatches(patches, live)).toEqual([]);
+  });
+
+  it('drops an assignee patch once the live row carries the same email', () => {
+    const patches: BacklogPatch[] = [
+      {
+        key: 'upd::a-1',
+        override: { assigneeEmail: 'new@amboss.com' },
+        appliedAt: 100,
+      },
+    ];
+    const live = [
+      {
+        ...backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' }),
+        assigneeEmail: 'new@amboss.com',
+      },
+    ];
+    expect(reconcileBacklogPatches(patches, live)).toEqual([]);
+  });
+
+  it('keeps an assignee patch while the live row still has the old email', () => {
+    const patches: BacklogPatch[] = [
+      {
+        key: 'upd::a-1',
+        override: { assigneeEmail: 'new@amboss.com' },
+        appliedAt: 100,
+      },
+    ];
+    const live = [
+      {
+        ...backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' }),
+        assigneeEmail: 'old@amboss.com',
+      },
+    ];
+    expect(reconcileBacklogPatches(patches, live)).toEqual(patches);
+  });
+
+  it('keeps an assignee patch while no live row exists yet (subscription lag)', () => {
+    const patches: BacklogPatch[] = [
+      {
+        key: 'upd::a-1',
+        override: { assigneeEmail: 'new@amboss.com' },
+        appliedAt: 100,
+      },
+    ];
+    expect(reconcileBacklogPatches(patches, [])).toEqual(patches);
+  });
+
+  it('drops an assignee-clear patch when the live row has empty assigneeEmail', () => {
+    const patches: BacklogPatch[] = [
+      {
+        key: 'upd::a-1',
+        override: { assigneeEmail: '' },
+        appliedAt: 100,
+      },
+    ];
+    const live = [backlog({ id: 'pb-1', articleKey: 'upd::a-1', type: 'update' })];
     expect(reconcileBacklogPatches(patches, live)).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import { setBacklogAssignee, setBacklogStatus } from '@/app/planning/[specialty]/actions';
+import { setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
@@ -278,8 +278,7 @@ export function BacklogView({
   ): Promise<void> {
     const emailOrNull = nextEmail.length > 0 ? nextEmail : null;
     try {
-      await setBacklogAssignee(slug, articleKey, articleRecordId, emailOrNull);
-      router.refresh();
+      await approval.setAssignee(articleKey, articleRecordId, emailOrNull);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Assignee change failed');
     }
