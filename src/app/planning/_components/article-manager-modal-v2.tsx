@@ -27,7 +27,6 @@ import type {
   ReviewCommentRecord,
   SourceReviewStatus,
 } from '@/lib/pb/types';
-import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
   getLatestDraftForArticle,
   resetArticle,
@@ -58,7 +57,7 @@ import {
 } from './pipeline-stage-gates';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
-import { useLitSearchState } from './use-running-lit-search-articles';
+import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
 // ---------------------------------------------------------------------------
 // Shared types — used by both review-stage variants. Kept here so the v2
@@ -631,35 +630,20 @@ function BacklogManagerView({
   const [resetting, setResetting] = useState(false);
   const notesDirty = pendingNotes !== notes;
 
-  // Live PB subscriptions — the modal becomes its own source of truth.
-  // Status: seed from the parent's optimistic backlog row (if present)
-  // so the first render matches the row list. PB realtime applies every
-  // change after that — including async pipeline writes from the writer
-  // and the lit-search worker.
-  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
-    'articleBacklog',
-    currentBacklogRow ? [currentBacklogRow] : [],
-    { filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"` },
+  // Read modal state directly from the opener props. The parent already
+  // runs PB subscriptions (via `useApprovalState`) AND polls
+  // `router.refresh()` on pipeline actions, so the props it passes are
+  // always fresh — and the snapshotToken-based reseed inside our own
+  // `useLiveCollection` calls used to silently fail when PB's `updated`
+  // string didn't visibly change between refreshes, freezing the badge.
+  // Reading the props directly eliminates that failure mode entirely.
+  const currentStatus = currentBacklogRow?.status ?? openerCurrentStatus;
+  const sources = openerSources;
+  const litSearchSnapshot = useMemo(
+    () => deriveLitSearchSnapshot(openerLitSearchRuns ?? []),
+    [openerLitSearchRuns],
   );
-  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
-
-  // Sources: same pattern. Seeded with the opener's SSR snapshot; live
-  // sub adds rows created by lit-search and applies review-status updates
-  // without a router.refresh.
-  const sources = useLiveCollection<ArticleSourceRecord>(
-    'articleSources',
-    openerSources,
-    { filter: `articleKey = "${article.articleKey}"` },
-  );
-
-  // Live lit-search progress for the header status badge. The panel
-  // below subscribes too, but its scope is internal — duplicating the
-  // subscription here keeps the badge swap self-contained instead of
-  // threading state through the SharedHeader.
-  const litSearchState = useLitSearchState(openerLitSearchRuns ?? [], {
-    filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
-  });
-  const isLitSearchRunning = litSearchState.inFlight.has(article.articleKey);
+  const isLitSearchRunning = litSearchSnapshot.inFlight.has(article.articleKey);
 
   // The article's real phase, derived from the persisted status.
   const actualPhase = phaseFromStatus(currentStatus);
@@ -2695,16 +2679,11 @@ function BacklogUpdateView({
     onStatusChange,
   } = opener;
 
-  // Live sub mirrors the new-article modal so cross-tab / async writes
-  // keep the stepper in sync.
-  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
-    'articleBacklog',
-    currentBacklogRow ? [currentBacklogRow] : [],
-    {
-      filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
-    },
-  );
-  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+  // Read status directly from the opener prop — same reasoning as the
+  // new-article view above. The parent's polling pulse keeps these props
+  // fresh; the previous self-contained useLiveCollection added a stale
+  // snapshotToken layer that masked legitimate updates.
+  const currentStatus = currentBacklogRow?.status ?? openerCurrentStatus;
 
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);

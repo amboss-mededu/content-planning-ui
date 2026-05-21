@@ -171,6 +171,7 @@ export function MyBacklogView({
   // the click fires.
   const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
   const onPipelineActionTriggered = useCallback(() => {
+    console.debug('[lit-search-pulse] fired');
     setPipelineActionPulse(Date.now());
     router.refresh();
   }, [router]);
@@ -181,6 +182,10 @@ export function MyBacklogView({
       pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
+      console.debug('[lit-search-poll] tick', {
+        pulseAgeMs: pipelineActionPulse ? Date.now() - pipelineActionPulse : null,
+        runningRows: initialLitSearchRuns.filter((r) => r.status === 'running').length,
+      });
       router.refresh();
       const stillRunning = initialLitSearchRuns.some((r) => r.status === 'running');
       if (!stillRunning && !isInClickWindow()) {

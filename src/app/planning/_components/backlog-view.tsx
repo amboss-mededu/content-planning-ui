@@ -195,6 +195,7 @@ export function BacklogView({
   // window.
   const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
   const onPipelineActionTriggered = useCallback(() => {
+    console.debug('[lit-search-pulse] fired');
     setPipelineActionPulse(Date.now());
     // Run one refresh immediately so the badge swap happens within ~1s
     // instead of waiting up to 2.5s for the first interval tick.
@@ -207,6 +208,10 @@ export function BacklogView({
       pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
+      console.debug('[lit-search-poll] tick', {
+        pulseAgeMs: pipelineActionPulse ? Date.now() - pipelineActionPulse : null,
+        runningRows: initialLitSearchRuns.filter((r) => r.status === 'running').length,
+      });
       router.refresh();
       const stillRunning = initialLitSearchRuns.some((r) => r.status === 'running');
       if (!stillRunning && !isInClickWindow()) {
