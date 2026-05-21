@@ -47,6 +47,7 @@ import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
 import { LitSearchPhase1Panel } from './lit-search-phase1-panel';
+import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import {
   canApproveSources,
   canDraft,
@@ -57,6 +58,7 @@ import {
 } from './pipeline-stage-gates';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
+import { useLitSearchState } from './use-running-lit-search-articles';
 
 // ---------------------------------------------------------------------------
 // Shared types — used by both review-stage variants. Kept here so the v2
@@ -645,6 +647,15 @@ function BacklogManagerView({
     { filter: `articleKey = "${article.articleKey}"` },
   );
 
+  // Live lit-search progress for the header status badge. The panel
+  // below subscribes too, but its scope is internal — duplicating the
+  // subscription here keeps the badge swap self-contained instead of
+  // threading state through the SharedHeader.
+  const litSearchState = useLitSearchState(openerLitSearchRuns ?? [], {
+    filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
+  });
+  const isLitSearchRunning = litSearchState.inFlight.has(article.articleKey);
+
   // The article's real phase, derived from the persisted status.
   const actualPhase = phaseFromStatus(currentStatus);
   // The phase the editor is *looking at*. Defaults to actual phase but
@@ -706,11 +717,13 @@ function BacklogManagerView({
         >
           <SharedHeader
             title={article.articleTitle ?? '(untitled)'}
-            stageBadge={{ text: 'Backlog', color: 'blue' }}
             decisionBadge={{
               text: STATUS_LABEL[currentStatus],
               color: STATUS_COLOR[currentStatus],
             }}
+            decisionBadgeNode={
+              isLitSearchRunning ? <LitSearchProgressBadge /> : undefined
+            }
             metaInline={
               <Inline space="s">
                 {article.articleType && (
@@ -874,12 +887,21 @@ function SharedHeader({
   title,
   stageBadge,
   decisionBadge,
+  decisionBadgeNode,
   extraBadges,
   metaInline,
 }: {
   title: string;
-  stageBadge: { text: string; color: BadgeColor };
+  /** Optional stage indicator. Backlog views omit this (the modal already
+   *  scopes by surface; no need for a redundant "Backlog" badge). Review
+   *  views still pass it so editors see they're in the review surface. */
+  stageBadge?: { text: string; color: BadgeColor };
   decisionBadge: { text: string; color: BadgeColor; tooltip?: string } | null;
+  /** Live ReactNode override for the decision badge slot. Takes precedence
+   *  over `decisionBadge` when present — used so the backlog modal can
+   *  swap in `<LitSearchProgressBadge />` while the lit-search worker is
+   *  running, without re-implementing the badge layout. */
+  decisionBadgeNode?: React.ReactNode;
   extraBadges?: Array<{ text: string; color: BadgeColor }>;
   metaInline?: React.ReactNode;
 }) {
@@ -889,18 +911,20 @@ function SharedHeader({
         <Text size="m" weight="bold">
           {title}
         </Text>
-        <Badge text={stageBadge.text} color={stageBadge.color} />
+        {stageBadge ? <Badge text={stageBadge.text} color={stageBadge.color} /> : null}
         {extraBadges?.map((b) => (
           <Badge key={b.text} text={b.text} color={b.color} />
         ))}
-        {decisionBadge &&
-          (decisionBadge.tooltip ? (
-            <span title={decisionBadge.tooltip}>
+        {decisionBadgeNode
+          ? decisionBadgeNode
+          : decisionBadge &&
+            (decisionBadge.tooltip ? (
+              <span title={decisionBadge.tooltip}>
+                <Badge text={decisionBadge.text} color={decisionBadge.color} />
+              </span>
+            ) : (
               <Badge text={decisionBadge.text} color={decisionBadge.color} />
-            </span>
-          ) : (
-            <Badge text={decisionBadge.text} color={decisionBadge.color} />
-          ))}
+            ))}
       </Inline>
       {metaInline}
     </Stack>
@@ -2724,7 +2748,6 @@ function BacklogUpdateView({
         >
           <SharedHeader
             title={article.articleTitle ?? '(untitled)'}
-            stageBadge={{ text: 'Backlog · Update', color: 'purple' }}
             decisionBadge={{
               text: STATUS_LABEL[currentStatus],
               color: STATUS_COLOR[currentStatus],
