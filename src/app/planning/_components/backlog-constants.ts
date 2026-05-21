@@ -24,26 +24,35 @@ export const STATUS_COLOR: Record<ArticleBacklogStatus, BadgeColor> = {
   published: 'green',
 };
 
+// Filter dropdown labels match the 7-phase chip stepper so editors see a
+// single vocabulary across the modal, the backlog table, and the filter.
+// `editing-in-progress` collapses into `ready-for-editing` (both phase 5,
+// both "Review article") to avoid a duplicate filter entry — editors can
+// still transition through `editing-in-progress` via the row's inline
+// status dropdown.
 export const STATUS_OPTIONS: Array<{ value: ArticleBacklogStatus; label: string }> = [
-  { value: 'waiting-for-sources', label: 'Waiting for sources' },
-  { value: 'sources-searched', label: 'Sources searched' },
-  { value: 'sources-approved', label: 'Sources approved' },
-  { value: 'ready-for-llm-draft', label: 'Ready for LLM draft' },
-  { value: 'ready-for-editing', label: 'Ready for editing' },
-  { value: 'editing-in-progress', label: 'Editing in progress' },
-  { value: 'ready-to-publish', label: 'Ready to publish' },
+  { value: 'waiting-for-sources', label: 'Search sources' },
+  { value: 'sources-searched', label: 'Approve sources' },
+  { value: 'sources-approved', label: 'Prioritize sources' },
+  { value: 'ready-for-llm-draft', label: 'Draft article' },
+  { value: 'ready-for-editing', label: 'Review article' },
+  { value: 'ready-to-publish', label: 'Article ready' },
   { value: 'published', label: 'Published' },
 ];
 
+// Mirrors `PHASE_LABEL[phaseFromStatus(status)]` — every badge in the app
+// reads through this map, so aligning the values here means the modal
+// header, the backlog table row, the my-backlog row, and the "Currently:"
+// subheader all speak the same chip-stepper vocabulary.
 export const STATUS_LABEL: Record<ArticleBacklogStatus, string> = {
-  unassigned: 'Waiting for sources',
-  'waiting-for-sources': 'Waiting for sources',
-  'sources-searched': 'Sources searched',
-  'sources-approved': 'Sources approved',
-  'ready-for-llm-draft': 'Ready for LLM draft',
-  'ready-for-editing': 'Ready for editing',
-  'editing-in-progress': 'Editing in progress',
-  'ready-to-publish': 'Ready to publish',
+  unassigned: 'Search sources',
+  'waiting-for-sources': 'Search sources',
+  'sources-searched': 'Approve sources',
+  'sources-approved': 'Prioritize sources',
+  'ready-for-llm-draft': 'Draft article',
+  'ready-for-editing': 'Review article',
+  'editing-in-progress': 'Review article',
+  'ready-to-publish': 'Article ready',
   published: 'Published',
 };
 
