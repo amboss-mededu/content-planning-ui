@@ -1,6 +1,6 @@
 'use client';
 
-import { Inline, Select, Stack, Text } from '@amboss/design-system';
+import { Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useEffect, useState } from 'react';
 import {
   MODEL_CATALOG,
@@ -10,9 +10,12 @@ import {
 } from '@/lib/workflows/lib/llm';
 import {
   backupModelKey,
+  clearSpec,
   DEFAULT_BACKUP_MODEL,
+  DEFAULT_MODELS,
   modelKey,
   readSpec,
+  readSpecForStage,
   writeSpec,
 } from './model-selection-storage';
 
@@ -53,14 +56,24 @@ function ModelDropdowns({
   initial,
   onChange,
   emptyHint,
+  defaultSpec,
+  portalContainer,
 }: {
   label: string;
   storageKey: string;
   initial: ModelSpec | null;
   onChange?: (spec: ModelSpec | null) => void;
   emptyHint?: string;
+  defaultSpec?: ModelSpec | null;
+  portalContainer?: HTMLElement | null;
 }) {
   const [spec, setSpec] = useState<ModelSpec | null>(initial);
+  const [hasOverride, setHasOverride] = useState(false);
+
+  useEffect(() => {
+    setSpec(initial);
+    setHasOverride(Boolean(readSpec(storageKey)));
+  }, [initial, storageKey]);
 
   // SSR-safe hydration: rely on the parent to pass `initial` from localStorage
   // after mount. If a key write happens elsewhere in the same tab (e.g. the
@@ -70,7 +83,9 @@ function ModelDropdowns({
       const changedKey =
         e instanceof StorageEvent ? e.key : (e as CustomEvent).detail?.key;
       if (changedKey === storageKey || changedKey === null) {
-        setSpec(readSpec(storageKey));
+        const stored = readSpec(storageKey);
+        setSpec(stored ?? defaultSpec ?? null);
+        setHasOverride(Boolean(stored));
       }
     }
     window.addEventListener('storage', onStorage as EventListener);
@@ -79,12 +94,20 @@ function ModelDropdowns({
       window.removeEventListener('storage', onStorage as EventListener);
       window.removeEventListener('pipeline:model-storage', onStorage as EventListener);
     };
-  }, [storageKey]);
+  }, [storageKey, defaultSpec]);
 
   function commit(next: ModelSpec) {
     setSpec(next);
+    setHasOverride(true);
     writeSpec(storageKey, next);
     onChange?.(next);
+  }
+
+  function resetToDefault() {
+    clearSpec(storageKey);
+    setSpec(defaultSpec ?? null);
+    setHasOverride(false);
+    onChange?.(defaultSpec ?? null);
   }
 
   function onModelChange(value: string) {
@@ -116,6 +139,7 @@ function ModelDropdowns({
             size="s"
             value={specToValue(spec)}
             options={MODEL_OPTIONS}
+            portalContainer={portalContainer}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onModelChange(e.target.value)
             }
@@ -130,11 +154,23 @@ function ModelDropdowns({
             value={spec?.reasoning ?? 'auto'}
             options={REASONING_OPTIONS}
             disabled={!spec}
+            portalContainer={portalContainer}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onReasoningChange(e.target.value)
             }
           />
         </div>
+        {defaultSpec ? (
+          <Button
+            variant="tertiary"
+            size="s"
+            type="button"
+            disabled={!hasOverride}
+            onClick={resetToDefault}
+          >
+            Reset to default
+          </Button>
+        ) : null}
       </Inline>
       {!spec && emptyHint ? <Text color="secondary">{emptyHint}</Text> : null}
     </Stack>
@@ -149,16 +185,26 @@ function ModelDropdowns({
 export function ModelSelector({
   specialtySlug,
   stage,
+  portalContainer,
 }: {
   specialtySlug: string;
   stage: string;
+  portalContainer?: HTMLElement | null;
 }) {
   const storageKey = modelKey(specialtySlug, stage);
   const [initial, setInitial] = useState<ModelSpec | null>(null);
   useEffect(() => {
-    setInitial(readSpec(storageKey));
-  }, [storageKey]);
-  return <ModelDropdowns label="Model" storageKey={storageKey} initial={initial} />;
+    setInitial(readSpecForStage(specialtySlug, stage));
+  }, [specialtySlug, stage]);
+  return (
+    <ModelDropdowns
+      label="Model"
+      storageKey={storageKey}
+      initial={initial}
+      defaultSpec={DEFAULT_MODELS[stage] ?? null}
+      portalContainer={portalContainer}
+    />
+  );
 }
 
 /**
@@ -168,20 +214,26 @@ export function ModelSelector({
  * the workflow has no fallback for codes whose primary attempts still
  * cite invalid IDs.
  */
-export function MappingModelSelector({ specialtySlug }: { specialtySlug: string }) {
+export function MappingModelSelector({
+  specialtySlug,
+  portalContainer,
+}: {
+  specialtySlug: string;
+  portalContainer?: HTMLElement | null;
+}) {
   const primaryStorageKey = modelKey(specialtySlug, 'map_codes');
   const backupStorageKey = backupModelKey(specialtySlug);
   const [primaryInitial, setPrimaryInitial] = useState<ModelSpec | null>(null);
   const [backupInitial, setBackupInitial] = useState<ModelSpec | null>(null);
 
   useEffect(() => {
-    setPrimaryInitial(readSpec(primaryStorageKey));
+    setPrimaryInitial(readSpecForStage(specialtySlug, 'map_codes'));
     const stored = readSpec(backupStorageKey);
     setBackupInitial(stored ?? DEFAULT_BACKUP_MODEL);
     // Seed the storage with the default backup so a kickoff before the user
     // touches the dropdown still has a backup to send.
     if (!stored) writeSpec(backupStorageKey, DEFAULT_BACKUP_MODEL);
-  }, [primaryStorageKey, backupStorageKey]);
+  }, [specialtySlug, backupStorageKey]);
 
   return (
     <Stack space="xs">
@@ -189,11 +241,15 @@ export function MappingModelSelector({ specialtySlug }: { specialtySlug: string 
         label="Primary model"
         storageKey={primaryStorageKey}
         initial={primaryInitial}
+        defaultSpec={DEFAULT_MODELS.map_codes}
+        portalContainer={portalContainer}
       />
       <ModelDropdowns
         label="Backup model (used when primary still cites invalid IDs)"
         storageKey={backupStorageKey}
         initial={backupInitial}
+        defaultSpec={DEFAULT_BACKUP_MODEL}
+        portalContainer={portalContainer}
       />
     </Stack>
   );

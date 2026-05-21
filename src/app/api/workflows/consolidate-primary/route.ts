@@ -44,7 +44,19 @@ type Body = {
    *  page so one click produces end-to-end output. The pipeline-page
    *  start buttons leave this off and fire each stage individually. */
   chainSecondaries?: boolean;
+  /** Optional editor-supplied note. Prepended to the LLM user message
+   *  as an `EDITOR INSTRUCTIONS` block for this run only. */
+  editorNote?: unknown;
 };
+
+const MAX_EDITOR_NOTE_LENGTH = 4000;
+
+function parseEditorNote(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.slice(0, MAX_EDITOR_NOTE_LENGTH);
+}
 
 const DEFAULT_CONSOLIDATION_MODEL: ModelSpec = {
   provider: 'google',
@@ -109,6 +121,7 @@ export async function POST(req: NextRequest) {
   }
 
   const chain = body.chainSecondaries === true;
+  const editorNote = parseEditorNote(body.editorNote);
 
   const apiKeys = await resolveApiKeysForRun([model.provider]);
   if (!apiKeys[model.provider]) {
@@ -168,6 +181,12 @@ export async function POST(req: NextRequest) {
         specialtySlug: slug,
         consolidationCategories,
       });
+      // Suppress each stage's own `pipelineRuns.status` update so the
+      // run stays `running` for the full chain duration — otherwise the
+      // primary stage flips status to `completed` mid-chain and the live
+      // `useRerunningCategories` subscription drops the in-progress badge
+      // before the secondaries finish. The route issues a single final
+      // status flip below.
       const primaryStats = await consolidatePrimaryWorkflow({
         runId,
         specialtySlug: slug,
@@ -175,6 +194,8 @@ export async function POST(req: NextRequest) {
         sourceCategories,
         model,
         apiKeys,
+        editorNote,
+        skipRunStatusUpdate: true,
       });
       // Forward `consolidationCategories` so the secondaries'
       // wipe-and-replace is scoped to the same buckets — otherwise a
@@ -183,11 +204,17 @@ export async function POST(req: NextRequest) {
         runId,
         specialtySlug: slug,
         categories: consolidationCategories,
+        skipRunStatusUpdate: true,
       });
       const sectionsStats = await consolidateSectionsSecondaryWorkflow({
         runId,
         specialtySlug: slug,
         categories: consolidationCategories,
+        skipRunStatusUpdate: true,
+      });
+      await updatePipelineRun(runId, {
+        status: 'completed',
+        finishedAt: Date.now(),
       });
       result = {
         stagingArticles: primaryStats.stagingArticles,
@@ -227,6 +254,7 @@ export async function POST(req: NextRequest) {
         sourceCategories,
         model,
         apiKeys,
+        editorNote,
       });
     })().catch((e) => {
       console.error('[consolidate-primary] workflow unhandled rejection', e);

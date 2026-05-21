@@ -141,6 +141,16 @@ export function writeSpec(key: string, spec: ModelSpec): void {
   }
 }
 
+export function clearSpec(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+    window.dispatchEvent(new CustomEvent('pipeline:model-storage', { detail: { key } }));
+  } catch {
+    // Private mode / blocked storage — readers will continue to fall back.
+  }
+}
+
 /**
  * Subscribe to a single (specialty, stage) selection. SSR-safe: returns
  * `null` on the first render, then snaps to the stored value once mounted.

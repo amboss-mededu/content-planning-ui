@@ -7,6 +7,10 @@ export type ConsolidationPromptInput = {
   region: string;
   articleTitles: string[];
   codes: MappedCodeWithSuggestions[];
+  /** Editor-supplied steering note for this run. When present, rendered
+   *  as an EDITOR INSTRUCTIONS block at the top of the user message so
+   *  the model treats it as run-scoped guidance. */
+  editorNote?: string | null;
 };
 
 export const CONSOLIDATION_SYSTEM_PROMPT = `
@@ -41,7 +45,101 @@ If a code has no article or section suggestion, it may be totally ignored with a
 
 FINAL VERIFICATION
 Before returning output, verify that no article title violates the "NO APPROACH TO" rule and that every input index is accounted for exactly where appropriate.
-Return schema-valid JSON only.
+Return schema-valid JSON only. Return a bare JSON object, not fenced markdown.
+`.trim();
+
+const CONSOLIDATION_OUTPUT_CONTRACT = `
+Required output shape:
+{
+  "specialty": "string",
+  "category": "string",
+  "articles": [
+    {
+      "articleTitle": "string",
+      "articleType": "disease | condition-overview | foundational-clinical | foundational-non-clinical | keystone-management | procedure | symptom-problem",
+      "exists": false,
+      "articleId": "string or null",
+      "codes": [
+        {
+          "code": "string",
+          "description": "string",
+          "previouslySuggestedArticleTitle": "string",
+          "previouslySuggestedArticleOrSectionTitle": "string",
+          "coverageScore": 0,
+          "importance": 0,
+          "index": 0
+        }
+      ],
+      "previousArticleTitleSuggestions": ["string"],
+      "overallCoverage": 0,
+      "overallImportance": 0,
+      "justification": "string"
+    }
+  ],
+  "includedArticleIndexes": [0],
+  "ignoredArticles": [
+    {
+      "code": "string",
+      "description": "string",
+      "previouslySuggestedArticleTitle": "string",
+      "justification": "string",
+      "index": 0
+    }
+  ],
+  "ignoredArticleIndexes": [0],
+  "sections": [
+    {
+      "articleTitle": "string",
+      "articleId": "string or null",
+      "articleType": "string",
+      "sectionUpdates": [
+        {
+          "sectionName": "string",
+          "codes": [
+            {
+              "code": "string",
+              "description": "string",
+              "previouslySuggestedArticleTitle": "string",
+              "previouslySuggestedArticleOrSectionTitle": "string",
+              "coverageScore": 0,
+              "importance": 0,
+              "index": 0
+            }
+          ],
+          "previousArticleAndSectionTitleSuggestions": ["a: previous article title", "s: previous section title"],
+          "exists": true,
+          "sectionId": "string or null",
+          "overallCoverage": 0,
+          "overallImportance": 0,
+          "justification": "string"
+        }
+      ]
+    }
+  ],
+  "includedSectionIndexes": [0],
+  "ignoredSections": [
+    {
+      "code": "string",
+      "description": "string",
+      "previouslySuggestedSectionTitle": "string",
+      "exists": false,
+      "articleId": "string or null",
+      "justification": "string",
+      "index": 0
+    }
+  ],
+  "ignoredSectionIndexes": [0],
+  "totallyIgnoredIndexes": [
+    {
+      "code": "string",
+      "index": 0,
+      "justification": "string"
+    }
+  ]
+}
+
+All top-level keys shown above are required. Use empty arrays when there are no items.
+Return a bare JSON object only, without markdown fences or commentary.
 `.trim();
 
 function cleanJson(value: unknown): unknown {
@@ -81,8 +179,13 @@ export function buildCategoryConsolidationPrompt(
     )
     .join('\n');
 
+  const editorBlock =
+    input.editorNote && input.editorNote.trim().length > 0
+      ? `EDITOR INSTRUCTIONS (apply to this run only):\n${input.editorNote.trim()}\n\n`
+      : '';
+
   return `
-Consolidate all section updates, new sections, and suggested articles in the category.
+${editorBlock}Consolidate all section updates, new sections, and suggested articles in the category.
 
 Specialty: ${input.specialty}
 Category: ${input.category}
@@ -91,6 +194,8 @@ Language: ${input.language} / ${input.region}
 Do not omit any codes in the input range. Every code must be returned in some form as consolidated article content, consolidated section content, ignored article content, ignored section content, or totally ignored.
 
 If a suggested article already exists in the current library, consider it an erroneous new-article mapping unless it should be moved to a section update. Explain this in the ignored article or section justification.
+
+${CONSOLIDATION_OUTPUT_CONTRACT}
 
 Existing AMBOSS article titles:
 ${articleTitlesString}

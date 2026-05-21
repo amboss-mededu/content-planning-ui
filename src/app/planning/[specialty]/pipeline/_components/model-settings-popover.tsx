@@ -1,6 +1,7 @@
 'use client';
 
 import { Box, Button, Icon, Popover, Stack, Text } from '@amboss/design-system';
+import { useState } from 'react';
 import { MODEL_CATALOG, type ModelSpec } from '@/lib/workflows/lib/llm';
 import { DEFAULT_MODELS } from './model-selection-storage';
 import { MappingModelSelector, ModelSelector } from './model-selector';
@@ -32,18 +33,28 @@ export function ModelSettingsPopover({
 }) {
   const defaultLabel = catalogLabel(DEFAULT_MODELS[stage]);
   const isMapping = stage === 'map_codes';
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
   const content = (
-    <Box vSpace="s" lSpace="s" rSpace="s">
-      <Stack space="s">
-        <Text color="secondary">Default: {defaultLabel}</Text>
-        {isMapping ? (
-          <MappingModelSelector specialtySlug={specialtySlug} />
-        ) : (
-          <ModelSelector specialtySlug={specialtySlug} stage={stage} />
-        )}
-      </Stack>
-    </Box>
+    <div ref={setPortalContainer}>
+      <Box vSpace="s" lSpace="s" rSpace="s">
+        <Stack space="s">
+          <Text color="secondary">Default: {defaultLabel}</Text>
+          {isMapping ? (
+            <MappingModelSelector
+              specialtySlug={specialtySlug}
+              portalContainer={portalContainer}
+            />
+          ) : (
+            <ModelSelector
+              specialtySlug={specialtySlug}
+              stage={stage}
+              portalContainer={portalContainer}
+            />
+          )}
+        </Stack>
+      </Box>
+    </div>
   );
 
   return (

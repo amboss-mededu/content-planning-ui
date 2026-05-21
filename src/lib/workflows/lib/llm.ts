@@ -111,9 +111,19 @@ export function resolveModel(spec: ModelSpec, apiKeys: ProviderApiKeys): Resolve
           : spec.reasoning === 'auto'
             ? undefined
             : { thinkingLevel: spec.reasoning };
+      // `structuredOutputs: false` keeps the provider in JSON-output mode
+      // (`responseMimeType: 'application/json'`) but skips Google's
+      // `responseSchema` grammar compilation. Large consolidation responses
+      // are parsed as JSON by the AI SDK and validated locally by the
+      // workflow's Zod schema.
       return {
         sdkModel: google(spec.model),
-        providerOptions: thinkingConfig ? { google: { thinkingConfig } } : {},
+        providerOptions: {
+          google: {
+            structuredOutputs: false,
+            ...(thinkingConfig ? { thinkingConfig } : {}),
+          },
+        },
         modelId: spec.model,
         provider: 'google',
       };

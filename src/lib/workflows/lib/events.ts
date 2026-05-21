@@ -36,6 +36,24 @@ export type EventMetrics = {
   phase?: 'identify' | 'extract' | 'milestones' | 'map';
   /** Raw parsed LLM output for this call. */
   completion?: unknown;
+  /** True when the call used a stricter retry after malformed JSON. */
+  jsonRetry?: boolean;
+  /** Length of malformed model text observed during JSON recovery. */
+  textLength?: number;
+  /** AI SDK finish reason for malformed-object recovery paths. */
+  finishReason?: string;
+  /** Truncated/short parse failure message for malformed-object recovery paths. */
+  parseError?: string;
+  /** Classified JSON failure reason for model-output recovery diagnostics. */
+  failureKind?: 'no_parseable_json' | 'schema_validation_failed';
+  /** First short schema or parse issue without raw model output. */
+  validationIssue?: string;
+  /** First Zod issue path for model-output recovery diagnostics. */
+  validationIssuePath?: string;
+  /** First Zod issue message for model-output recovery diagnostics. */
+  validationIssueMessage?: string;
+  /** Top-level parsed JSON keys seen during schema-validation failure. */
+  topLevelKeys?: string[];
   /** Per-code metadata for `map` events. */
   code?: string;
   attempts?: number;

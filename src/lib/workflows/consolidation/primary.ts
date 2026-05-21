@@ -12,8 +12,6 @@
  * "Start consolidation" don't pile up duplicates.
  */
 
-import { generateText, Output } from 'ai';
-import { z } from 'zod';
 import { listAmbossArticleTitlesAsAdmin } from '@/lib/data/amboss-library';
 import {
   bulkInsertArticleUpdateSuggestionsAsAdmin,
@@ -33,7 +31,6 @@ import {
 import { logEvent } from '../lib/events';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { resolveModel } from '../lib/llm';
-import { estimateCostUsd } from '../lib/pricing';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import {
   aggregateNewArticles,
@@ -41,7 +38,13 @@ import {
   type MappedCodeWithSuggestions,
 } from './aggregate';
 import { groupByConsolidationCategory } from './buckets';
-import { buildCategoryConsolidationPrompt, CONSOLIDATION_SYSTEM_PROMPT } from './prompts';
+import { generatePrimaryConsolidationOutput } from './primary-model-call';
+import {
+  type ConsolidatedCode,
+  type ConsolidationOutput,
+  validateConsolidationOutput,
+} from './primary-output';
+import { buildCategoryConsolidationPrompt } from './prompts';
 
 export type ConsolidatePrimaryInput = {
   runId: string;
@@ -55,6 +58,16 @@ export type ConsolidatePrimaryInput = {
   sourceCategories?: string[] | null;
   model?: ModelSpec;
   apiKeys?: ProviderApiKeys;
+  /** Editor-supplied steering note. Prepended to the LLM user message
+   *  as an EDITOR INSTRUCTIONS block for this run only. */
+  editorNote?: string | null;
+  /** When true, this workflow does NOT update `pipelineRuns.status` —
+   *  the caller (typically the chained API route) owns the final
+   *  success/failure flip. The per-stage `pipelineStages` row is still
+   *  marked completed/failed via `markStageCompleted` / `markStageFailed`.
+   *  Used so a chained primary→secondaries run keeps the top-level
+   *  status as `running` for the full chain duration. */
+  skipRunStatusUpdate?: boolean;
 };
 
 export type ConsolidatePrimaryStats = {
@@ -69,121 +82,6 @@ export type ConsolidatePrimaryStats = {
 function shouldAbort(status: string | null): boolean {
   return status === 'cancelled' || status === 'failed' || status === null;
 }
-
-const nullableString = z.preprocess(
-  (value) => (value === null ? undefined : value),
-  z.string().optional(),
-);
-const nullableBoolean = z.preprocess((value) => {
-  if (value === null || value === '') return undefined;
-  if (typeof value === 'string') {
-    if (value.toLowerCase() === 'true') return true;
-    if (value.toLowerCase() === 'false') return false;
-  }
-  return value;
-}, z.boolean().optional());
-const nullableNumber = z.preprocess((value) => {
-  if (value === null || value === '') return undefined;
-  return value;
-}, z.coerce.number().optional());
-
-const ConsolidatedCodeSchema = z.object({
-  code: z.string(),
-  description: nullableString,
-  previouslySuggestedArticleTitle: nullableString,
-  previouslySuggestedArticleOrSectionTitle: nullableString,
-  coverageScore: nullableNumber,
-  importance: nullableNumber,
-  index: z.union([z.number(), z.string()]).optional(),
-});
-
-const IgnoredArticleSchema = z.object({
-  code: z.string(),
-  description: nullableString,
-  previouslySuggestedArticleTitle: nullableString,
-  justification: nullableString,
-  index: z.union([z.number(), z.string()]).optional(),
-});
-
-const IgnoredSectionSchema = z.object({
-  code: z.string(),
-  description: nullableString,
-  previouslySuggestedSectionTitle: nullableString,
-  exists: nullableBoolean,
-  articleId: nullableString,
-  justification: nullableString,
-  index: z.union([z.number(), z.string()]).optional(),
-});
-
-const ConsolidationOutputSchema = z.object({
-  specialty: nullableString,
-  category: z.string(),
-  articles: z.array(
-    z.object({
-      articleTitle: z.string(),
-      articleType: nullableString,
-      exists: nullableBoolean,
-      articleId: nullableString,
-      codes: z.array(ConsolidatedCodeSchema),
-      previousArticleTitleSuggestions: z.array(z.string()).optional().default([]),
-      overallCoverage: nullableNumber,
-      overallImportance: nullableNumber,
-      justification: nullableString,
-    }),
-  ),
-  includedArticleIndexes: z
-    .array(z.union([z.number(), z.string()]))
-    .optional()
-    .default([]),
-  ignoredArticles: z.array(IgnoredArticleSchema).optional().default([]),
-  ignoredArticleIndexes: z
-    .array(z.union([z.number(), z.string()]))
-    .optional()
-    .default([]),
-  sections: z.array(
-    z.object({
-      articleTitle: z.string(),
-      articleId: nullableString,
-      articleType: nullableString,
-      sectionUpdates: z.array(
-        z.object({
-          sectionName: z.string(),
-          codes: z.array(ConsolidatedCodeSchema),
-          previousArticleAndSectionTitleSuggestions: z
-            .array(z.string())
-            .optional()
-            .default([]),
-          exists: nullableBoolean,
-          sectionId: nullableString,
-          overallCoverage: nullableNumber,
-          overallImportance: nullableNumber,
-          justification: nullableString,
-        }),
-      ),
-    }),
-  ),
-  includedSectionIndexes: z
-    .array(z.union([z.number(), z.string()]))
-    .optional()
-    .default([]),
-  ignoredSections: z.array(IgnoredSectionSchema).optional().default([]),
-  ignoredSectionIndexes: z
-    .array(z.union([z.number(), z.string()]))
-    .optional()
-    .default([]),
-  totallyIgnoredIndexes: z
-    .array(
-      z.object({
-        code: z.string(),
-        index: z.union([z.number(), z.string()]).optional(),
-        justification: nullableString,
-      }),
-    )
-    .optional()
-    .default([]),
-});
-
-type ConsolidationOutput = z.infer<typeof ConsolidationOutputSchema>;
 
 type ConsolidationRows = {
   newArticles: Array<Record<string, unknown>>;
@@ -200,10 +98,7 @@ type ConsolidationRows = {
   >;
 };
 
-function codeList(
-  codes: Array<z.infer<typeof ConsolidatedCodeSchema>>,
-  allowed: Set<string>,
-) {
+function codeList(codes: ConsolidatedCode[], allowed: Set<string>) {
   const seen = new Set<string>();
   return codes.filter((code) => {
     if (!allowed.has(code.code) || seen.has(code.code)) return false;
@@ -228,6 +123,7 @@ async function consolidateCategoryWithLlm({
   articleTitles,
   model,
   apiKeys,
+  editorNote,
 }: {
   runId: string;
   specialtyName: string;
@@ -238,6 +134,7 @@ async function consolidateCategoryWithLlm({
   articleTitles: string[];
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  editorNote?: string | null;
 }): Promise<ConsolidationRows> {
   const resolved = resolveModel(model, apiKeys);
   const allowed = new Set(codes.map((code) => code.code));
@@ -248,6 +145,7 @@ async function consolidateCategoryWithLlm({
     region,
     articleTitles,
     codes,
+    editorNote,
   });
 
   await logEvent({
@@ -262,44 +160,15 @@ async function consolidateCategoryWithLlm({
     },
   });
 
-  const started = Date.now();
-  const result = await generateText({
-    model: resolved.sdkModel,
-    system: CONSOLIDATION_SYSTEM_PROMPT,
-    prompt,
-    output: Output.object({ schema: ConsolidationOutputSchema }),
-    providerOptions: resolved.providerOptions,
-    temperature: 1,
-  });
-  const durationMs = Date.now() - started;
-  const usage = {
-    inputTokens: result.usage?.inputTokens,
-    outputTokens: result.usage?.outputTokens,
-    reasoningTokens: result.usage?.reasoningTokens,
-    cachedInputTokens: result.usage?.cachedInputTokens,
-  };
-  await logEvent({
+  const generated = await generatePrimaryConsolidationOutput({
     runId,
-    stage: 'consolidate_primary',
-    level: 'info',
-    message: `LLM primary consolidation done for "${category}" in ${durationMs}ms.`,
-    metrics: {
-      durationMs,
-      ...usage,
-      costUsd: estimateCostUsd(resolved.modelId, usage),
-      model: resolved.modelId,
-      provider: resolved.provider,
-      reasoning: model.reasoning,
-      completion: result.output,
-    },
+    category,
+    prompt,
+    resolved,
+    model,
   });
 
-  const output = result.output;
-  if (output.category !== category) {
-    throw new Error(
-      `Consolidation output category mismatch: expected "${category}", got "${output.category}"`,
-    );
-  }
+  const output = validateConsolidationOutput(generated.output, category);
 
   const newArticles = output.articles
     .map((row) => {
@@ -557,6 +426,7 @@ export async function consolidatePrimaryWorkflow(
               articleTitles,
               model: input.model,
               apiKeys: input.apiKeys,
+              editorNote: input.editorNote,
             })
           : {
               newArticles: aggregateNewArticles(catCodes, category),
@@ -602,7 +472,9 @@ export async function consolidatePrimaryWorkflow(
       llmStub: !input.model,
       model: input.model?.model,
     });
-    await updatePipelineRunStatus(input.runId, 'completed');
+    if (!input.skipRunStatusUpdate) {
+      await updatePipelineRunStatus(input.runId, 'completed');
+    }
     await revalidateSpecialtyCache(input.specialtySlug);
     return {
       consolidationCategoriesProcessed,
@@ -613,7 +485,9 @@ export async function consolidatePrimaryWorkflow(
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[pipeline] consolidatePrimaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_primary', msg);
-    await updatePipelineRunStatus(input.runId, 'failed', msg);
+    if (!input.skipRunStatusUpdate) {
+      await updatePipelineRunStatus(input.runId, 'failed', msg);
+    }
     await revalidateSpecialtyCache(input.specialtySlug);
     throw e;
   }

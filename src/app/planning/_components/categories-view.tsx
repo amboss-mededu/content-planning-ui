@@ -1,6 +1,14 @@
 'use client';
 
-import { Badge, SegmentedControl, Stack, Text, Tooltip } from '@amboss/design-system';
+import {
+  Badge,
+  Notification,
+  SegmentedControl,
+  Stack,
+  Text,
+  Tooltip,
+} from '@amboss/design-system';
+import { useRouter } from 'next/navigation';
 import { type ReactNode, useCallback, useState } from 'react';
 import type {
   CategoryOrchestration,
@@ -9,7 +17,11 @@ import type {
 import { CategoryDetailsModal } from './category-details-modal';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { type Column, DataTable } from './data-table';
-import { useRerunningCategories } from './use-rerunning-categories';
+import { useConsolidationRerun } from './use-consolidation-rerun';
+import {
+  type PipelineRunSettlement,
+  useRerunningCategories,
+} from './use-rerunning-categories';
 
 type ChipTone = 'amber' | 'red' | 'none';
 
@@ -77,6 +89,15 @@ function nullableCount(value: number | null): ReactNode {
 
 type ViewMode = 'consolidation' | 'source';
 
+function settlementErrorMessage(settlement: PipelineRunSettlement): string | null {
+  if (settlement.status !== 'failed' && settlement.status !== 'cancelled') return null;
+  const categories = settlement.categories.join(', ');
+  const action = settlement.status === 'cancelled' ? 'cancelled' : 'failed';
+  return `Consolidation ${action} for "${categories}": ${
+    settlement.error ?? `run ${settlement.runId}`
+  }`;
+}
+
 export function CategoriesView({
   rows,
   sourceRows,
@@ -86,25 +107,43 @@ export function CategoriesView({
   sourceRows: SourceCategoryProgress[];
   slug: string;
 }) {
+  const router = useRouter();
   const [mode, setMode] = useState<ViewMode>('consolidation');
-  const [openBucket, setOpenBucket] = useState<CategoryOrchestration | null>(null);
-  const [optimisticRunningCategories, setOptimisticRunningCategories] = useState<
-    Set<string>
-  >(() => new Set());
-  const rebuildingCategories = useRerunningCategories(slug);
-  const runningCategories = new Set([
-    ...rebuildingCategories,
-    ...optimisticRunningCategories,
-  ]);
-
-  const setCategoryRunning = useCallback((category: string, running: boolean) => {
-    setOptimisticRunningCategories((current) => {
-      const next = new Set(current);
-      if (running) next.add(category);
-      else next.delete(category);
-      return next;
-    });
-  }, []);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
+  const {
+    rerun,
+    isRunning: isLocalCategoryRunning,
+    error: rerunError,
+    dismissError: dismissRerunError,
+    lastResult,
+    dismissLastResult,
+  } = useConsolidationRerun(slug);
+  const [settledRunError, setSettledRunError] = useState<string | null>(null);
+  const refreshOnSettled = useCallback(
+    (settlement: PipelineRunSettlement) => {
+      const message = settlementErrorMessage(settlement);
+      if (message) setSettledRunError(message);
+      router.refresh();
+    },
+    [router],
+  );
+  const rebuildingCategories = useRerunningCategories(slug, {
+    onSettled: refreshOnSettled,
+  });
+  const consolidationError = rerunError ?? settledRunError;
+  const dismissConsolidationError = useCallback(() => {
+    dismissRerunError();
+    setSettledRunError(null);
+  }, [dismissRerunError]);
+  const isCategoryRunning = useCallback(
+    (category: string) =>
+      isLocalCategoryRunning(category) || rebuildingCategories.has(category),
+    [isLocalCategoryRunning, rebuildingCategories],
+  );
+  const openBucket =
+    openCategory === null
+      ? null
+      : (rows.find((row) => row.consolidationCategory === openCategory) ?? null);
 
   const columns: Column<CategoryOrchestration>[] = [
     {
@@ -184,7 +223,7 @@ export function CategoriesView({
       description:
         'Not ready → some codes still unmapped. Ready for consolidation → all included codes mapped, awaiting consolidation. Consolidated → at least one consolidated output article cites a code from this bucket.',
       render: (r) => {
-        if (runningCategories.has(r.consolidationCategory)) {
+        if (isCategoryRunning(r.consolidationCategory)) {
           return <ConsolidationProgressBadge />;
         }
         const status = deriveStatus(r);
@@ -293,6 +332,15 @@ export function CategoriesView({
           { name: 'mode', value: 'source', label: 'Source categories' },
         ]}
       />
+      {consolidationError ? (
+        <Notification
+          type="error"
+          text={consolidationError}
+          isDismissable
+          closeButtonAriaLabel="Dismiss consolidation error"
+          onClickDismiss={dismissConsolidationError}
+        />
+      ) : null}
       {mode === 'consolidation' ? (
         <DataTable
           rows={rows}
@@ -302,7 +350,7 @@ export function CategoriesView({
           storageKey={`categories-table:${slug}`}
           onRowClick={(r) => {
             if (r.isUnbucketed) return;
-            setOpenBucket(r);
+            setOpenCategory(r.consolidationCategory);
           }}
         />
       ) : (
@@ -312,8 +360,13 @@ export function CategoriesView({
         <CategoryDetailsModal
           bucket={openBucket}
           slug={slug}
-          onRunningChange={setCategoryRunning}
-          onClose={() => setOpenBucket(null)}
+          rerun={rerun}
+          isRerunning={isCategoryRunning(openBucket.consolidationCategory)}
+          rerunError={consolidationError}
+          onDismissRerunError={dismissConsolidationError}
+          lastResult={lastResult}
+          onDismissLastResult={dismissLastResult}
+          onClose={() => setOpenCategory(null)}
         />
       )}
     </Stack>

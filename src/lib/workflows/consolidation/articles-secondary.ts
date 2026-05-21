@@ -36,6 +36,11 @@ export type ConsolidateArticlesSecondaryInput = {
    *  preserves the existing specialty-wide wipe-and-replace, used by
    *  the run-all path. */
   categories?: string[] | null;
+  /** When true, this workflow does NOT update `pipelineRuns.status` —
+   *  the caller (typically the chained API route) owns the final
+   *  success/failure flip. See ConsolidatePrimaryInput for the
+   *  rationale. */
+  skipRunStatusUpdate?: boolean;
 };
 
 function extractCodeList(raw: unknown): string[] {
@@ -155,7 +160,9 @@ export async function consolidateArticlesSecondaryWorkflow(
         merged: 0,
         llmStub: true,
       });
-      await updatePipelineRunStatus(input.runId, 'completed');
+      if (!input.skipRunStatusUpdate) {
+        await updatePipelineRunStatus(input.runId, 'completed');
+      }
       await revalidateSpecialtyCache(input.specialtySlug);
       return { merged: 0 };
     }
@@ -273,14 +280,18 @@ export async function consolidateArticlesSecondaryWorkflow(
       merged: finalRows.length,
       llmStub: false,
     });
-    await updatePipelineRunStatus(input.runId, 'completed');
+    if (!input.skipRunStatusUpdate) {
+      await updatePipelineRunStatus(input.runId, 'completed');
+    }
     await revalidateSpecialtyCache(input.specialtySlug);
     return { merged: finalRows.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[pipeline] consolidateArticlesSecondaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_articles', msg);
-    await updatePipelineRunStatus(input.runId, 'failed', msg);
+    if (!input.skipRunStatusUpdate) {
+      await updatePipelineRunStatus(input.runId, 'failed', msg);
+    }
     await revalidateSpecialtyCache(input.specialtySlug);
     throw e;
   }

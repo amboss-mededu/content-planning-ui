@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
+import { Badge, Button, Inline, Notification, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import type {
@@ -24,12 +24,16 @@ import { CategoryGroupedCodeList, CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
+import { RerunConfirmModal } from './rerun-confirm-modal';
 import type { SectionRow } from './sections-view';
 import {
   type ConsolidationRerunOptions,
   useConsolidationRerun,
 } from './use-consolidation-rerun';
-import { useRerunningCategories } from './use-rerunning-categories';
+import {
+  type PipelineRunSettlement,
+  useRerunningCategories,
+} from './use-rerunning-categories';
 
 type CategoryBucket = {
   articles: ArticleRow[];
@@ -48,6 +52,15 @@ const GROUPED_CODES_THRESHOLD = 15;
 const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
 const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
+
+function settlementErrorMessage(settlement: PipelineRunSettlement): string | null {
+  if (settlement.status !== 'failed' && settlement.status !== 'cancelled') return null;
+  const categories = settlement.categories.join(', ');
+  const action = settlement.status === 'cancelled' ? 'cancelled' : 'failed';
+  return `Consolidation ${action} for "${categories}": ${
+    settlement.error ?? `run ${settlement.runId}`
+  }`;
+}
 
 type ModalOpener =
   | { kind: 'article'; startAtId: string }
@@ -165,6 +178,7 @@ export function ConsolidationReviewView({
   const [modal, setModal] = useState<ModalOpener>(null);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [settledRunError, setSettledRunError] = useState<string | null>(null);
   const router = useRouter();
   // Per-category rerun is shared with the Category modal via this hook —
   // both surfaces honor the same in-flight set, confirm dialog, and
@@ -182,14 +196,25 @@ export function ConsolidationReviewView({
   // in-flight set so the rail badge flips instantly on click (before PB
   // realtime delivers the create event) and lingers until the server-side
   // row flips out of "running" status.
-  const rebuildingCategories = useRerunningCategories(slug);
+  const refreshOnSettled = useCallback(
+    (settlement: PipelineRunSettlement) => {
+      const message = settlementErrorMessage(settlement);
+      if (message) setSettledRunError(message);
+      router.refresh();
+    },
+    [router],
+  );
+  const rebuildingCategories = useRerunningCategories(slug, {
+    onSettled: refreshOnSettled,
+  });
   const isCategoryConsolidating = useCallback(
     (cat: string) => isLocalCategoryRunning(cat) || rebuildingCategories.has(cat),
     [isLocalCategoryRunning, rebuildingCategories],
   );
-  const consolidateError = perCategoryError ?? actionError;
+  const consolidateError = perCategoryError ?? settledRunError ?? actionError;
   const dismissConsolidateError = useCallback(() => {
     dismissPerCategoryError();
+    setSettledRunError(null);
     setActionError(null);
   }, [dismissPerCategoryError]);
 
@@ -454,6 +479,22 @@ export function ConsolidationReviewView({
   // ----- Modal close -----
   const closeModal = useCallback(() => setModal(null), []);
 
+  // Per-category rerun confirm flow. Holds the pending category +
+  // hasOutput so the amboss confirm modal can show the right copy and
+  // (for re-runs) collect an optional editor note that gets appended
+  // to the LLM user message.
+  const [pendingRerun, setPendingRerun] = useState<{
+    category: string;
+    hasOutput: boolean;
+  } | null>(null);
+  const requestConsolidation = useCallback(
+    (cat: string, options?: ConsolidationRerunOptions) => {
+      const hasOutput = options?.hasOutput ?? true;
+      setPendingRerun({ category: cat, hasOutput });
+    },
+    [],
+  );
+
   return (
     <Stack space="m">
       <ConsolidationViewSwitcher slug={slug} />
@@ -480,7 +521,7 @@ export function ConsolidationReviewView({
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
           isCategoryConsolidating={isCategoryConsolidating}
-          onStartConsolidation={startConsolidation}
+          onStartConsolidation={requestConsolidation}
           isRunningAll={isRunningAll}
           onStartConsolidationAll={startConsolidationAll}
           onResetApprovals={resetApprovals}
@@ -589,7 +630,7 @@ export function ConsolidationReviewView({
                   .catch(surfaceActionError);
               }}
               onApproveAll={approveAllInCategory}
-              onStartConsolidation={startConsolidation}
+              onStartConsolidation={requestConsolidation}
               isConsolidating={isCategoryConsolidating(selectedCategory)}
               hasOutput={
                 selectedBucket.articles.length + selectedBucket.sections.length > 0
@@ -649,6 +690,21 @@ export function ConsolidationReviewView({
           onClose={closeModal}
         />
       )}
+      <RerunConfirmModal
+        open={!!pendingRerun}
+        category={pendingRerun?.category ?? ''}
+        hasOutput={pendingRerun?.hasOutput ?? false}
+        onCancel={() => setPendingRerun(null)}
+        onConfirm={(editorNote) => {
+          const next = pendingRerun;
+          setPendingRerun(null);
+          if (!next) return;
+          void startConsolidation(next.category, {
+            hasOutput: next.hasOutput,
+            editorNote,
+          });
+        }}
+      />
     </Stack>
   );
 }
@@ -715,24 +771,13 @@ function CategoryRail({
     >
       <Stack space="xs">
         {consolidateError ? (
-          <button
-            type="button"
-            onClick={onDismissError}
-            style={{
-              textAlign: 'left',
-              padding: '6px 8px',
-              border: '1px solid rgb(220, 38, 38)',
-              borderRadius: 4,
-              background: 'rgb(254, 226, 226)',
-              cursor: 'pointer',
-              font: 'inherit',
-              color: 'rgb(127, 29, 29)',
-              fontSize: 12,
-            }}
-            title="Dismiss"
-          >
-            {consolidateError}
-          </button>
+          <Notification
+            type="error"
+            text={consolidateError}
+            isDismissable
+            closeButtonAriaLabel="Dismiss consolidation error"
+            onClickDismiss={onDismissError}
+          />
         ) : null}
         {lastResult ? (
           <button

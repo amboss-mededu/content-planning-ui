@@ -5,8 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSpecForStage } from '../[specialty]/pipeline/_components/model-selection-storage';
 
 export type ConsolidationRerunOptions = {
-  /** Show window.confirm before firing. Defaults to true. */
-  confirm?: boolean;
   /** Forward chainSecondaries to the workflow route. Defaults to true. */
   chainSecondaries?: boolean;
   /** Current-output signal for copy. Defaults to true for legacy callers. */
@@ -16,6 +14,10 @@ export type ConsolidationRerunOptions = {
    *  mapped-code read also accepts source-category scopes for compatibility
    *  with imported data and older mapping runs. */
   additionalCategories?: string[];
+  /** Editor-supplied note appended to the LLM user message as
+   *  `EDITOR INSTRUCTIONS` for this run only. Empty string / whitespace
+   *  is treated as null by the caller. */
+  editorNote?: string | null;
 };
 
 export type RerunResult = {
@@ -56,38 +58,35 @@ export function useConsolidationRerun(slug: string) {
 
   const rerun = useCallback(
     async (category: string, options?: ConsolidationRerunOptions) => {
-      const {
-        confirm = true,
-        chainSecondaries = true,
-        hasOutput = true,
-        additionalCategories,
-      } = options ?? {};
+      const { chainSecondaries = true, additionalCategories, editorNote } = options ?? {};
       if (inFlight.current.has(category)) return;
-      const verb = hasOutput ? 'Re-run' : 'Run';
-      const consequence = hasOutput
-        ? ' This will erase the current consolidation output for this category.'
-        : '';
-      if (
-        confirm &&
-        typeof window !== 'undefined' &&
-        !window.confirm(`${verb} consolidation for "${category}"?${consequence}`)
-      ) {
-        return;
-      }
       setError(null);
       setLastResult(null);
       inFlight.current.add(category);
       bump();
       try {
+        const trimmedNote =
+          typeof editorNote === 'string' && editorNote.trim().length > 0
+            ? editorNote.trim()
+            : null;
         const res = await fetch('/api/workflows/consolidate-primary', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             specialtySlug: slug,
             consolidationCategories: [category],
-            categories: Array.from(new Set([category, ...(additionalCategories ?? [])])),
+            // Only send the legacy `categories` body when the caller
+            // explicitly passes extras. The data filter ORs with a
+            // bucket-first fallback, so omitting it keeps the read scoped
+            // strictly to the consolidationCategory and matches the
+            // working Consolidations-tab trigger path.
+            categories:
+              additionalCategories && additionalCategories.length > 0
+                ? Array.from(new Set([category, ...additionalCategories]))
+                : undefined,
             chainSecondaries,
             model: readSpecForStage(slug, 'consolidate_primary'),
+            editorNote: trimmedNote,
           }),
         });
         const body = (await res.json().catch(() => ({}))) as {
