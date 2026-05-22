@@ -11,6 +11,7 @@ import {
   setArticleBacklogAssignee,
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
+import { deleteArticleLitSearchRunsByArticleKeyAsAdmin } from '@/lib/data/article-lit-search-runs';
 import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
 import {
   deleteArticleSourcesByArticleKeyAsAdmin,
@@ -514,9 +515,11 @@ export async function clearBacklogRow(
  * the `consolidatedArticles` representation; preserves the backlog
  * row's assignee so the article doesn't disappear from `/my-backlog`.
  *
- * Order: writing runs (cascade drafts) → sources → comments → article
- * review → backlog status. Drafts come first so a mid-cascade failure
+ * Order: writing runs (cascade drafts) → sources → lit-search runs →
+ * comments → backlog status. Drafts come first so a mid-cascade failure
  * doesn't leave orphaned children pointing at deleted parents.
+ * `articleLitSearchRuns` rows are wiped so the Phase 1 panel doesn't
+ * surface a stale "Last run failed" error from before the reset.
  */
 export async function resetArticle(
   slug: string,
@@ -526,6 +529,7 @@ export async function resetArticle(
   const user = await getCurrentUser();
   await deleteWritingRunsForArticleAsAdmin(slug, articleRecordId);
   await deleteArticleSourcesByArticleKeyAsAdmin(slug, articleKey);
+  await deleteArticleLitSearchRunsByArticleKeyAsAdmin(slug, articleKey);
   await deleteReviewCommentsForArticleAsAdmin(slug, articleKey);
   // NOTE: do NOT clear `articleReviews` here. The specialty backlog
   // page (`/planning/<slug>/backlog`) gates which articles appear by
@@ -541,6 +545,9 @@ export async function resetArticle(
     user?.email ?? null,
   );
   revalidatePath(`/planning/${slug}`, 'layout');
+  // Cross-specialty backlog reads the same data; without this, /my-backlog
+  // shows stale sources/status until the user navigates away and back.
+  revalidatePath('/my-backlog', 'layout');
 }
 
 /**

@@ -13,17 +13,23 @@
  * `extract_codes`.
  */
 
-import { generateText, Output } from 'ai';
+import { generateText, NoObjectGeneratedError, Output } from 'ai';
 import { z } from 'zod';
 import type { StageName } from '../lib/db-writes';
 import { logEvent } from '../lib/events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from '../lib/llm';
 import { estimateCostUsd } from '../lib/pricing';
 import {
+  describeJsonShape,
+  recoverElementsFromText,
+  recoverRawElementsFromText,
+} from './json-recovery';
+import {
   DEFAULT_QUERY_GENERATION_PROMPT,
   DEFAULT_RANK_CANDIDATES_PROMPT,
 } from './prompts';
 import type { PubmedCandidate } from './pubmed';
+import { normalizeRankedSourceRows } from './ranked-source-normalization';
 
 const QUERY_MODEL: ModelSpec = {
   provider: 'google',
@@ -67,10 +73,55 @@ const RankedSourceSchema = z.object({
 
 export type RankedSource = z.infer<typeof RankedSourceSchema>;
 
+type NoObjectLikeError = Error & {
+  text?: string;
+  finishReason?: string;
+  cause?: unknown;
+};
+
+function noObjectError(e: unknown): NoObjectLikeError | null {
+  if (NoObjectGeneratedError.isInstance(e)) return e as NoObjectLikeError;
+  if (!e || typeof e !== 'object') return null;
+  const candidate = e as Partial<NoObjectLikeError> & {
+    name?: string;
+    constructor?: { name?: string };
+  };
+  if (typeof candidate.text !== 'string') return null;
+  if (
+    candidate.name === 'NoObjectGeneratedError' ||
+    candidate.constructor?.name === 'NoObjectGeneratedError' ||
+    'finishReason' in candidate
+  ) {
+    return candidate as NoObjectLikeError;
+  }
+  return null;
+}
+
+function validationSummary(e: NoObjectLikeError): string | undefined {
+  const cause = e.cause;
+  if (!cause || typeof cause !== 'object') return undefined;
+  if ('issues' in cause) {
+    const issues = (cause as { issues?: unknown }).issues;
+    if (Array.isArray(issues)) return `issues:${issues.length}`;
+  }
+  if (
+    'message' in cause &&
+    typeof (cause as { message?: unknown }).message === 'string'
+  ) {
+    return (cause as { message: string }).message.slice(0, 240);
+  }
+  return cause.constructor?.name;
+}
+
 export type ArticleLike = {
   id: string;
   articleTitle?: string;
   codes?: string[];
+  /** Canonical key from the producer row (`consolidatedArticles.articleKey`).
+   *  When present, the worker uses it verbatim for backlog + sources writes
+   *  instead of recomputing from title alone — the producer's key is
+   *  category-aware and recomputing without category drifts. */
+  articleKey?: string;
 };
 
 export async function generateSearchQueries(args: {
@@ -126,13 +177,50 @@ Produce 3 PubMed queries.
     });
     return queries;
   } catch (e) {
+    const objectError = noObjectError(e);
+    if (objectError) {
+      const recovered = recoverElementsFromText(objectError.text, QuerySchema);
+      if (recovered && recovered.length > 0) {
+        const queries = recovered.filter((q) => q.trim().length > 0);
+        await logEvent({
+          runId: args.runId,
+          stage: args.stage,
+          level: 'warn',
+          message: `Recovered ${queries.length} queries from malformed JSON for ${title}`,
+          metrics: {
+            durationMs: Date.now() - started,
+            model: resolved.modelId,
+            provider: resolved.provider,
+            jsonRetry: true,
+            textLength: objectError.text?.length ?? 0,
+            finishReason: objectError.finishReason,
+            validationIssue: validationSummary(objectError),
+            jsonShape: describeJsonShape(objectError.text),
+          },
+        });
+        return queries;
+      }
+    }
     const msg = e instanceof Error ? e.message : String(e);
+    const rawText = objectError?.text;
     await logEvent({
       runId: args.runId,
       stage: args.stage,
       level: 'error',
       message: `Query generation failed for ${title}: ${msg}`,
-      metrics: { durationMs: Date.now() - started, model: resolved.modelId },
+      metrics: {
+        durationMs: Date.now() - started,
+        model: resolved.modelId,
+        provider: resolved.provider,
+        textLength: rawText?.length ?? 0,
+        jsonShape: rawText ? describeJsonShape(rawText) : undefined,
+        // Truncate the model output before persisting — pipelineEvents.metrics
+        // is JSON in PB and we don't need multi-KB completions to debug shape
+        // mismatches.
+        rawTextSample: rawText?.slice(0, 500),
+        finishReason: objectError?.finishReason,
+        validationIssue: objectError ? validationSummary(objectError) : undefined,
+      },
     });
     throw e;
   }
@@ -212,13 +300,65 @@ Rank the candidates and return the top sources only.
     });
     return ranked;
   } catch (e) {
+    const objectError = noObjectError(e);
+    if (objectError) {
+      const rawRows = recoverRawElementsFromText(objectError.text);
+      const ranked = rawRows ? normalizeRankedSourceRows(rawRows) : [];
+      if (ranked.length > 0) {
+        await logEvent({
+          runId: args.runId,
+          stage: args.stage,
+          level: 'warn',
+          message: `Recovered ${ranked.length} ranked sources from malformed JSON for ${title}`,
+          metrics: {
+            durationMs: Date.now() - started,
+            model: resolved.modelId,
+            provider: resolved.provider,
+            jsonRetry: true,
+            textLength: objectError.text?.length ?? 0,
+            finishReason: objectError.finishReason,
+            validationIssue: validationSummary(objectError),
+            jsonShape: describeJsonShape(objectError.text),
+          },
+        });
+        return ranked;
+      }
+      await logEvent({
+        runId: args.runId,
+        stage: args.stage,
+        level: 'error',
+        message: `Ranking JSON recovery failed for ${title}`,
+        metrics: {
+          durationMs: Date.now() - started,
+          model: resolved.modelId,
+          provider: resolved.provider,
+          jsonRetry: true,
+          recoveredRows: 0,
+          textLength: objectError.text?.length ?? 0,
+          finishReason: objectError.finishReason,
+          validationIssue: validationSummary(objectError),
+          jsonShape: describeJsonShape(objectError.text),
+          rawTextSample: objectError.text?.slice(0, 500),
+        },
+      });
+    }
     const msg = e instanceof Error ? e.message : String(e);
+    const rawText = objectError?.text;
     await logEvent({
       runId: args.runId,
       stage: args.stage,
       level: 'error',
       message: `Ranking failed for ${title}: ${msg}`,
-      metrics: { durationMs: Date.now() - started, model: resolved.modelId },
+      metrics: {
+        durationMs: Date.now() - started,
+        model: resolved.modelId,
+        provider: resolved.provider,
+        textLength: rawText?.length ?? 0,
+        jsonShape: rawText ? describeJsonShape(rawText) : undefined,
+        rawTextSample: rawText?.slice(0, 500),
+        finishReason: objectError?.finishReason,
+        validationIssue: objectError ? validationSummary(objectError) : undefined,
+      },
     });
     throw e;
   }

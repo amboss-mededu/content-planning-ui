@@ -252,6 +252,26 @@ export interface ArticleSourceRecord extends PbRecord {
 
 export type SourceReviewStatus = 'approved' | 'rejected';
 
+// --- Collection: articleLitSearchRuns --------------------------------------
+
+export type ArticleLitSearchRunStatus = 'running' | 'completed' | 'failed';
+
+export interface ArticleLitSearchRunRecord extends PbRecord {
+  specialtySlug: string;
+  articleKey: string;
+  articleRecordId: string;
+  runId?: string;
+  status: ArticleLitSearchRunStatus;
+  /** ms since epoch */
+  startedAt?: number;
+  /** ms since epoch */
+  finishedAt?: number;
+  errorMessage?: string;
+  queryCount?: number;
+  candidateCount?: number;
+  sourcesCount?: number;
+}
+
 // --- Collection: reviewComments --------------------------------------------
 
 export type ReviewRecordKind = 'article' | 'section';

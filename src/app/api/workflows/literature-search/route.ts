@@ -26,6 +26,11 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { extractCodes } from '@/app/planning/_components/code-utils';
 import { requireUserResponse } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
+import {
+  attachPipelineRunToLitSearchRunsAsAdmin,
+  claimArticleLitSearchRunAsAdmin,
+  finishArticleLitSearchRunAsAdmin,
+} from '@/lib/data/article-lit-search-runs';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
@@ -88,23 +93,71 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ skipped: true, articles: 0 });
   }
 
-  const { id: runId } = await createPipelineRun({ specialtySlug: slug });
-  await initPipelineStage({ runId, stage: 'literature_search' });
-
-  const articles = eligible.map((r) => {
+  const claimed: Array<{
+    id: string;
+    articleTitle?: string;
+    articleKey: string;
+    codes: string[];
+    litSearchRunId: string;
+  }> = [];
+  let alreadyRunning = 0;
+  for (const r of eligible) {
     const id = r.id ?? '';
     const codeRows = extractCodes(r.codes);
-    return {
+    const claim = await claimArticleLitSearchRunAsAdmin({
+      specialtySlug: slug,
+      articleKey: r.articleKey ?? '',
+      articleRecordId: id,
+    });
+    if (!claim.claimed) {
+      alreadyRunning++;
+      continue;
+    }
+    claimed.push({
       id,
       articleTitle: r.articleTitle,
+      articleKey: r.articleKey ?? '',
       codes: codeRows.map((c) => c.description ?? c.code).filter((s): s is string => !!s),
-    };
-  });
+      litSearchRunId: claim.record.id,
+    });
+  }
+
+  if (claimed.length === 0) {
+    return NextResponse.json({
+      skipped: true,
+      reason: alreadyRunning > 0 ? 'already_running' : 'no_claims',
+      articles: 0,
+      alreadyRunning,
+    });
+  }
+
+  let runId: string;
+  try {
+    const run = await createPipelineRun({ specialtySlug: slug });
+    runId = run.id;
+    await initPipelineStage({ runId, stage: 'literature_search' });
+    await attachPipelineRunToLitSearchRunsAsAdmin(
+      claimed.map((article) => article.litSearchRunId),
+      runId,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await Promise.all(
+      claimed.map((article) =>
+        finishArticleLitSearchRunAsAdmin(article.litSearchRunId, {
+          status: 'failed',
+          errorMessage: `Failed to start literature-search run: ${msg}`,
+          sourcesCount: 0,
+        }),
+      ),
+    );
+    throw e;
+  }
 
   void runLiteratureSearch({
     runId,
     specialtySlug: slug,
-    articles,
+    articles: claimed,
     apiKeys,
   }).catch((e) => {
     console.error('[literature-search] unhandled rejection', e);
@@ -116,6 +169,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     runId,
     specialty: slug,
-    articles: articles.length,
+    articles: claimed.length,
+    alreadyRunning,
   });
 }

@@ -45,13 +45,18 @@ export function RunLitSearchRowButton({ slug, articleRecordId }: Props) {
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         skipped?: boolean;
+        reason?: string;
       };
       if (!res.ok) {
         setError(body.error ?? `HTTP ${res.status}`);
         return;
       }
       if (body.skipped) {
-        setError('Already searched or not eligible');
+        setError(
+          body.reason === 'already_running'
+            ? 'Search already in progress'
+            : 'Already searched or not eligible',
+        );
         return;
       }
       router.refresh();

@@ -21,12 +21,12 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleLitSearchRunRecord,
   ArticleSourceRecord,
   PredatoryJournalRisk,
   ReviewCommentRecord,
   SourceReviewStatus,
 } from '@/lib/pb/types';
-import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import {
   getLatestDraftForArticle,
   resetArticle,
@@ -45,6 +45,8 @@ import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import { LitSearchPhase1Panel } from './lit-search-phase1-panel';
+import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import {
   canApproveSources,
   canDraft,
@@ -53,9 +55,9 @@ import {
   missingCortexIdCount,
   phaseFromStatus,
 } from './pipeline-stage-gates';
-import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
 import { StartWritingButton } from './start-writing-button';
+import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
 // ---------------------------------------------------------------------------
 // Shared types — used by both review-stage variants. Kept here so the v2
@@ -129,6 +131,7 @@ export type ManagerOpener =
        *  clicks). Falls back to `currentStatus` if missing. */
       currentBacklogRow?: ArticleBacklogRecord;
       sources: ArticleSourceRecord[];
+      litSearchRuns?: ArticleLitSearchRunRecord[];
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
       categoryLookup: CategoryLookup;
@@ -137,6 +140,10 @@ export type ManagerOpener =
         next: ArticleBacklogStatus,
         notes?: string,
       ) => void | Promise<void>;
+      /** Called when the user clicks "Search sources" in the Phase 1
+       *  panel. Polls the parent page so the badge + table reflect the
+       *  new running row even when PB realtime is anonymous-blocked. */
+      onPipelineActionTriggered?: () => void;
     }
   | {
       type: 'update';
@@ -608,11 +615,13 @@ function BacklogManagerView({
     currentStatus: openerCurrentStatus,
     currentBacklogRow,
     sources: openerSources,
+    litSearchRuns: openerLitSearchRuns,
     initialComments,
     initialNotes,
     categoryLookup,
     viewerEmail,
     onStatusChange,
+    onPipelineActionTriggered,
   } = opener;
   const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
@@ -621,26 +630,20 @@ function BacklogManagerView({
   const [resetting, setResetting] = useState(false);
   const notesDirty = pendingNotes !== notes;
 
-  // Live PB subscriptions — the modal becomes its own source of truth.
-  // Status: seed from the parent's optimistic backlog row (if present)
-  // so the first render matches the row list. PB realtime applies every
-  // change after that — including async pipeline writes from the writer
-  // and the lit-search worker.
-  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
-    'articleBacklog',
-    currentBacklogRow ? [currentBacklogRow] : [],
-    { filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"` },
+  // Read modal state directly from the opener props. The parent already
+  // runs PB subscriptions (via `useApprovalState`) AND polls
+  // `router.refresh()` on pipeline actions, so the props it passes are
+  // always fresh — and the snapshotToken-based reseed inside our own
+  // `useLiveCollection` calls used to silently fail when PB's `updated`
+  // string didn't visibly change between refreshes, freezing the badge.
+  // Reading the props directly eliminates that failure mode entirely.
+  const currentStatus = currentBacklogRow?.status ?? openerCurrentStatus;
+  const sources = openerSources;
+  const litSearchSnapshot = useMemo(
+    () => deriveLitSearchSnapshot(openerLitSearchRuns ?? []),
+    [openerLitSearchRuns],
   );
-  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
-
-  // Sources: same pattern. Seeded with the opener's SSR snapshot; live
-  // sub adds rows created by lit-search and applies review-status updates
-  // without a router.refresh.
-  const sources = useLiveCollection<ArticleSourceRecord>(
-    'articleSources',
-    openerSources,
-    { filter: `articleKey = "${article.articleKey}"` },
-  );
+  const isLitSearchRunning = litSearchSnapshot.inFlight.has(article.articleKey);
 
   // The article's real phase, derived from the persisted status.
   const actualPhase = phaseFromStatus(currentStatus);
@@ -703,11 +706,13 @@ function BacklogManagerView({
         >
           <SharedHeader
             title={article.articleTitle ?? '(untitled)'}
-            stageBadge={{ text: 'Backlog', color: 'blue' }}
             decisionBadge={{
               text: STATUS_LABEL[currentStatus],
               color: STATUS_COLOR[currentStatus],
             }}
+            decisionBadgeNode={
+              isLitSearchRunning ? <LitSearchProgressBadge /> : undefined
+            }
             metaInline={
               <Inline space="s">
                 {article.articleType && (
@@ -743,10 +748,13 @@ function BacklogManagerView({
             phase={viewedPhase}
             status={currentStatus}
             sources={sources}
+            litSearchRuns={openerLitSearchRuns ?? []}
             slug={slug}
+            articleKey={article.articleKey}
             articleRecordId={article.id}
             viewerEmail={viewerEmail}
             onAdvance={pickStatus}
+            onPipelineActionTriggered={onPipelineActionTriggered}
           />
 
           <DecisionNoteField
@@ -813,16 +821,20 @@ function BacklogManagerView({
                     setResetting(true);
                     try {
                       await resetArticle(slug, article.articleKey, article.id);
-                      // Force the page's server-rendered data to refresh
-                      // so the underlying rows array picks up the new
-                      // status. The PB realtime sub on the parent backlog
-                      // map already reflects the change, but the server-
-                      // rendered `rows` (sourcesCount, etc.) needs a
-                      // re-fetch. Keep the modal open so the user sees
-                      // the article is still here, just back at phase 1
-                      // — addresses the "reset removed the article"
-                      // report.
-                      router.refresh();
+                      // Pulse the parent's polling window. A single
+                      // `router.refresh()` here used to race the
+                      // `revalidatePath` cache commit and sometimes pulled
+                      // the pre-reset snapshot; the parent pulse fires an
+                      // immediate refresh AND polls for 30s, so the modal
+                      // header badge + the backlog table row both catch
+                      // up without a manual reload. Keep the modal open
+                      // so the user sees the article is still here, just
+                      // back at phase 1.
+                      if (onPipelineActionTriggered) {
+                        onPipelineActionTriggered();
+                      } else {
+                        router.refresh();
+                      }
                       setResetting(false);
                     } catch (e) {
                       console.error('[reset-article] failed', e);
@@ -869,12 +881,21 @@ function SharedHeader({
   title,
   stageBadge,
   decisionBadge,
+  decisionBadgeNode,
   extraBadges,
   metaInline,
 }: {
   title: string;
-  stageBadge: { text: string; color: BadgeColor };
+  /** Optional stage indicator. Backlog views omit this (the modal already
+   *  scopes by surface; no need for a redundant "Backlog" badge). Review
+   *  views still pass it so editors see they're in the review surface. */
+  stageBadge?: { text: string; color: BadgeColor };
   decisionBadge: { text: string; color: BadgeColor; tooltip?: string } | null;
+  /** Live ReactNode override for the decision badge slot. Takes precedence
+   *  over `decisionBadge` when present — used so the backlog modal can
+   *  swap in `<LitSearchProgressBadge />` while the lit-search worker is
+   *  running, without re-implementing the badge layout. */
+  decisionBadgeNode?: React.ReactNode;
   extraBadges?: Array<{ text: string; color: BadgeColor }>;
   metaInline?: React.ReactNode;
 }) {
@@ -884,18 +905,20 @@ function SharedHeader({
         <Text size="m" weight="bold">
           {title}
         </Text>
-        <Badge text={stageBadge.text} color={stageBadge.color} />
+        {stageBadge ? <Badge text={stageBadge.text} color={stageBadge.color} /> : null}
         {extraBadges?.map((b) => (
           <Badge key={b.text} text={b.text} color={b.color} />
         ))}
-        {decisionBadge &&
-          (decisionBadge.tooltip ? (
-            <span title={decisionBadge.tooltip}>
+        {decisionBadgeNode
+          ? decisionBadgeNode
+          : decisionBadge &&
+            (decisionBadge.tooltip ? (
+              <span title={decisionBadge.tooltip}>
+                <Badge text={decisionBadge.text} color={decisionBadge.color} />
+              </span>
+            ) : (
               <Badge text={decisionBadge.text} color={decisionBadge.color} />
-            </span>
-          ) : (
-            <Badge text={decisionBadge.text} color={decisionBadge.color} />
-          ))}
+            ))}
       </Inline>
       {metaInline}
     </Stack>
@@ -1669,10 +1692,13 @@ function PhaseBody({
   phase,
   status,
   sources,
+  litSearchRuns,
   slug,
+  articleKey,
   articleRecordId,
   viewerEmail,
   onAdvance,
+  onPipelineActionTriggered,
 }: {
   /** The phase the user is *viewing* — drives which panel renders. May lag
    *  behind `status` when the editor has chip-navigated to an earlier
@@ -1684,27 +1710,35 @@ function PhaseBody({
    *  no-op anyway. */
   status: ArticleBacklogStatus;
   sources: ArticleSourceRecord[];
+  litSearchRuns: ArticleLitSearchRunRecord[];
   slug: string;
+  articleKey: string;
   articleRecordId: string;
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
+  onPipelineActionTriggered?: () => void;
 }) {
   const copy = PHASE_COPY[phase];
 
   if (phase === 1) {
     const litEligible = canRunLitSearch(status, sources.length);
+    if (litEligible) {
+      return (
+        <LitSearchPhase1Panel
+          slug={slug}
+          articleKey={articleKey}
+          articleRecordId={articleRecordId}
+          copy={copy}
+          initialRuns={litSearchRuns}
+          onTriggered={onPipelineActionTriggered}
+        />
+      );
+    }
     return (
       <Stack space="m">
         <Text color="secondary">
-          {litEligible
-            ? copy
-            : `Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
+          {`Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
         </Text>
-        {litEligible ? (
-          <Inline space="s" vAlignItems="center">
-            <RunLitSearchRowButton slug={slug} articleRecordId={articleRecordId} />
-          </Inline>
-        ) : null}
       </Stack>
     );
   }
@@ -2645,16 +2679,11 @@ function BacklogUpdateView({
     onStatusChange,
   } = opener;
 
-  // Live sub mirrors the new-article modal so cross-tab / async writes
-  // keep the stepper in sync.
-  const liveBacklog = useLiveCollection<ArticleBacklogRecord>(
-    'articleBacklog',
-    currentBacklogRow ? [currentBacklogRow] : [],
-    {
-      filter: `specialtySlug = "${slug}" && articleKey = "${article.articleKey}"`,
-    },
-  );
-  const currentStatus = liveBacklog[0]?.status ?? openerCurrentStatus;
+  // Read status directly from the opener prop — same reasoning as the
+  // new-article view above. The parent's polling pulse keeps these props
+  // fresh; the previous self-contained useLiveCollection added a stale
+  // snapshotToken layer that masked legitimate updates.
+  const currentStatus = currentBacklogRow?.status ?? openerCurrentStatus;
 
   const [notes, setNotes] = useState<string>(initialNotes);
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
@@ -2711,7 +2740,6 @@ function BacklogUpdateView({
         >
           <SharedHeader
             title={article.articleTitle ?? '(untitled)'}
-            stageBadge={{ text: 'Backlog · Update', color: 'purple' }}
             decisionBadge={{
               text: STATUS_LABEL[currentStatus],
               color: STATUS_COLOR[currentStatus],

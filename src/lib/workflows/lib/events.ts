@@ -54,6 +54,14 @@ export type EventMetrics = {
   validationIssueMessage?: string;
   /** Top-level parsed JSON keys seen during schema-validation failure. */
   topLevelKeys?: string[];
+  /** Compact top-level JSON shape observed during malformed-object recovery. */
+  jsonShape?: string;
+  /** First N chars of the raw model output, captured when JSON recovery fails
+   *  so the persisted error event is enough to debug a shape mismatch
+   *  without re-running the call. */
+  rawTextSample?: string;
+  /** Number of rows recovered from malformed-object output. */
+  recoveredRows?: number;
   /** Per-code metadata for `map` events. */
   code?: string;
   attempts?: number;
@@ -66,6 +74,12 @@ export type EventMetrics = {
   passes?: number;
   /** Source count for the write-article run header log. */
   sources?: number;
+  /** Which article this event belongs to within a multi-article lit-search run. */
+  articleRecordId?: string;
+  /** Lifecycle marker for a per-article lit-search invocation. Used by the
+   *  modal's progress badge to derive "is this article currently being
+   *  searched" from the latest event tagged with the same `articleRecordId`. */
+  litSearchPhase?: 'start' | 'end';
   /** Number of Gemini Files PDFs attached to a writing-pass request. */
   attachedFiles?: number;
   /** Gemini Files ensure-upload counters logged at the start of a

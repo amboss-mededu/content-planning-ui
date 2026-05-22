@@ -261,7 +261,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
       | 'articleKey'
     >
   >,
-): Promise<void> {
+): Promise<number> {
   const pb = await createAdminClient();
   // Delete any prior rows that match either the stable key or the
   // (legacy) PB id — handles the case where a partial backfill left
@@ -269,7 +269,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
   const filterParts: string[] = [];
   if (articleKey) filterParts.push(`articleKey = "${articleKey}"`);
   if (articleRecordId) filterParts.push(`articleRecordId = "${articleRecordId}"`);
-  if (filterParts.length === 0) return;
+  if (filterParts.length === 0) return 0;
   const filter = `specialtySlug = "${slug}" && (${filterParts.join(' || ')})`;
   const existing = await pb
     .collection<ArticleSourceRecord>('articleSources')
@@ -283,6 +283,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
       ...row,
     });
   }
+  return rows.length;
 }
 
 /**

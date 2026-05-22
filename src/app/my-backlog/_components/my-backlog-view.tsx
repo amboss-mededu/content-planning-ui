@@ -16,7 +16,11 @@ import {
 import { CodeChipList } from '@/app/planning/_components/code-chip';
 import type { CategoryLookup, EmbeddedCode } from '@/app/planning/_components/code-utils';
 import { type Column, DataTable } from '@/app/planning/_components/data-table';
+import { LitSearchProgressBadge } from '@/app/planning/_components/lit-search-progress-badge';
+import { canRunLitSearch } from '@/app/planning/_components/pipeline-stage-gates';
+import { RunLitSearchRowButton } from '@/app/planning/_components/run-lit-search-row-button';
 import type { SectionRow } from '@/app/planning/_components/sections-view';
+import { useLitSearchState } from '@/app/planning/_components/use-running-lit-search-articles';
 import {
   clearBacklogRow,
   setBacklogAssignee,
@@ -25,6 +29,7 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleLitSearchRunRecord,
   ArticleSourceRecord,
   ReviewCommentRecord,
 } from '@/lib/pb/types';
@@ -87,6 +92,7 @@ export function MyBacklogView({
   assignableUsers,
   initialBacklog,
   initialSourcesByArticleKey,
+  initialLitSearchRuns,
   initialCommentsByArticle,
   viewerEmail,
 }: {
@@ -95,6 +101,7 @@ export function MyBacklogView({
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
+  initialLitSearchRuns: ArticleLitSearchRunRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail: string;
 }) {
@@ -125,6 +132,74 @@ export function MyBacklogView({
   }, [liveBacklogRows]);
   const [drawerArticleId, setDrawerArticleId] = useState<string | null>(null);
   const [managerArticleId, setManagerArticleId] = useState<string | null>(null);
+  const initialSources = useMemo(
+    () => Object.values(initialSourcesByArticleKey).flat(),
+    [initialSourcesByArticleKey],
+  );
+  const liveSources = useLiveCollection<ArticleSourceRecord>(
+    'articleSources',
+    initialSources,
+  );
+  const sourcesByArticleKey = useMemo(() => {
+    const rowKeys = new Set(rows.map((row) => row.articleKey));
+    const out: Record<string, ArticleSourceRecord[]> = {};
+    for (const source of liveSources) {
+      const key = source.articleKey;
+      if (!key || !rowKeys.has(key)) continue;
+      if (!out[key]) out[key] = [];
+      out[key].push(source);
+    }
+    for (const key of Object.keys(out)) {
+      out[key].sort((a, b) => {
+        const ar = a.rank ?? Number.POSITIVE_INFINITY;
+        const br = b.rank ?? Number.POSITIVE_INFINITY;
+        if (ar !== br) return ar - br;
+        return a.title.localeCompare(b.title);
+      });
+    }
+    return out;
+  }, [liveSources, rows]);
+  const litSearchState = useLitSearchState(initialLitSearchRuns);
+
+  // Browser PB realtime drops events for auth-gated collections (httpOnly
+  // pb_auth cookie isn't readable from JS). Mirror the polling fallback in
+  // `codes-view-client.tsx` so badge swaps land for the cross-specialty
+  // backlog too.
+  //
+  // State (not a ref) for the click timestamp: useRef mutations don't
+  // trigger a re-render, so the polling effect would never re-run when
+  // the click fires.
+  const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
+  const onPipelineActionTriggered = useCallback(() => {
+    console.log('[lit-search-pulse] fired');
+    setPipelineActionPulse(Date.now());
+    router.refresh();
+  }, [router]);
+
+  useEffect(() => {
+    const hasRunningRow = initialLitSearchRuns.some((r) => r.status === 'running');
+    const isInClickWindow = () =>
+      pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
+    if (!hasRunningRow && !isInClickWindow()) return;
+    const tick = () => {
+      console.log('[lit-search-poll] tick', {
+        pulseAgeMs: pipelineActionPulse ? Date.now() - pipelineActionPulse : null,
+        runningRows: initialLitSearchRuns.filter((r) => r.status === 'running').length,
+      });
+      router.refresh();
+      const stillRunning = initialLitSearchRuns.some((r) => r.status === 'running');
+      if (!stillRunning && !isInClickWindow()) {
+        window.clearInterval(id);
+      }
+    };
+    const id = window.setInterval(tick, 2500);
+    const onFocus = () => router.refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [initialLitSearchRuns, pipelineActionPulse, router]);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -146,6 +221,10 @@ export function MyBacklogView({
     (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
+  const isLitSearchRunning = useCallback(
+    (articleKey: string): boolean => litSearchState.inFlight.has(articleKey),
+    [litSearchState.inFlight],
+  );
 
   const specialtyOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -158,7 +237,16 @@ export function MyBacklogView({
   }, [rows]);
 
   const filtered = useMemo(() => {
-    let out = rows;
+    let out = rows.map((row) => {
+      const sources = sourcesByArticleKey[row.articleKey] ?? [];
+      return row.type === 'new'
+        ? {
+            ...row,
+            sourcesCount: sources.length,
+            registeredSourcesCount: sources.filter((s) => !!s.cortexSourceId).length,
+          }
+        : row;
+    });
     if (statusFilter) {
       out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
     }
@@ -166,20 +254,39 @@ export function MyBacklogView({
       out = out.filter((r) => r.specialtySlug === specialtyFilter);
     }
     return out;
-  }, [rows, statusFilter, specialtyFilter, statusOf]);
+  }, [rows, sourcesByArticleKey, statusFilter, specialtyFilter, statusOf]);
+
+  const liveRows = useMemo(
+    () =>
+      rows.map((row) => {
+        const sources = sourcesByArticleKey[row.articleKey] ?? [];
+        return row.type === 'new'
+          ? {
+              ...row,
+              sourcesCount: sources.length,
+              registeredSourcesCount: sources.filter((s) => !!s.cortexSourceId).length,
+            }
+          : row;
+      }),
+    [rows, sourcesByArticleKey],
+  );
 
   const counts = useMemo(() => {
     let published = 0;
     let inProgress = 0;
     let waiting = 0;
-    for (const r of rows) {
+    for (const r of liveRows) {
+      if (isLitSearchRunning(r.articleKey)) {
+        inProgress++;
+        continue;
+      }
       const s = statusOf(r.articleKey);
       if (s === 'published') published++;
       else if (WAITING_STATUSES.includes(s)) waiting++;
       else if (IN_PROGRESS_STATUSES.includes(s)) inProgress++;
     }
     return { published, inProgress, waiting };
-  }, [rows, statusOf]);
+  }, [liveRows, statusOf, isLitSearchRunning]);
 
   // Optimistic state was removed when this view moved to PB realtime —
   // see the matching comment in `backlog-view.tsx`. Server writes, the
@@ -301,13 +408,22 @@ export function MyBacklogView({
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => STATUS_LABEL[statusOf(r.articleKey)],
+      accessor: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
-      filterValue: (r) => STATUS_LABEL[statusOf(r.articleKey)],
+      filterValue: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
         const s = statusOf(r.articleKey);
+        if (isLitSearchRunning(r.articleKey)) {
+          return <LitSearchProgressBadge />;
+        }
         return (
           <span
             style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
@@ -341,14 +457,26 @@ export function MyBacklogView({
       width: 180,
       verticalAlign: 'middle',
       align: 'left',
-      accessor: (r) => NEXT_ACTION[statusOf(r.articleKey)],
+      accessor: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : NEXT_ACTION[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: Array.from(
         new Set(Object.values(NEXT_ACTION).filter((v) => v !== '—')),
       ).map((v) => ({ value: v, label: v })),
-      filterValue: (r) => NEXT_ACTION[statusOf(r.articleKey)],
-      render: (r) => <Text>{NEXT_ACTION[statusOf(r.articleKey)]}</Text>,
+      filterValue: (r) =>
+        isLitSearchRunning(r.articleKey)
+          ? 'Search in progress...'
+          : NEXT_ACTION[statusOf(r.articleKey)],
+      render: (r) => (
+        <Text>
+          {isLitSearchRunning(r.articleKey)
+            ? 'Search in progress...'
+            : NEXT_ACTION[statusOf(r.articleKey)]}
+        </Text>
+      ),
     },
     {
       key: 'assignee',
@@ -406,12 +534,21 @@ export function MyBacklogView({
       width: 120,
       verticalAlign: 'middle',
       align: 'center',
-      render: (r) =>
-        r.type === 'update' ? (
-          <Text size="xs" color="secondary">
-            —
-          </Text>
-        ) : (
+      render: (r) => {
+        if (r.type === 'update') {
+          return (
+            <Text size="xs" color="secondary">
+              —
+            </Text>
+          );
+        }
+        if (isLitSearchRunning(r.articleKey)) {
+          return <LitSearchProgressBadge />;
+        }
+        if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
+          return <RunLitSearchRowButton slug={r.specialtySlug} articleRecordId={r.id} />;
+        }
+        return (
           <Button
             variant="tertiary"
             size="s"
@@ -422,17 +559,26 @@ export function MyBacklogView({
           >
             View
           </Button>
-        ),
+        );
+      },
     },
   ];
 
-  const drawerRow = drawerArticleId ? rows.find((r) => r.id === drawerArticleId) : null;
+  const drawerRow = drawerArticleId
+    ? liveRows.find((r) => r.id === drawerArticleId)
+    : null;
   const drawerSources = drawerRow?.articleKey
-    ? (initialSourcesByArticleKey[drawerRow.articleKey] ?? [])
+    ? (sourcesByArticleKey[drawerRow.articleKey] ?? [])
     : [];
   const managerRow = managerArticleId
-    ? (rows.find((r) => r.id === managerArticleId) ?? null)
+    ? (liveRows.find((r) => r.id === managerArticleId) ?? null)
     : null;
+  const managerLatestLitSearchRun = managerRow?.articleKey
+    ? litSearchState.latestByArticleKey.get(managerRow.articleKey)
+    : undefined;
+  const managerLitSearchRuns = managerLatestLitSearchRun
+    ? [managerLatestLitSearchRun]
+    : initialLitSearchRuns.filter((run) => run.articleKey === managerRow?.articleKey);
 
   return (
     <Stack space="m">
@@ -465,7 +611,7 @@ export function MyBacklogView({
         getRowKey={(r) => r.id}
         onRowClick={(r) => setManagerArticleId(r.id)}
         countAddendum={() => 'articles'}
-        leadingNote={`${rows.length} assigned · ${counts.published} published · ${counts.inProgress} in progress · ${counts.waiting} waiting for sources`}
+        leadingNote={`${liveRows.length} assigned · ${counts.published} published · ${counts.inProgress} in progress · ${counts.waiting} waiting for sources`}
         storageKey="my-backlog-table"
       />
       {drawerArticleId && (
@@ -484,12 +630,14 @@ export function MyBacklogView({
             article: managerRow,
             currentStatus: statusOf(managerRow.articleKey),
             currentBacklogRow: backlog[managerRow.articleKey],
-            sources: initialSourcesByArticleKey[managerRow.articleKey] ?? [],
+            sources: sourcesByArticleKey[managerRow.articleKey] ?? [],
+            litSearchRuns: managerLitSearchRuns,
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,
             viewerEmail,
             onStatusChange: (next, notes) => handleStatusChange(managerRow, next, notes),
+            onPipelineActionTriggered,
           }}
           onClose={() => setManagerArticleId(null)}
         />

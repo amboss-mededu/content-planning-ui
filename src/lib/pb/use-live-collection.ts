@@ -19,14 +19,30 @@ export function useLiveCollection<T extends RecordModel>(
   initial: T[],
   opts?: { filter?: string },
 ): T[] {
+  const initialRef = useRef(initial);
   const initialSnapshotToken = snapshotToken(initial);
   const lastAppliedSnapshotToken = useRef(initialSnapshotToken);
 
   // Seed from the server-rendered snapshot; subsequent RSC refreshes
-  // are applied by the snapshot-token effect below.
+  // are applied below.
   const [rows, setRows] = useState<T[]>(initial);
 
   useEffect(() => {
+    // (i) Primary freshness signal: parent passed a NEW `initial` array
+    //     reference. Next 16's RSC streaming produces a new reference on
+    //     every `router.refresh()`, so trusting the reference is more
+    //     reliable than `id:updated` token comparison (which can collide
+    //     when PB formats `updated` identically across sub-second writes
+    //     and silently freeze the hook on pre-refresh state).
+    if (initialRef.current !== initial) {
+      initialRef.current = initial;
+      lastAppliedSnapshotToken.current = initialSnapshotToken;
+      setRows(initial);
+      return;
+    }
+    // (ii) Fallback: same array reference but mutated contents. Rare in
+    //      practice — kept so callers that recompute `initial` outside
+    //      a useMemo dep still see updates.
     if (lastAppliedSnapshotToken.current === initialSnapshotToken) return;
     lastAppliedSnapshotToken.current = initialSnapshotToken;
     setRows(initial);
