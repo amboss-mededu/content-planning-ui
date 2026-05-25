@@ -9,10 +9,9 @@
  * unassigned, or no backlog row yet) — the parent column decides
  * whether to render it.
  *
- * Search runs fire-and-forget on the server; this button just kicks
- * off and refreshes. The backlog status flip
- * (`waiting-for-sources` → `sources-searched`) happens inside
- * runLiteratureSearch and shows up on the next refresh.
+ * Search runs on n8n; this button just dispatches and refreshes. The
+ * backlog status flip (`waiting-for-sources` → `sources-searched`)
+ * happens in the callback handler when n8n posts results back.
  */
 
 import { Button, Inline, Text } from '@amboss/design-system';

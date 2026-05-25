@@ -1,3 +1,6 @@
-export type { ArticleLike, RankedSource } from './llm-calls';
-export type { PubmedCandidate } from './pubmed';
-export { runLiteratureSearch } from './run';
+export type {
+  DispatchArticle,
+  DispatchLiteratureSearchInput,
+  DispatchLiteratureSearchResult,
+} from './dispatch';
+export { dispatchLiteratureSearch } from './dispatch';
