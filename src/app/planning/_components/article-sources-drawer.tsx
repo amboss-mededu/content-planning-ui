@@ -3,6 +3,7 @@
 import { Badge, Modal, Text } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
+import { isSafeUrl } from '@/lib/url';
 
 const SOURCE_TYPE_LABEL: Record<string, string> = {
   guideline: 'Guideline',
@@ -109,14 +110,18 @@ export function ArticleSourcesDrawer({
                     </td>
                     <td style={tdStyle}>
                       {s.url ? (
-                        <a
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ wordBreak: 'break-all' }}
-                        >
-                          {s.url}
-                        </a>
+                        isSafeUrl(s.url) ? (
+                          <a
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ wordBreak: 'break-all' }}
+                          >
+                            {s.url}
+                          </a>
+                        ) : (
+                          <span style={{ wordBreak: 'break-all' }}>{s.url}</span>
+                        )
                       ) : (
                         '—'
                       )}
