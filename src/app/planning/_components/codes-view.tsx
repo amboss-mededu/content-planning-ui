@@ -53,7 +53,7 @@ export function CodesView({
   unmappedCodes,
   unmappedCount,
   totalCount,
-  isLoadingMore,
+  loadState,
   remapLoading,
   onRequestRemapData,
 }: {
@@ -67,7 +67,7 @@ export function CodesView({
   unmappedCodes: UnmappedCodePickerRow[];
   unmappedCount: number;
   totalCount?: number;
-  isLoadingMore?: boolean;
+  loadState?: 'loading' | 'retrying' | 'complete';
   remapLoading?: boolean;
   onRequestRemapData?: () => Promise<void>;
 }) {
@@ -399,13 +399,7 @@ export function CodesView({
         columns={columns}
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
-        leadingNote={
-          isLoadingMore && totalCount
-            ? `Loading ${Math.max(0, totalCount - codes.length).toLocaleString()} more rows…`
-            : isLoadingMore
-              ? 'Loading more rows…'
-              : undefined
-        }
+        leadingNote={getLoadStatusText(loadState, totalCount, codes.length)}
         countAddendum={(filtered) => {
           const mapped = filtered.reduce(
             (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
@@ -436,6 +430,18 @@ export function CodesView({
       />
     </Stack>
   );
+}
+
+function getLoadStatusText(
+  loadState: 'loading' | 'retrying' | 'complete' | undefined,
+  totalCount: number | undefined,
+  loadedCount: number,
+): string | undefined {
+  if (loadState === 'retrying') return 'Loading paused; retrying…';
+  if (loadState === 'complete') return 'All rows loaded.';
+  if (loadState !== 'loading') return undefined;
+  if (totalCount === undefined) return 'Loading more rows…';
+  return `Loading ${Math.max(0, totalCount - loadedCount).toLocaleString()} more rows…`;
 }
 
 const CHIP_TONES: Record<

@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
-import { isSafeUrl } from '@/lib/url';
 import {
   clearArticleBacklog,
   clearUpdateBacklogRow,
@@ -60,6 +59,7 @@ import {
   isPipelineStageName,
   type PipelineCardState,
 } from '@/lib/pipeline-stage-state';
+import { isSafeUrl } from '@/lib/url';
 import type { ApprovalActionResult } from './actions.types';
 
 // Re-exported so consumers can keep importing the type from the actions
