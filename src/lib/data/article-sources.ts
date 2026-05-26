@@ -196,6 +196,24 @@ export async function markSourceCortexRegisteredAsAdmin(
   await pb.collection('articleSources').update(sourceId, { cortexSourceId });
 }
 
+export async function setSourceUrlAsAdmin(sourceId: string, url: string): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { url });
+}
+
+export async function setSourceDoiAsAdmin(sourceId: string, doi: string): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { doi });
+}
+
+export async function setSourceNotesAsAdmin(
+  sourceId: string,
+  notes: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { notes });
+}
+
 /**
  * Renumber `priority` on the given source IDs in array order (1..N).
  * Editor-controlled ordering for the sources-approved priority list.
@@ -324,6 +342,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
       'reviewStatus',
       'reviewerEmail',
       'reviewedAt',
+      'notes',
     ]);
     for (const [k, v] of Object.entries(row)) {
       if (v === null || v === undefined) continue;

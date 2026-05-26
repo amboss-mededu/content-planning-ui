@@ -30,8 +30,11 @@ import {
   getLatestDraftForArticle,
   resetArticle,
   submitSourceCortexId,
+  submitSourceDoi,
+  submitSourceNotes,
   submitSourceReview,
   submitSourcesOrder,
+  submitSourceUrl,
 } from '../[specialty]/actions';
 import type { ArticleRow } from './articles-view';
 import {
@@ -143,6 +146,10 @@ export type ManagerOpener =
        *  panel. Polls the parent page so the badge + table reflect the
        *  new running row even when PB realtime is anonymous-blocked. */
       onPipelineActionTriggered?: () => void;
+      /** Step to the previous/next backlog row. Undefined at edges. */
+      onPrev?: () => void;
+      onNext?: () => void;
+      position?: { index: number; total: number };
     }
   | {
       type: 'update';
@@ -183,6 +190,10 @@ export type ManagerOpener =
         next: ArticleBacklogStatus,
         notes?: string,
       ) => void | Promise<void>;
+      /** Step to the previous/next backlog row. Undefined at edges. */
+      onPrev?: () => void;
+      onNext?: () => void;
+      position?: { index: number; total: number };
     };
 
 export function ArticleManagerModalV2({
@@ -438,6 +449,7 @@ function ReviewManagerView({
             flex: 1,
             minHeight: 0,
             overflow: 'auto',
+            overscrollBehavior: 'contain',
             display: 'flex',
             flexDirection: 'column',
             gap: 16,
@@ -621,6 +633,9 @@ function BacklogManagerView({
     viewerEmail,
     onStatusChange,
     onPipelineActionTriggered,
+    onPrev,
+    onNext,
+    position,
   } = opener;
   const router = useRouter();
   const [notes, setNotes] = useState<string>(initialNotes);
@@ -628,6 +643,17 @@ function BacklogManagerView({
   const [savingNotes, setSavingNotes] = useState(false);
   const [resetting, setResetting] = useState(false);
   const notesDirty = pendingNotes !== notes;
+
+  // The DS Modal doesn't lock body scroll, so wheel events that don't get
+  // absorbed by the modal's own scroll container chain up to the page.
+  // Lock body overflow while the modal is mounted.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   // Read modal state directly from the opener props. The parent already
   // runs PB subscriptions (via `useApprovalState`) AND polls
@@ -697,6 +723,7 @@ function BacklogManagerView({
             flex: 1,
             minHeight: 0,
             overflow: 'auto',
+            overscrollBehavior: 'contain',
             display: 'flex',
             flexDirection: 'column',
             gap: 16,
@@ -864,6 +891,21 @@ function BacklogManagerView({
             </Stack>
           </div>
         </div>
+        {(onPrev || onNext) && (
+          <div style={footerStyle}>
+            <Button variant="tertiary" onClick={onPrev} disabled={!onPrev}>
+              ← Prev
+            </Button>
+            <Button variant="tertiary" onClick={onNext} disabled={!onNext}>
+              Next →
+            </Button>
+            {position && (
+              <Text size="xs" color="secondary">
+                {position.index + 1} / {position.total}
+              </Text>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -1192,28 +1234,34 @@ function SourcesTable({
     mode === 'priority'
       ? [
           { key: 'drag', label: '', initialWidth: 28, resizable: false },
-          { key: 'idx', label: '#', initialWidth: 44 },
           { key: 'sourceId', label: 'Source ID', initialWidth: 160 },
-          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
           { key: 'title', label: 'Title', initialWidth: 320 },
           { key: 'type', label: 'Type', initialWidth: 140 },
           { key: 'journal', label: 'Journal', initialWidth: 220 },
           { key: 'url', label: 'URL', initialWidth: 160 },
           { key: 'doi', label: 'DOI', initialWidth: 180 },
+          { key: 'notes', label: 'Notes', initialWidth: 220 },
           { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
         ]
       : [
-          { key: 'llmRank', label: 'LLM rank', initialWidth: 70 },
           { key: 'title', label: 'Title', initialWidth: 360 },
           { key: 'type', label: 'Type', initialWidth: 140 },
           { key: 'journal', label: 'Journal', initialWidth: 240 },
           { key: 'url', label: 'URL', initialWidth: 160 },
           { key: 'doi', label: 'DOI', initialWidth: 200 },
+          { key: 'notes', label: 'Notes', initialWidth: 220 },
           { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
         ];
 
   return (
-    <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
+    <div
+      style={{
+        maxHeight: '40vh',
+        overflow: 'auto',
+        width: 'fit-content',
+        maxWidth: '100%',
+      }}
+    >
       <table style={tableStyle}>
         <colgroup>
           {columnList.map((c) => (
@@ -1234,7 +1282,7 @@ function SourcesTable({
           </tr>
         </thead>
         <tbody>
-          {ordered.map((s, idx) => {
+          {ordered.map((s) => {
             const isDragging = dragId === s.id;
             const isDropTarget = dropId === s.id && dragId !== s.id;
             return (
@@ -1270,13 +1318,11 @@ function SourcesTable({
                     >
                       ≡
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>{idx + 1}</td>
                     <td style={tdStyle}>
                       <SourceIdCell source={s} slug={slug} />
                     </td>
                   </>
                 ) : null}
-                <td style={{ ...tdStyle, textAlign: 'center' }}>{s.rank ?? '—'}</td>
                 <td style={tdStyle}>
                   <Text weight="bold">{s.title}</Text>
                   {s.llmSummary ? (
@@ -1304,32 +1350,13 @@ function SourcesTable({
                   ) : null}
                 </td>
                 <td style={tdStyle}>
-                  {s.url ? (
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ wordBreak: 'break-all' }}
-                    >
-                      {s.url}
-                    </a>
-                  ) : (
-                    '—'
-                  )}
+                  <SourceUrlCell source={s} slug={slug} />
                 </td>
                 <td style={tdStyle}>
-                  {s.doi ? (
-                    <a
-                      href={`https://doi.org/${s.doi}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ wordBreak: 'break-all' }}
-                    >
-                      {s.doi}
-                    </a>
-                  ) : (
-                    '—'
-                  )}
+                  <SourceDoiCell source={s} slug={slug} />
+                </td>
+                <td style={tdStyle}>
+                  <SourceNotesCell source={s} slug={slug} />
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'center' }}>
                   <SourceDecisionCell source={s} slug={slug} viewerEmail={viewerEmail} />
@@ -1387,6 +1414,199 @@ function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: str
         borderRadius: 4,
         background: '#fff',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      }}
+    />
+  );
+}
+
+// Borderless input that looks like plain text in the cell. The browser's
+// native focus ring marks the active field; cursor switches to text on
+// hover so the affordance is discoverable.
+const editableInputStyle: CSSProperties = {
+  width: '100%',
+  padding: '2px 4px',
+  fontSize: 'inherit',
+  fontFamily: 'inherit',
+  color: 'inherit',
+  border: '1px solid transparent',
+  borderRadius: 3,
+  background: 'transparent',
+};
+
+const openLinkStyle: CSSProperties = {
+  flex: 'none',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 20,
+  height: 20,
+  borderRadius: 3,
+  textDecoration: 'none',
+  fontSize: 12,
+  lineHeight: 1,
+  color: 'inherit',
+  opacity: 0.6,
+};
+
+function SourceUrlCell({ source, slug }: { source: ArticleSourceRecord; slug: string }) {
+  const [value, setValue] = useState<string>(source.url ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    setValue(source.url ?? '');
+  }, [source.url]);
+
+  const persist = useCallback(async () => {
+    const trimmed = value.trim();
+    const current = source.url ?? '';
+    if (trimmed === current) return;
+    setSubmitting(true);
+    try {
+      await submitSourceUrl(slug, source.id, trimmed);
+    } catch (e) {
+      console.error('[source-url] submit failed', e);
+      setValue(current);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [value, source.id, source.url, slug]);
+
+  const trimmed = value.trim();
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => void persist()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        disabled={submitting}
+        placeholder="Paste URL"
+        style={editableInputStyle}
+      />
+      {trimmed && (
+        <a
+          href={trimmed}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open URL"
+          style={openLinkStyle}
+        >
+          ↗
+        </a>
+      )}
+    </div>
+  );
+}
+
+function SourceDoiCell({ source, slug }: { source: ArticleSourceRecord; slug: string }) {
+  const [value, setValue] = useState<string>(source.doi ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    setValue(source.doi ?? '');
+  }, [source.doi]);
+
+  const persist = useCallback(async () => {
+    const trimmed = value.trim();
+    const current = source.doi ?? '';
+    if (trimmed === current) return;
+    setSubmitting(true);
+    try {
+      await submitSourceDoi(slug, source.id, trimmed);
+    } catch (e) {
+      console.error('[source-doi] submit failed', e);
+      setValue(current);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [value, source.id, source.doi, slug]);
+
+  const trimmed = value.trim();
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => void persist()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        disabled={submitting}
+        placeholder="Paste DOI"
+        style={editableInputStyle}
+      />
+      {trimmed && (
+        <a
+          href={`https://doi.org/${trimmed}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open DOI"
+          style={openLinkStyle}
+        >
+          ↗
+        </a>
+      )}
+    </div>
+  );
+}
+
+function SourceNotesCell({
+  source,
+  slug,
+}: {
+  source: ArticleSourceRecord;
+  slug: string;
+}) {
+  const [value, setValue] = useState<string>(source.notes ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    setValue(source.notes ?? '');
+  }, [source.notes]);
+
+  const persist = useCallback(async () => {
+    const trimmed = value.trim();
+    const current = source.notes ?? '';
+    if (trimmed === current) return;
+    setSubmitting(true);
+    try {
+      await submitSourceNotes(slug, source.id, trimmed);
+    } catch (e) {
+      console.error('[source-notes] submit failed', e);
+      setValue(current);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [value, source.id, source.notes, slug]);
+
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void persist()}
+      onKeyDown={(e) => {
+        // Enter saves and blurs; Shift+Enter inserts a newline so editors
+        // can write multi-line notes.
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          (e.target as HTMLTextAreaElement).blur();
+        }
+      }}
+      disabled={submitting}
+      placeholder="Add note…"
+      rows={2}
+      style={{
+        ...editableInputStyle,
+        resize: 'vertical',
+        minHeight: 36,
+        lineHeight: 1.4,
       }}
     />
   );
@@ -1665,8 +1885,8 @@ function Stepper({
 }
 
 const PHASE_COPY: Record<ArticleManagerPhase, string> = {
-  1: 'No sources fetched yet. Run a literature search to fetch and rank PubMed candidates for this article.',
-  2: 'PubMed ranked these sources. Approve the ones to keep and reject the rest — then advance to prioritize.',
+  1: 'No sources fetched yet. Run a literature search to gather and rank candidates from Gemini web search, PubMed, and Google Scholar for this article.',
+  2: 'The LLM ranked these sources. Approve the ones to keep and reject the rest — then advance to prioritize.',
   3: 'Drag to reorder by priority. Paste the Cortex Source ID for every approved source — the draft step needs all of them.',
   4: 'Article draft is being generated. The dispatcher runs up to 3 articles concurrently.',
   5: "Preview the latest draft. When you've finished editing in Cortex, mark the article ready to publish.",
@@ -2166,6 +2386,7 @@ function UpdateReviewView({
             flex: 1,
             minHeight: 0,
             overflow: 'auto',
+            overscrollBehavior: 'contain',
             display: 'flex',
             flexDirection: 'column',
             gap: 16,
@@ -2663,6 +2884,9 @@ function BacklogUpdateView({
     categoryLookup,
     viewerEmail,
     onStatusChange,
+    onPrev,
+    onNext,
+    position,
   } = opener;
 
   // Read status directly from the opener prop — same reasoning as the
@@ -2675,6 +2899,15 @@ function BacklogUpdateView({
   const [pendingNotes, setPendingNotes] = useState<string>(initialNotes);
   const [savingNotes, setSavingNotes] = useState(false);
   const notesDirty = pendingNotes !== notes;
+
+  // See BacklogManagerView — DS Modal doesn't lock body scroll.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   // Stepper is purely visual here (no PhaseBody) — chip clicks just park
   // viewedPhase locally. They never flip the persisted status.
@@ -2718,6 +2951,7 @@ function BacklogUpdateView({
             flex: 1,
             minHeight: 0,
             overflow: 'auto',
+            overscrollBehavior: 'contain',
             display: 'flex',
             flexDirection: 'column',
             gap: 16,
@@ -2788,6 +3022,21 @@ function BacklogUpdateView({
             viewerEmail={viewerEmail}
           />
         </div>
+        {(onPrev || onNext) && (
+          <div style={footerStyle}>
+            <Button variant="tertiary" onClick={onPrev} disabled={!onPrev}>
+              ← Prev
+            </Button>
+            <Button variant="tertiary" onClick={onNext} disabled={!onNext}>
+              Next →
+            </Button>
+            {position && (
+              <Text size="xs" color="secondary">
+                {position.index + 1} / {position.total}
+              </Text>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );

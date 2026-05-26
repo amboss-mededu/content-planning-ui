@@ -248,6 +248,8 @@ export interface ArticleSourceRecord extends PbRecord {
   reviewerEmail?: string;
   /** ms since epoch */
   reviewedAt?: number;
+  /** Free-form editor notes attached to this source. */
+  notes?: string;
 }
 
 export type SourceReviewStatus = 'approved' | 'rejected';
