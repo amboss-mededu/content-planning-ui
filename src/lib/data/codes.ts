@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
+import { deriveCodeTableCounts } from '@/lib/data/code-table-counts';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   CodeRecord,
@@ -38,6 +39,12 @@ export type CodeTableRow = Pick<
   | 'newArticleSuggestionCount'
 >;
 
+type CodeTableRowSource = CodeTableRow &
+  Pick<
+    CodeRecord,
+    'articlesWhereCoverageIs' | 'existingArticleUpdates' | 'newArticlesNeeded'
+  >;
+
 const CODE_TABLE_FIELDS = [
   'id',
   'created',
@@ -59,17 +66,10 @@ const CODE_TABLE_FIELDS = [
   'coverageSectionCount',
   'existingArticleUpdateCount',
   'newArticleSuggestionCount',
+  'articlesWhereCoverageIs',
+  'existingArticleUpdates',
+  'newArticlesNeeded',
 ].join(',');
-
-function countCoveredSections(items: CoveredSection[] | undefined): number {
-  if (!Array.isArray(items)) return 0;
-  let n = 0;
-  for (const item of items) {
-    const sections = item.sections;
-    if (Array.isArray(sections)) n += sections.length;
-  }
-  return n;
-}
 
 function buildMappingCounts(mapping: {
   articlesWhereCoverageIs?: CoveredSection[];
@@ -81,17 +81,23 @@ function buildMappingCounts(mapping: {
   existingArticleUpdateCount: number;
   newArticleSuggestionCount: number;
 } {
+  return deriveCodeTableCounts(mapping);
+}
+
+function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
+  const { articlesWhereCoverageIs, existingArticleUpdates, newArticlesNeeded, ...rest } =
+    row;
   return {
-    coverageArticleCount: Array.isArray(mapping.articlesWhereCoverageIs)
-      ? mapping.articlesWhereCoverageIs.length
-      : 0,
-    coverageSectionCount: countCoveredSections(mapping.articlesWhereCoverageIs),
-    existingArticleUpdateCount: Array.isArray(mapping.existingArticleUpdates)
-      ? mapping.existingArticleUpdates.length
-      : 0,
-    newArticleSuggestionCount: Array.isArray(mapping.newArticlesNeeded)
-      ? mapping.newArticlesNeeded.length
-      : 0,
+    ...rest,
+    ...deriveCodeTableCounts({
+      articlesWhereCoverageIs,
+      existingArticleUpdates,
+      newArticlesNeeded,
+      coverageArticleCount: row.coverageArticleCount,
+      coverageSectionCount: row.coverageSectionCount,
+      existingArticleUpdateCount: row.existingArticleUpdateCount,
+      newArticleSuggestionCount: row.newArticleSuggestionCount,
+    }),
   };
 }
 
@@ -165,13 +171,16 @@ export async function listCodeTableRowsPage(
         updatedAfter,
       })
     : pb.filter('specialtySlug = {:slug}', { slug });
-  const result = await pb.collection<CodeTableRow>('codes').getList(page, perPage, {
+  const result = await pb.collection<CodeTableRowSource>('codes').getList(page, perPage, {
     filter,
     sort: updatedAfter ? 'updated' : 'code',
     fields: CODE_TABLE_FIELDS,
     skipTotal: true,
   });
-  return { items: result.items, hasMore: result.items.length === perPage };
+  return {
+    items: result.items.map(toCodeTableRow),
+    hasMore: result.items.length === perPage,
+  };
 }
 
 export async function listUnmappedCodeCount(slug: string): Promise<number> {
