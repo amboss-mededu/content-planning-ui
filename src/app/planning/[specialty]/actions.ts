@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
+import { isSafeUrl } from '@/lib/url';
 import {
   clearArticleBacklog,
   clearUpdateBacklogRow,
@@ -174,6 +175,9 @@ export async function submitSourceUrl(
   sourceId: string,
   value: string,
 ): Promise<void> {
+  if (value && !isSafeUrl(value)) {
+    throw new Error('URL must start with http:// or https://');
+  }
   await setSourceUrlAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }

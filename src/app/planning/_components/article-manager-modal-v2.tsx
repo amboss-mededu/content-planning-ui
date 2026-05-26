@@ -36,6 +36,7 @@ import {
   submitSourcesOrder,
   submitSourceUrl,
 } from '../[specialty]/actions';
+import { isSafeUrl } from '@/lib/url';
 import type { ArticleRow } from './articles-view';
 import {
   type ArticleManagerPhase,
@@ -1488,7 +1489,7 @@ function SourceUrlCell({ source, slug }: { source: ArticleSourceRecord; slug: st
         placeholder="Paste URL"
         style={editableInputStyle}
       />
-      {trimmed && (
+      {trimmed && isSafeUrl(trimmed) && (
         <a
           href={trimmed}
           target="_blank"
