@@ -23,7 +23,6 @@ import type {
   ArticleBacklogStatus,
   ArticleLitSearchRunRecord,
   ArticleSourceRecord,
-  PredatoryJournalRisk,
   ReviewCommentRecord,
   SourceReviewStatus,
 } from '@/lib/pb/types';
@@ -975,14 +974,6 @@ const SOURCE_TYPE_LABEL: Record<string, string> = {
   other: 'Other',
 };
 
-const RISK_COLOR: Record<PredatoryJournalRisk, BadgeColor> = {
-  none: 'green',
-  low: 'gray',
-  medium: 'yellow',
-  high: 'red',
-  predatory: 'purple',
-};
-
 const tableStyle: CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
@@ -1207,7 +1198,7 @@ function SourcesTable({
           { key: 'title', label: 'Title', initialWidth: 320 },
           { key: 'type', label: 'Type', initialWidth: 140 },
           { key: 'journal', label: 'Journal', initialWidth: 220 },
-          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'url', label: 'URL', initialWidth: 160 },
           { key: 'doi', label: 'DOI', initialWidth: 180 },
           { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
         ]
@@ -1216,7 +1207,7 @@ function SourcesTable({
           { key: 'title', label: 'Title', initialWidth: 360 },
           { key: 'type', label: 'Type', initialWidth: 140 },
           { key: 'journal', label: 'Journal', initialWidth: 240 },
-          { key: 'risk', label: 'Risk', initialWidth: 110 },
+          { key: 'url', label: 'URL', initialWidth: 160 },
           { key: 'doi', label: 'DOI', initialWidth: 200 },
           { key: 'decision', label: 'Decision', initialWidth: 110, resizable: false },
         ];
@@ -1313,11 +1304,15 @@ function SourcesTable({
                   ) : null}
                 </td>
                 <td style={tdStyle}>
-                  {s.predatoryJournalRisk ? (
-                    <Badge
-                      text={s.predatoryJournalRisk}
-                      color={RISK_COLOR[s.predatoryJournalRisk]}
-                    />
+                  {s.url ? (
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {s.url}
+                    </a>
                   ) : (
                     '—'
                   )}
@@ -1331,15 +1326,6 @@ function SourcesTable({
                       style={{ wordBreak: 'break-all' }}
                     >
                       {s.doi}
-                    </a>
-                  ) : s.url ? (
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ wordBreak: 'break-all' }}
-                    >
-                      {s.url}
                     </a>
                   ) : (
                     '—'

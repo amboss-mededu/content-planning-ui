@@ -2,7 +2,7 @@
 
 import { Badge, Modal, Text } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
-import type { ArticleSourceRecord, PredatoryJournalRisk } from '@/lib/pb/types';
+import type { ArticleSourceRecord } from '@/lib/pb/types';
 
 const SOURCE_TYPE_LABEL: Record<string, string> = {
   guideline: 'Guideline',
@@ -13,17 +13,6 @@ const SOURCE_TYPE_LABEL: Record<string, string> = {
   vet_content: 'Vet content',
   non_english: 'Non-English',
   other: 'Other',
-};
-
-const RISK_COLOR: Record<
-  PredatoryJournalRisk,
-  'gray' | 'green' | 'yellow' | 'red' | 'purple'
-> = {
-  none: 'green',
-  low: 'gray',
-  medium: 'yellow',
-  high: 'red',
-  predatory: 'purple',
 };
 
 const tableStyle: CSSProperties = {
@@ -85,7 +74,7 @@ export function ArticleSourcesDrawer({
                   <th style={thStyle}>Title</th>
                   <th style={{ ...thStyle, width: 130 }}>Type</th>
                   <th style={thStyle}>Journal</th>
-                  <th style={{ ...thStyle, width: 110 }}>Risk</th>
+                  <th style={{ ...thStyle, width: 160 }}>URL</th>
                   <th style={thStyle}>Justification</th>
                   <th style={{ ...thStyle, width: 160 }}>DOI</th>
                 </tr>
@@ -121,11 +110,15 @@ export function ArticleSourcesDrawer({
                       ) : null}
                     </td>
                     <td style={tdStyle}>
-                      {s.predatoryJournalRisk ? (
-                        <Badge
-                          text={s.predatoryJournalRisk}
-                          color={RISK_COLOR[s.predatoryJournalRisk]}
-                        />
+                      {s.url ? (
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ wordBreak: 'break-all' }}
+                        >
+                          {s.url}
+                        </a>
                       ) : (
                         '—'
                       )}
@@ -142,15 +135,6 @@ export function ArticleSourcesDrawer({
                           style={{ wordBreak: 'break-all' }}
                         >
                           {s.doi}
-                        </a>
-                      ) : s.url ? (
-                        <a
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ wordBreak: 'break-all' }}
-                        >
-                          {s.url}
                         </a>
                       ) : (
                         '—'
