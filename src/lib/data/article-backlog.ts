@@ -127,6 +127,24 @@ export async function setArticleBacklogAssignee(
   );
 }
 
+export async function setArticleBacklogAssigneeAsAdmin(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  assigneeEmail: string | null,
+  changedByEmail: string | null,
+): Promise<void> {
+  const pb = await createAdminClient();
+  await upsertBacklog(
+    pb,
+    slug,
+    articleKey,
+    articleRecordId,
+    { assigneeEmail: assigneeEmail ?? '' },
+    changedByEmail,
+  );
+}
+
 /**
  * Returns the deleted articleKey, or null if no row existed.
  */
@@ -136,6 +154,25 @@ export async function clearArticleBacklog(
 ): Promise<string | null> {
   if (!articleKey) return null;
   const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  try {
+    const existing = await pb
+      .collection<ArticleBacklogRecord>('articleBacklog')
+      .getFirstListItem(filter);
+    await pb.collection('articleBacklog').delete(existing.id);
+    return articleKey;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function clearArticleBacklogAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<string | null> {
+  if (!articleKey) return null;
+  const pb = await createAdminClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     const existing = await pb
@@ -259,6 +296,35 @@ export async function ensureNewArticleBacklogRow(
 ): Promise<string | null> {
   if (!articleKey) return null;
   const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  try {
+    await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);
+    return articleKey;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      await pb.collection('articleBacklog').create({
+        specialtySlug: slug,
+        articleKey,
+        articleRecordId,
+        type: 'new',
+        status: 'waiting-for-sources',
+        lastChangedByEmail: changedByEmail ?? '',
+        lastChangedAt: Date.now(),
+      });
+      return articleKey;
+    }
+    throw e;
+  }
+}
+
+export async function ensureNewArticleBacklogRowAsAdmin(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  changedByEmail: string | null,
+): Promise<string | null> {
+  if (!articleKey) return null;
+  const pb = await createAdminClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     await pb.collection<ArticleBacklogRecord>('articleBacklog').getFirstListItem(filter);

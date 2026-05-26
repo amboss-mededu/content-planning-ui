@@ -3,7 +3,7 @@
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import { setBacklogStatus } from '@/app/planning/[specialty]/actions';
+import { deleteManualArticle, setBacklogStatus } from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
@@ -16,6 +16,7 @@ import type {
 } from '@/lib/pb/types';
 import { useApprovalState } from '@/lib/pb/use-approval-state';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
+import { AddArticleModal } from './add-article-modal';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
@@ -132,6 +133,7 @@ export function BacklogView({
   const [assigneeFilter, setAssigneeFilter] = useState<string>(
     () => params.get('assignee') ?? '',
   );
+  const [addModalOpen, setAddModalOpen] = useState(false);
   // Same shared decision hook used by Consolidation Review / Articles /
   // Sections. Seeded with the SSR snapshots so the first paint matches
   // the server, then live PB subscriptions + optimistic patches keep
@@ -393,6 +395,19 @@ export function BacklogView({
     }
   }
 
+  async function handleDeleteArticle(articleKey: string): Promise<void> {
+    setManagerArticleId((current) => {
+      const row = current ? memberRows.find((r) => r.id === current) : null;
+      return row?.articleKey === articleKey ? null : current;
+    });
+    try {
+      await deleteManualArticle(slug, articleKey);
+      router.refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Delete failed');
+    }
+  }
+
   async function handleAssigneeChange(
     articleKey: string,
     articleRecordId: string,
@@ -553,19 +568,26 @@ export function BacklogView({
       width: 150,
       verticalAlign: 'middle',
       align: 'center',
-      render: (r) => (
-        <Button
-          variant="tertiary"
-          size="s"
-          destructive
-          onClick={(e) => {
-            (e as React.MouseEvent).stopPropagation();
-            handleRemoveApproval(r.articleKey);
-          }}
-        >
-          Remove approval
-        </Button>
-      ),
+      render: (r) => {
+        const isManual = r.codes.length === 0;
+        return (
+          <Button
+            variant="tertiary"
+            size="s"
+            destructive
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              if (isManual) {
+                handleDeleteArticle(r.articleKey);
+              } else {
+                handleRemoveApproval(r.articleKey);
+              }
+            }}
+          >
+            {isManual ? 'Delete' : 'Remove approval'}
+          </Button>
+        );
+      },
     },
     {
       key: 'nextAction',
@@ -809,6 +831,9 @@ export function BacklogView({
             onChange={(e) => setAssigneeFilter(e.target.value)}
           />
         </div>
+        <Button variant="secondary" onClick={() => setAddModalOpen(true)}>
+          + Add article
+        </Button>
       </Inline>
       {selectedIds.size > 0 && (
         <BacklogBulkToolbar
@@ -884,6 +909,15 @@ export function BacklogView({
           onClose={() => setManagerArticleId(null)}
         />
       )}
+      <AddArticleModal
+        open={addModalOpen}
+        slug={slug}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={() => {
+          setAddModalOpen(false);
+          router.refresh();
+        }}
+      />
     </Stack>
   );
 }
