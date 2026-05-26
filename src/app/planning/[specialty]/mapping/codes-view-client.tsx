@@ -14,6 +14,9 @@ import { CodesView } from '../../_components/codes-view';
 const PER_PAGE = 200;
 const EMPTY_IN_FLIGHT: MappingInFlightRecord[] = [];
 const FULL_RECONCILE_INTERVAL_MS = 60_000;
+const PAGE_RETRY_DELAY_MS = 1500;
+
+export type CodeRowsLoadState = 'loading' | 'retrying' | 'complete';
 
 type SupportSummary = {
   totalCount: number;
@@ -33,7 +36,9 @@ export function CodesViewClient({
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialHasMore);
+  const [loadState, setLoadState] = useState<CodeRowsLoadState>(
+    initialHasMore ? 'loading' : 'complete',
+  );
   const [summary, setSummary] = useState<SupportSummary | null>(null);
 
   const [remapData, setRemapData] = useState<{
@@ -42,13 +47,15 @@ export function CodesViewClient({
   } | null>(null);
   const [remapLoading, setRemapLoading] = useState(false);
   const currentSlugRef = useRef(slug);
+  const nextPageRef = useRef(2);
 
   useEffect(() => {
     if (currentSlugRef.current !== slug) {
       currentSlugRef.current = slug;
+      nextPageRef.current = 2;
       setCodes(initialCodes);
       setHasMore(initialHasMore);
-      setIsLoadingMore(initialHasMore);
+      setLoadState(initialHasMore ? 'loading' : 'complete');
       setSummary(null);
       setRemapData(null);
       setRemapLoading(false);
@@ -56,8 +63,6 @@ export function CodesViewClient({
     }
 
     setCodes((prev) => mergePageInto(prev, initialCodes));
-    setHasMore(initialHasMore);
-    setIsLoadingMore(initialHasMore);
   }, [slug, initialCodes, initialHasMore]);
 
   useEffect(() => {
@@ -111,45 +116,51 @@ export function CodesViewClient({
   }, [inFlightRows, summary]);
 
   // Progressive page fetch — load remaining lean pages after first paint.
-  const progressiveLoadKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    const loadKey = `${slug}:${initialCodes.length}:${initialHasMore}`;
-    if (progressiveLoadKeyRef.current === loadKey) return;
     if (!initialHasMore) {
-      progressiveLoadKeyRef.current = loadKey;
-      setIsLoadingMore(false);
+      setHasMore(false);
+      setLoadState('complete');
       return;
     }
-    progressiveLoadKeyRef.current = loadKey;
-    let cancelled = false;
+    const controller = new AbortController();
 
     (async () => {
-      let page = 2;
-      while (!cancelled) {
-        if (cancelled) break;
+      while (!controller.signal.aborted) {
+        const page = nextPageRef.current;
+        setLoadState((prev) => (prev === 'retrying' ? prev : 'loading'));
         try {
           const res = await fetch(
             `/api/codes/${encodeURIComponent(slug)}?page=${page}&perPage=${PER_PAGE}`,
-            { cache: 'no-store' },
+            { cache: 'no-store', signal: controller.signal },
           );
-          if (!res.ok) break;
+          if (!res.ok) throw new Error(`Failed to load page ${page}`);
           const data: { items: CodeTableRow[]; hasMore: boolean } = await res.json();
-          if (cancelled) break;
+          if (controller.signal.aborted) break;
           setCodes((prev) => mergePageInto(prev, data.items));
           setHasMore(data.hasMore);
-          if (!data.hasMore) break;
-          page++;
+          if (!data.hasMore) {
+            setLoadState('complete');
+            break;
+          }
+          nextPageRef.current = page + 1;
+          setLoadState('loading');
         } catch {
-          break;
+          if (controller.signal.aborted) break;
+          setHasMore(true);
+          setLoadState('retrying');
+          try {
+            await waitForRetry(PAGE_RETRY_DELAY_MS, controller.signal);
+          } catch {
+            break;
+          }
         }
       }
-      if (!cancelled) setIsLoadingMore(false);
     })();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [slug, initialCodes.length, initialHasMore]);
+  }, [slug, initialHasMore]);
 
   const newestUpdated = useMemo(() => getNewestUpdated(codes), [codes]);
 
@@ -176,7 +187,7 @@ export function CodesViewClient({
   }, [slug]);
 
   useEffect(() => {
-    if (isLoadingMore) return;
+    if (loadState !== 'complete') return;
     let cancelled = false;
 
     const pollIncremental = async () => {
@@ -221,12 +232,12 @@ export function CodesViewClient({
       clearInterval(reconcileId);
       window.removeEventListener('focus', onFocus);
     };
-  }, [slug, isLoadingMore, newestUpdated, fullReconcile]);
+  }, [slug, loadState, newestUpdated, fullReconcile]);
 
   const supportReady = summary !== null;
   const canEdit = supportReady ? !summary.lock.locked : false;
   const lockStatus = summary?.lock.status ?? null;
-  const allRowsLoaded = !isLoadingMore && !hasMore;
+  const allRowsLoaded = loadState === 'complete' && !hasMore;
   const totalCount = summary?.totalCount ?? (allRowsLoaded ? codes.length : undefined);
   const unmappedCount = allRowsLoaded
     ? codes.filter((r) => !r.mappedAt || r.mappedAt === 0).length
@@ -244,7 +255,7 @@ export function CodesViewClient({
       unmappedCodes={remapData?.unmappedCodes ?? []}
       unmappedCount={unmappedCount}
       totalCount={totalCount}
-      isLoadingMore={isLoadingMore || hasMore}
+      loadState={loadState}
       remapLoading={remapLoading}
       onRequestRemapData={loadRemapData}
     />
@@ -279,4 +290,18 @@ function getNewestUpdated(rows: CodeTableRow[]): string | null {
     if (!newest || row.updated > newest) newest = row.updated;
   }
   return newest;
+}
+
+function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        window.clearTimeout(timeout);
+        reject(new DOMException('Aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
 }

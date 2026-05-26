@@ -26,6 +26,7 @@ import type {
   ReviewCommentRecord,
   SourceReviewStatus,
 } from '@/lib/pb/types';
+import { isSafeUrl } from '@/lib/url';
 import {
   getLatestDraftForArticle,
   resetArticle,
@@ -36,7 +37,6 @@ import {
   submitSourcesOrder,
   submitSourceUrl,
 } from '../[specialty]/actions';
-import { isSafeUrl } from '@/lib/url';
 import type { ArticleRow } from './articles-view';
 import {
   type ArticleManagerPhase,
