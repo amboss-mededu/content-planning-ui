@@ -130,7 +130,7 @@ async function MyBacklogData() {
     }
   }
 
-  const specialtyNameBySlug: Record<string, string> = {};
+  const specialtyNameBySlug: Record<string, string> = { _personal: '(No specialty)' };
   for (const s of specialties) specialtyNameBySlug[s.slug] = s.name;
 
   const categoryLookup: CategoryLookup = {};
@@ -209,6 +209,7 @@ async function MyBacklogData() {
       rows={rows}
       categoryLookup={categoryLookup}
       assignableUsers={users}
+      specialties={specialties.map((s) => ({ slug: s.slug, name: s.name }))}
       initialBacklog={initialBacklog}
       initialSourcesByArticleKey={initialSourcesByArticleKey}
       initialLitSearchRuns={litSearchRuns}

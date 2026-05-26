@@ -20,9 +20,11 @@ import { LitSearchProgressBadge } from '@/app/planning/_components/lit-search-pr
 import { canRunLitSearch } from '@/app/planning/_components/pipeline-stage-gates';
 import { RunLitSearchRowButton } from '@/app/planning/_components/run-lit-search-row-button';
 import type { SectionRow } from '@/app/planning/_components/sections-view';
+import { AddArticleModal } from '@/app/planning/_components/add-article-modal';
 import { useLitSearchState } from '@/app/planning/_components/use-running-lit-search-articles';
 import {
   clearBacklogRow,
+  deleteManualArticle,
   setBacklogAssignee,
   setBacklogStatus,
 } from '@/app/planning/[specialty]/actions';
@@ -90,6 +92,7 @@ export function MyBacklogView({
   rows,
   categoryLookup,
   assignableUsers,
+  specialties,
   initialBacklog,
   initialSourcesByArticleKey,
   initialLitSearchRuns,
@@ -99,6 +102,7 @@ export function MyBacklogView({
   rows: MyBacklogRow[];
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
+  specialties: Array<{ slug: string; name: string }>;
   initialBacklog: Record<string, ArticleBacklogRecord>;
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialLitSearchRuns: ArticleLitSearchRunRecord[];
@@ -113,6 +117,7 @@ export function MyBacklogView({
   const [specialtyFilter, setSpecialtyFilter] = useState<string>(
     () => params.get('specialty') ?? '',
   );
+  const [addModalOpen, setAddModalOpen] = useState(false);
   // Live PB sub on `articleBacklog`. Filter on the current user's email
   // so the cross-specialty view only resubscribes when the assignee
   // changes (i.e. never within a session). Same key-indexed projection
@@ -323,6 +328,22 @@ export function MyBacklogView({
       router.refresh();
     } catch (e) {
       console.error('setBacklogAssignee failed', e);
+    }
+  }
+
+  async function handleDeleteArticle(
+    specialtySlug: string,
+    articleKey: string,
+  ): Promise<void> {
+    setManagerArticleId((current) => {
+      const row = current ? liveRows.find((r) => r.id === current) : null;
+      return row?.articleKey === articleKey ? null : current;
+    });
+    try {
+      await deleteManualArticle(specialtySlug, articleKey);
+      router.refresh();
+    } catch (e) {
+      console.error('deleteManualArticle failed', e);
     }
   }
 
@@ -562,6 +583,29 @@ export function MyBacklogView({
         );
       },
     },
+    {
+      key: 'delete',
+      label: '',
+      width: 80,
+      verticalAlign: 'middle',
+      align: 'center',
+      render: (r) => {
+        if (r.codes.length > 0) return null;
+        return (
+          <Button
+            variant="tertiary"
+            size="s"
+            destructive
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              handleDeleteArticle(r.specialtySlug, r.articleKey);
+            }}
+          >
+            Delete
+          </Button>
+        );
+      },
+    },
   ];
 
   const drawerRow = drawerArticleId
@@ -604,6 +648,9 @@ export function MyBacklogView({
             onChange={(e) => setSpecialtyFilter(e.target.value)}
           />
         </div>
+        <Button variant="secondary" onClick={() => setAddModalOpen(true)}>
+          + Add article
+        </Button>
       </Inline>
       <DataTable
         rows={filtered}
@@ -661,6 +708,15 @@ export function MyBacklogView({
           onClose={() => setManagerArticleId(null)}
         />
       )}
+      <AddArticleModal
+        open={addModalOpen}
+        specialties={specialties}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={() => {
+          setAddModalOpen(false);
+          router.refresh();
+        }}
+      />
     </Stack>
   );
 }

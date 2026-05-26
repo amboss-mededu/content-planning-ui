@@ -299,3 +299,35 @@ export async function bulkInsertArticleUpdateSuggestionsAsAdmin(
       .create({ specialtySlug: slug, ...withArticleKey(slug, r) });
   }
 }
+
+export async function deleteConsolidatedArticleByKeyAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<boolean> {
+  const pb = await createAdminClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  try {
+    const row = await pb
+      .collection<ConsolidatedArticleRecord>('consolidatedArticles')
+      .getFirstListItem(filter);
+    await pb.collection('consolidatedArticles').delete(row.id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function createManualConsolidatedArticleAsAdmin(
+  slug: string,
+  title: string,
+  articleType?: string,
+): Promise<{ id: string; articleKey: string }> {
+  const pb = await createAdminClient();
+  const base: Record<string, unknown> = { articleTitle: title };
+  if (articleType) base.articleType = articleType;
+  const row = withArticleKey(slug, base);
+  const created = await pb
+    .collection('consolidatedArticles')
+    .create({ specialtySlug: slug, ...row });
+  return { id: created.id, articleKey: (row.articleKey as string) ?? '' };
+}

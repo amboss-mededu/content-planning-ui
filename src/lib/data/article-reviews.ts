@@ -82,6 +82,41 @@ export async function setArticleReview(
   return articleKey;
 }
 
+export async function setArticleReviewAsAdmin(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  status: ArticleReviewStatus,
+  reviewerEmail: string | null,
+): Promise<string> {
+  if (!articleKey) {
+    throw new Error('setArticleReviewAsAdmin: articleKey is required');
+  }
+  const pb = await createAdminClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  const payload: Record<string, unknown> = {
+    specialtySlug: slug,
+    articleKey,
+    articleRecordId,
+    status,
+    reviewerEmail: reviewerEmail ?? '',
+    reviewedAt: Date.now(),
+  };
+  try {
+    const existing = await pb
+      .collection<ArticleReviewRecord>('articleReviews')
+      .getFirstListItem(filter);
+    await pb.collection('articleReviews').update(existing.id, payload);
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      await pb.collection('articleReviews').create(payload);
+      return articleKey;
+    }
+    throw e;
+  }
+  return articleKey;
+}
+
 /**
  * Returns the articleKey that was deleted (or null if no row existed).
  * Callers use this to clear matching optimistic patches without waiting
@@ -93,6 +128,25 @@ export async function clearArticleReview(
 ): Promise<string | null> {
   if (!articleKey) return null;
   const pb = await userClient();
+  const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
+  try {
+    const existing = await pb
+      .collection<ArticleReviewRecord>('articleReviews')
+      .getFirstListItem(filter);
+    await pb.collection('articleReviews').delete(existing.id);
+    return articleKey;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function clearArticleReviewAsAdmin(
+  slug: string,
+  articleKey: string,
+): Promise<string | null> {
+  if (!articleKey) return null;
+  const pb = await createAdminClient();
   const filter = `specialtySlug = "${slug}" && articleKey = "${articleKey}"`;
   try {
     const existing = await pb

@@ -4,15 +4,28 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/auth';
 import {
   clearArticleBacklog,
+  clearArticleBacklogAsAdmin,
   clearUpdateBacklogRow,
   ensureNewArticleBacklogRow,
+  ensureNewArticleBacklogRowAsAdmin,
   ensureUpdateBacklogRow,
   resetArticleBacklogStatusAsAdmin,
   setArticleBacklogAssignee,
+  setArticleBacklogAssigneeAsAdmin,
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
+import { computeArticleKey } from '@/lib/data/article-keys';
 import { deleteArticleLitSearchRunsByArticleKeyAsAdmin } from '@/lib/data/article-lit-search-runs';
-import { clearArticleReview, setArticleReview } from '@/lib/data/article-reviews';
+import {
+  clearArticleReview,
+  clearArticleReviewAsAdmin,
+  setArticleReview,
+  setArticleReviewAsAdmin,
+} from '@/lib/data/article-reviews';
+import {
+  createManualConsolidatedArticleAsAdmin,
+  deleteConsolidatedArticleByKeyAsAdmin,
+} from '@/lib/data/articles';
 import {
   deleteArticleSourcesByArticleKeyAsAdmin,
   markSourceCortexRegisteredAsAdmin,
@@ -647,4 +660,62 @@ export async function setPipelineStageState(
   }
   await setPipelineStageStateData(slug, stageName, state);
   revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+const PERSONAL_BACKLOG_SLUG = '_personal';
+
+export async function addManualArticle(
+  slug: string,
+  title: string,
+  articleType?: string,
+  assignToSelf?: boolean,
+): Promise<{ articleKey: string; error?: string }> {
+  const trimmed = title.trim();
+  if (!trimmed) return { articleKey: '', error: 'Title is required.' };
+
+  const effectiveSlug = slug || PERSONAL_BACKLOG_SLUG;
+
+  const articleKey = computeArticleKey({
+    specialtySlug: effectiveSlug,
+    articleTitle: trimmed,
+  });
+  if (!articleKey) return { articleKey: '', error: 'Could not derive a valid article key.' };
+
+  const { id } = await createManualConsolidatedArticleAsAdmin(
+    effectiveSlug,
+    trimmed,
+    articleType,
+  );
+
+  const user = await getCurrentUser();
+  const email = user?.email ?? null;
+
+  await setArticleReviewAsAdmin(effectiveSlug, articleKey, id, 'approved', email);
+  await ensureNewArticleBacklogRowAsAdmin(effectiveSlug, articleKey, id, email);
+
+  if (assignToSelf && email) {
+    await setArticleBacklogAssigneeAsAdmin(effectiveSlug, articleKey, id, email, email);
+  }
+
+  if (effectiveSlug !== PERSONAL_BACKLOG_SLUG) {
+    revalidatePath(`/planning/${effectiveSlug}`, 'layout');
+  }
+  revalidatePath('/my-backlog', 'layout');
+  return { articleKey };
+}
+
+export async function deleteManualArticle(
+  slug: string,
+  articleKey: string,
+): Promise<void> {
+  const effectiveSlug = slug || PERSONAL_BACKLOG_SLUG;
+  await Promise.all([
+    deleteConsolidatedArticleByKeyAsAdmin(effectiveSlug, articleKey),
+    clearArticleReviewAsAdmin(effectiveSlug, articleKey),
+    clearArticleBacklogAsAdmin(effectiveSlug, articleKey),
+  ]);
+  if (effectiveSlug !== PERSONAL_BACKLOG_SLUG) {
+    revalidatePath(`/planning/${effectiveSlug}`, 'layout');
+  }
+  revalidatePath('/my-backlog', 'layout');
 }
