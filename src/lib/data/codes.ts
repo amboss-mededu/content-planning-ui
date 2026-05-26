@@ -14,6 +14,87 @@ import type {
 } from '@/lib/pb/types';
 import { filterCodesByConsolidationCategories } from '@/lib/workflows/consolidation/buckets';
 
+export type CodeTableRow = Pick<
+  CodeRecord,
+  | 'id'
+  | 'created'
+  | 'updated'
+  | 'collectionId'
+  | 'collectionName'
+  | 'specialtySlug'
+  | 'specialty'
+  | 'source'
+  | 'code'
+  | 'category'
+  | 'consolidationCategory'
+  | 'description'
+  | 'isInAMBOSS'
+  | 'mappedAt'
+  | 'coverageLevel'
+  | 'depthOfCoverage'
+  | 'coverageArticleCount'
+  | 'coverageSectionCount'
+  | 'existingArticleUpdateCount'
+  | 'newArticleSuggestionCount'
+>;
+
+const CODE_TABLE_FIELDS = [
+  'id',
+  'created',
+  'updated',
+  'collectionId',
+  'collectionName',
+  'specialtySlug',
+  'specialty',
+  'source',
+  'code',
+  'category',
+  'consolidationCategory',
+  'description',
+  'isInAMBOSS',
+  'mappedAt',
+  'coverageLevel',
+  'depthOfCoverage',
+  'coverageArticleCount',
+  'coverageSectionCount',
+  'existingArticleUpdateCount',
+  'newArticleSuggestionCount',
+].join(',');
+
+function countCoveredSections(items: CoveredSection[] | undefined): number {
+  if (!Array.isArray(items)) return 0;
+  let n = 0;
+  for (const item of items) {
+    const sections = item.sections;
+    if (Array.isArray(sections)) n += sections.length;
+  }
+  return n;
+}
+
+function buildMappingCounts(mapping: {
+  articlesWhereCoverageIs?: CoveredSection[];
+  existingArticleUpdates?: SectionUpdate[];
+  newArticlesNeeded?: NewArticle[];
+}): {
+  coverageArticleCount: number;
+  coverageSectionCount: number;
+  existingArticleUpdateCount: number;
+  newArticleSuggestionCount: number;
+} {
+  return {
+    coverageArticleCount: Array.isArray(mapping.articlesWhereCoverageIs)
+      ? mapping.articlesWhereCoverageIs.length
+      : 0,
+    coverageSectionCount: countCoveredSections(mapping.articlesWhereCoverageIs),
+    existingArticleUpdateCount: Array.isArray(mapping.existingArticleUpdates)
+      ? mapping.existingArticleUpdates.length
+      : 0,
+    newArticleSuggestionCount: Array.isArray(mapping.newArticlesNeeded)
+      ? mapping.newArticlesNeeded.length
+      : 0,
+  };
+}
+
 async function userClient(): Promise<PocketBase> {
   const store = await cookies();
   const cookieHeader = store
@@ -53,6 +134,44 @@ export async function listInFlightCodes(slug: string): Promise<string[]> {
     .collection<MappingInFlightRecord>('mappingsInFlight')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   return rows.map((r) => r.code);
+}
+
+export async function listCodesPaginated(
+  slug: string,
+  page: number,
+  perPage: number,
+): Promise<{ items: CodeRecord[]; totalItems: number }> {
+  await connection();
+  const pb = await userClient();
+  const result = await pb.collection<CodeRecord>('codes').getList(page, perPage, {
+    filter: `specialtySlug = "${slug}"`,
+    sort: 'code',
+    skipTotal: false,
+  });
+  return { items: result.items, totalItems: result.totalItems };
+}
+
+export async function listCodeTableRowsPage(
+  slug: string,
+  page: number,
+  perPage: number,
+  updatedAfter?: string | null,
+): Promise<{ items: CodeTableRow[]; hasMore: boolean }> {
+  await connection();
+  const pb = await userClient();
+  const filter = updatedAfter
+    ? pb.filter('specialtySlug = {:slug} && updated > {:updatedAfter}', {
+        slug,
+        updatedAfter,
+      })
+    : pb.filter('specialtySlug = {:slug}', { slug });
+  const result = await pb.collection<CodeTableRow>('codes').getList(page, perPage, {
+    filter,
+    sort: updatedAfter ? 'updated' : 'code',
+    fields: CODE_TABLE_FIELDS,
+    skipTotal: true,
+  });
+  return { items: result.items, hasMore: result.items.length === perPage };
 }
 
 export async function listUnmappedCodeCount(slug: string): Promise<number> {
@@ -279,7 +398,12 @@ export async function writeCodeMappingAsAdmin(args: WriteCodeMappingArgs): Promi
   const row = await pb
     .collection<CodeRecord>('codes')
     .getFirstListItem(`specialtySlug = "${slug}" && code = "${code}"`);
-  await pb.collection('codes').update(row.id, { ...mapping, mappedAt: Date.now() });
+  const mappedAt = Date.now();
+  await pb.collection('codes').update(row.id, {
+    ...mapping,
+    ...buildMappingCounts(mapping),
+    mappedAt,
+  });
 
   // Drop in-flight markers for this code.
   const flights = await pb
@@ -306,6 +430,10 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       articlesWhereCoverageIs: null,
       existingArticleUpdates: null,
       newArticlesNeeded: null,
+      coverageArticleCount: 0,
+      coverageSectionCount: 0,
+      existingArticleUpdateCount: 0,
+      newArticleSuggestionCount: 0,
     });
   }
   const flights = await pb
@@ -336,6 +464,10 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     articlesWhereCoverageIs: null,
     existingArticleUpdates: null,
     newArticlesNeeded: null,
+    coverageArticleCount: 0,
+    coverageSectionCount: 0,
+    existingArticleUpdateCount: 0,
+    newArticleSuggestionCount: 0,
   });
 }
 
@@ -349,7 +481,14 @@ export async function bulkInsertCodesAsAdmin(
     // codes don't trip the "mapping has run" predicate. `isInAMBOSS` is a PB
     // bool (NOT NULL, default false) and cannot represent "unset", so we read
     // it conditionally on `mappedAt > 0` everywhere.
-    await pb.collection('codes').create({ specialtySlug: slug, ...r });
+    await pb.collection('codes').create({
+      specialtySlug: slug,
+      coverageArticleCount: 0,
+      coverageSectionCount: 0,
+      existingArticleUpdateCount: 0,
+      newArticleSuggestionCount: 0,
+      ...r,
+    });
   }
 }
 

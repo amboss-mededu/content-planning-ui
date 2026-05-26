@@ -89,6 +89,7 @@ export function CodeDetailModal({
   specialtySlug,
   canEdit,
   lockStatus,
+  supportReady = true,
   inFlight,
   onClose,
 }: {
@@ -97,6 +98,7 @@ export function CodeDetailModal({
   specialtySlug: string;
   canEdit: boolean;
   lockStatus: string | null;
+  supportReady?: boolean;
   inFlight: boolean;
   onClose: () => void;
 }) {
@@ -110,6 +112,11 @@ export function CodeDetailModal({
     'idle' | 'loading' | 'loaded' | 'missing' | 'error'
   >('idle');
   const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [fullRow, setFullRow] = useState<Code | null>(null);
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'loaded' | 'error'>(
+    'idle',
+  );
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   // The modal stays mounted across opens (row toggles between null and a
   // value), so re-align the tab whenever the caller's target/row changes.
@@ -125,7 +132,43 @@ export function CodeDetailModal({
     setMetadata(null);
     setMetadataState('idle');
     setMetadataError(null);
+    setFullRow(null);
+    setDetailState(rowKey ? 'loading' : 'idle');
+    setDetailError(null);
   }, [target, rowKey]);
+
+  useEffect(() => {
+    if (!rowKey) return;
+    let cancelled = false;
+    setDetailState('loading');
+    setDetailError(null);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/codes/${encodeURIComponent(specialtySlug)}/${encodeURIComponent(rowKey)}`,
+          { cache: 'no-store' },
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setDetailError(body?.error ?? `HTTP ${res.status}`);
+          setDetailState('error');
+          return;
+        }
+        const json = (await res.json()) as Code;
+        if (cancelled) return;
+        setFullRow(json);
+        setDetailState('loaded');
+      } catch (e) {
+        if (cancelled) return;
+        setDetailError(e instanceof Error ? e.message : String(e));
+        setDetailState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rowKey, specialtySlug]);
 
   // Lazy-load metadata only when the user opens that tab. We deliberately
   // exclude `metadataState` from the deps: setting it to 'loading' inside the
@@ -174,19 +217,26 @@ export function CodeDetailModal({
   // RowActions: unmapped rows can always be mapped; remap of an already-
   // mapped row requires the consolidation gate to be open. While the row is
   // currently in flight from an active map_codes run, the action is locked.
-  const isUnmapped = !((row.mappedAt ?? 0) > 0);
-  const actionEnabled = !inFlight && !submitting && (isUnmapped || canEdit);
+  const detailRow = fullRow ?? row;
+  const detailLoading = detailState === 'loading';
+  const detailFailed = detailState === 'error';
+
+  const isUnmapped = !((detailRow.mappedAt ?? 0) > 0);
+  const actionEnabled =
+    supportReady && !inFlight && !submitting && (isUnmapped || canEdit);
   const actionLabel = inFlight
     ? 'Mapping…'
-    : submitting
-      ? isUnmapped
-        ? 'Mapping…'
-        : 'Remapping…'
-      : isUnmapped
-        ? 'Map'
-        : 'Remap';
+    : !supportReady
+      ? 'Loading…'
+      : submitting
+        ? isUnmapped
+          ? 'Mapping…'
+          : 'Remapping…'
+        : isUnmapped
+          ? 'Map'
+          : 'Remap';
   const lockReason =
-    !canEdit && !isUnmapped
+    supportReady && !canEdit && !isUnmapped
       ? `Consolidation is active${lockStatus ? ` (${lockStatus})` : ''} — reset to re-enable`
       : null;
 
@@ -194,7 +244,7 @@ export function CodeDetailModal({
     if (!actionEnabled) return;
     if (!isUnmapped) {
       const ok = window.confirm(
-        `Clear the current mapping for "${row.code}" and re-run? The existing coverage, suggestions, and metadata will be overwritten.`,
+        `Clear the current mapping for "${detailRow.code}" and re-run? The existing coverage, suggestions, and metadata will be overwritten.`,
       );
       if (!ok) return;
     }
@@ -213,14 +263,14 @@ export function CodeDetailModal({
       const body = isUnmapped
         ? {
             specialtySlug,
-            codes: [row.code],
+            codes: [detailRow.code],
             checkAgainstLibrary: true,
             primaryModel,
             backupModel,
           }
         : {
             specialtySlug,
-            code: row.code,
+            code: detailRow.code,
             checkAgainstLibrary: true,
             primaryModel,
             backupModel,
@@ -254,17 +304,19 @@ export function CodeDetailModal({
     }
   };
 
-  const covered = (row.articlesWhereCoverageIs ?? []) as unknown as CoveredSection[];
-  const updates = (row.existingArticleUpdates ?? []) as unknown as SectionUpdate[];
-  const newArticles = (row.newArticlesNeeded ?? []) as unknown as NewArticleSuggestion[];
-  const inAmboss = row.isInAMBOSS;
-  const specialty = row.specialty ?? '';
-  const category = row.category ?? '';
+  const covered = (detailRow.articlesWhereCoverageIs ??
+    []) as unknown as CoveredSection[];
+  const updates = (detailRow.existingArticleUpdates ?? []) as unknown as SectionUpdate[];
+  const newArticles = (detailRow.newArticlesNeeded ??
+    []) as unknown as NewArticleSuggestion[];
+  const inAmboss = detailRow.isInAMBOSS;
+  const specialty = detailRow.specialty ?? '';
+  const category = detailRow.category ?? '';
 
   return (
     <Modal
-      header={row.description ?? row.code}
-      subHeader={row.description ? row.code : undefined}
+      header={detailRow.description ?? detailRow.code}
+      subHeader={detailRow.description ? detailRow.code : undefined}
       size="l"
       isDismissible
       actionButton={{
@@ -307,9 +359,14 @@ export function CodeDetailModal({
             ) : (
               <Badge text="Unmapped" color="gray" />
             )}
-            {row.coverageLevel ? <CoverageBadge level={row.coverageLevel} /> : null}
-            {typeof row.depthOfCoverage === 'number' ? (
-              <DepthBadge depth={row.depthOfCoverage} level={row.coverageLevel} />
+            {detailRow.coverageLevel ? (
+              <CoverageBadge level={detailRow.coverageLevel} />
+            ) : null}
+            {typeof detailRow.depthOfCoverage === 'number' ? (
+              <DepthBadge
+                depth={detailRow.depthOfCoverage}
+                level={detailRow.coverageLevel}
+              />
             ) : null}
           </Inline>
 
@@ -321,6 +378,11 @@ export function CodeDetailModal({
           {lockReason && !error ? (
             <Text size="s" color="secondary">
               {lockReason}
+            </Text>
+          ) : null}
+          {detailFailed ? (
+            <Text size="s" color="error">
+              {detailError ?? 'Failed to load code details.'}
             </Text>
           ) : null}
 
@@ -339,12 +401,21 @@ export function CodeDetailModal({
             ]}
           >
             <div>
-              {activeTab === 0 ? (
+              {detailLoading && activeTab !== 5 ? (
+                <Text size="s" color="tertiary">
+                  Loading code details…
+                </Text>
+              ) : activeTab === 0 ? (
                 <CoverageArticlesPanel covered={covered} />
               ) : activeTab === 1 ? (
-                <CoverageNotesPanel notes={row.notes ?? null} gaps={row.gaps ?? null} />
+                <CoverageNotesPanel
+                  notes={detailRow.notes ?? null}
+                  gaps={detailRow.gaps ?? null}
+                />
               ) : activeTab === 2 ? (
-                <SuggestionImprovementsPanel improvements={row.improvements ?? null} />
+                <SuggestionImprovementsPanel
+                  improvements={detailRow.improvements ?? null}
+                />
               ) : activeTab === 3 ? (
                 <SuggestionUpdatesPanel updates={updates} />
               ) : activeTab === 4 ? (

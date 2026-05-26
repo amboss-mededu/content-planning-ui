@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { COVERAGE_LEVELS, type Code } from '@/lib/types';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
@@ -43,57 +43,36 @@ const IN_AMBOSS_FILTER_OPTIONS = [
 ];
 
 export function CodesView({
-  codes: initialCodes,
+  codes,
   specialtySlug,
   canEdit,
   lockStatus,
+  supportReady = true,
   inFlightCodes,
   categories,
   unmappedCodes,
   unmappedCount,
+  totalCount,
+  isLoadingMore,
+  remapLoading,
+  onRequestRemapData,
 }: {
   codes: Code[];
   specialtySlug: string;
   canEdit: boolean;
   lockStatus: string | null;
+  supportReady?: boolean;
   inFlightCodes: string[];
   categories: CodeCategorySummary[];
   unmappedCodes: UnmappedCodePickerRow[];
   unmappedCount: number;
+  totalCount?: number;
+  isLoadingMore?: boolean;
+  remapLoading?: boolean;
+  onRequestRemapData?: () => Promise<void>;
 }) {
   const [remapOpen, setRemapOpen] = useState(false);
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
-
-  // Polling for in-flight mappings now lives in `CodesViewClient` via
-  // TanStack Query's `refetchInterval` — the cached query is the source of
-  // truth for codes data, and `router.refresh()` would not update it.
-
-  // Mirror the server-loaded codes into local state so inline edits and the
-  // Map/Remap action can repaint optimistically before the server round-trip
-  // + router.refresh() completes. When the server sends a new list, merge it
-  // into the existing array keyed by `code` so a row that was at position N
-  // before mapping stays at position N afterwards — only the row's data is
-  // updated, the order isn't reshuffled by whatever the server query returns.
-  const [codes, setCodes] = useState<Code[]>(initialCodes);
-  useEffect(() => {
-    setCodes((prev) => {
-      if (prev.length === 0) return initialCodes;
-      const byCode = new Map(initialCodes.map((c) => [c.code, c]));
-      const seen = new Set<string>();
-      const merged: Code[] = [];
-      for (const c of prev) {
-        const next = byCode.get(c.code);
-        if (next) {
-          merged.push(next);
-          seen.add(c.code);
-        }
-      }
-      for (const c of initialCodes) {
-        if (!seen.has(c.code)) merged.push(c);
-      }
-      return merged;
-    });
-  }, [initialCodes]);
 
   const [selected, setSelected] = useState<{
     row: Code;
@@ -315,8 +294,8 @@ export function CodesView({
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           const arr = r.articlesWhereCoverageIs ?? [];
-          const articles = arr.length;
-          const sections = countCoveredSections(arr);
+          const articles = r.coverageArticleCount ?? arr.length;
+          const sections = r.coverageSectionCount ?? countCoveredSections(arr);
           if (articles === 0) return <EmptyChip />;
           return (
             <ChipButton
@@ -330,7 +309,7 @@ export function CodesView({
             />
           );
         },
-        accessor: (r) => r.articlesWhereCoverageIs?.length ?? 0,
+        accessor: (r) => r.coverageArticleCount ?? r.articlesWhereCoverageIs?.length ?? 0,
         type: 'number',
         filterable: true,
         group: 'coverage',
@@ -343,7 +322,7 @@ export function CodesView({
         align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
-          const n = r.existingArticleUpdates?.length ?? 0;
+          const n = r.existingArticleUpdateCount ?? r.existingArticleUpdates?.length ?? 0;
           if (n === 0) return <EmptyChip />;
           return (
             <ChipButton
@@ -353,7 +332,8 @@ export function CodesView({
             />
           );
         },
-        accessor: (r) => r.existingArticleUpdates?.length ?? 0,
+        accessor: (r) =>
+          r.existingArticleUpdateCount ?? r.existingArticleUpdates?.length ?? 0,
         type: 'number',
         filterable: true,
         group: 'suggestions',
@@ -366,7 +346,7 @@ export function CodesView({
         align: 'center',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
-          const n = r.newArticlesNeeded?.length ?? 0;
+          const n = r.newArticleSuggestionCount ?? r.newArticlesNeeded?.length ?? 0;
           if (n === 0) return <EmptyChip />;
           return (
             <ChipButton
@@ -376,7 +356,7 @@ export function CodesView({
             />
           );
         },
-        accessor: (r) => r.newArticlesNeeded?.length ?? 0,
+        accessor: (r) => r.newArticleSuggestionCount ?? r.newArticlesNeeded?.length ?? 0,
         type: 'number',
         filterable: true,
         group: 'suggestions',
@@ -384,10 +364,10 @@ export function CodesView({
     ];
   }, [onOpenDetail, inFlightSet]);
 
-  const canRemap = canEdit && unmappedCount > 0;
+  const canRemap = supportReady && canEdit && unmappedCount > 0;
   return (
     <Stack space="m">
-      {!canEdit ? (
+      {supportReady && !canEdit ? (
         <Text color="secondary">
           Consolidation is active{lockStatus ? ` (${lockStatus})` : ''} — edits and
           re-mapping of already-mapped codes are disabled. Reset the consolidation stage
@@ -398,15 +378,20 @@ export function CodesView({
         <Button
           variant="secondary"
           size="m"
-          onClick={() => setRemapOpen(true)}
-          disabled={!canRemap}
+          onClick={async () => {
+            await onRequestRemapData?.();
+            setRemapOpen(true);
+          }}
+          disabled={!canRemap || remapLoading}
         >
-          Map by category…
+          {remapLoading ? 'Loading…' : 'Map by category…'}
         </Button>
         <Text color="secondary">
-          {unmappedCount === 0
-            ? 'All codes mapped.'
-            : `${unmappedCount.toLocaleString()} unmapped`}
+          {!supportReady
+            ? 'Loading mapping controls…'
+            : unmappedCount === 0
+              ? 'All codes mapped.'
+              : `${unmappedCount.toLocaleString()} unmapped`}
         </Text>
       </Inline>
       <DataTable
@@ -414,9 +399,13 @@ export function CodesView({
         columns={columns}
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
-        // "Mapped" = the workflow has stamped `mappedAt` (yes or no verdict).
-        // Computed off the live filtered set so the count tracks whatever
-        // slice the user is currently looking at.
+        leadingNote={
+          isLoadingMore && totalCount
+            ? `Loading ${Math.max(0, totalCount - codes.length).toLocaleString()} more rows…`
+            : isLoadingMore
+              ? 'Loading more rows…'
+              : undefined
+        }
         countAddendum={(filtered) => {
           const mapped = filtered.reduce(
             (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
@@ -432,10 +421,12 @@ export function CodesView({
         specialtySlug={specialtySlug}
         canEdit={canEdit}
         lockStatus={lockStatus}
+        supportReady={supportReady}
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
         onClose={() => setSelected(null)}
       />
       <RemapModal
+        key={`remap-${categories.length}`}
         open={remapOpen}
         onClose={() => setRemapOpen(false)}
         specialtySlug={specialtySlug}

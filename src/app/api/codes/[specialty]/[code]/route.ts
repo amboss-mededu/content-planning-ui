@@ -12,7 +12,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
 import { requireUserResponse } from '@/lib/auth';
-import { patchCode } from '@/lib/data/codes';
+import { getCode, patchCode } from '@/lib/data/codes';
 import { getConsolidationLockState } from '@/lib/data/pipeline';
 
 type Body = {
@@ -27,6 +27,21 @@ function cleanOpt(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined;
   const trimmed = v.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ specialty: string; code: string }> },
+) {
+  const guard = await requireUserResponse();
+  if (guard) return guard;
+  const { specialty, code } = await params;
+  const slug = decodeURIComponent(specialty);
+  const codeId = decodeURIComponent(code);
+
+  const row = await getCode(slug, codeId);
+  if (!row) return NextResponse.json({ error: 'code not found' }, { status: 404 });
+  return NextResponse.json(row);
 }
 
 export async function PATCH(

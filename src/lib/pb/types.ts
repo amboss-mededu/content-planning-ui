@@ -69,6 +69,10 @@ export interface CodeRecord extends PbRecord {
   gaps?: string;
   coverageLevel?: string;
   depthOfCoverage?: number;
+  coverageArticleCount?: number;
+  coverageSectionCount?: number;
+  existingArticleUpdateCount?: number;
+  newArticleSuggestionCount?: number;
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   improvements?: string;

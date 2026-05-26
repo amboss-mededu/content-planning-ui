@@ -99,7 +99,7 @@ export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
           <div className="primary-nav-user">{user ? <UserMenu user={user} /> : null}</div>
         </div>
       </NavBar.PrimaryNavContainer>
-      {isAuthenticated && (
+      {isAuthenticated && !isCompact && (
         <NavBar.SubMenuContainer>
           <Box space="m" vSpace="zero">
             <NavBar.SecondaryNav

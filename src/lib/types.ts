@@ -68,6 +68,10 @@ export type Code = {
   gaps?: string;
   coverageLevel?: CoverageLevel;
   depthOfCoverage?: number;
+  coverageArticleCount?: number;
+  coverageSectionCount?: number;
+  existingArticleUpdateCount?: number;
+  newArticleSuggestionCount?: number;
   existingArticleUpdates?: ArticleUpdate[];
   newArticlesNeeded?: NewArticleRef[];
   improvements?: string;
