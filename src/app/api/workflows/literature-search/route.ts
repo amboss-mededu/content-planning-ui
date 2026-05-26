@@ -9,34 +9,36 @@
  *
  * Responsibility:
  *   1. Verify auth + specialty.
- *   2. Resolve the Google API key (Gemini-only workflow).
- *   3. Find approved new-article candidates whose effective
- *      backlog status is `waiting-for-sources` (no PB row, status=
+ *   2. Find approved new-article candidates whose effective backlog
+ *      status is `waiting-for-sources` (no PB row, status=
  *      `unassigned`, or status=`waiting-for-sources` are all treated
  *      as waiting). When `articleRecordIds` is provided, the eligible
  *      set is intersected with it so editors can search a chosen subset.
- *   4. Skip with 200 + `{ skipped: true }` if nothing to do — no run
+ *   3. Skip with 200 + `{ skipped: true }` if nothing to do — no run
  *      row created.
- *   5. Otherwise create the pipelineRuns + pipelineStages rows and
- *      kick off the background worker fire-and-forget.
+ *   4. Otherwise create the pipelineRuns + pipelineStages rows, claim
+ *      a per-article `articleLitSearchRuns` row for each, then dispatch
+ *      one POST per article to the n8n webhook backend. Results land via
+ *      /api/workflows/literature-search/callback when n8n finishes.
  */
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { extractCodes } from '@/app/planning/_components/code-utils';
+import { env } from '@/env';
 import { requireUserResponse } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import {
   attachPipelineRunToLitSearchRunsAsAdmin,
   claimArticleLitSearchRunAsAdmin,
   finishArticleLitSearchRunAsAdmin,
+  reapStaleLitSearchRunsAsAdmin,
 } from '@/lib/data/article-lit-search-runs';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
-import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
-import { runLiteratureSearch } from '@/lib/workflows/literature-search';
+import { dispatchLiteratureSearch } from '@/lib/workflows/literature-search';
 
 type Body = { specialtySlug?: string; articleRecordIds?: string[] };
 
@@ -53,17 +55,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
   }
 
-  const apiKeys = await resolveApiKeysForRun(['google']);
-  if (!apiKeys.google) {
-    return NextResponse.json(
-      {
-        error: 'No Google API key configured.',
-        code: 'MISSING_API_KEY',
-        provider: 'google',
-      },
-      { status: 409 },
-    );
-  }
+  // Reap stuck `running` rows older than the timeout before claiming so
+  // a previously-stalled article doesn't keep blocking new attempts.
+  await reapStaleLitSearchRunsAsAdmin(slug);
 
   const [suggestions, reviews, backlog] = await Promise.all([
     listConsolidatedArticles(slug),
@@ -154,13 +148,21 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  void runLiteratureSearch({
+  // Prefer the explicit override so local dev can hit localhost in the
+  // browser (avoiding mixed-content with the HTTP PocketBase) while n8n
+  // calls back through a tunnel. Falls back to the request origin, which
+  // is what production wants.
+  const callbackOrigin = env.LIT_SEARCH_N8N_CALLBACK_BASE_URL ?? req.nextUrl.origin;
+  const callbackUrl = new URL(
+    '/api/workflows/literature-search/callback',
+    callbackOrigin,
+  ).toString();
+
+  const dispatchResult = await dispatchLiteratureSearch({
     runId,
     specialtySlug: slug,
+    callbackUrl,
     articles: claimed,
-    apiKeys,
-  }).catch((e) => {
-    console.error('[literature-search] unhandled rejection', e);
   });
 
   revalidateTag(`pipeline:${slug}`, 'max');
@@ -171,5 +173,7 @@ export async function POST(req: NextRequest) {
     specialty: slug,
     articles: claimed.length,
     alreadyRunning,
+    dispatched: dispatchResult.dispatched,
+    dispatchFailed: dispatchResult.failed,
   });
 }

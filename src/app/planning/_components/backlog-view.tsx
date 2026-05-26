@@ -307,6 +307,32 @@ export function BacklogView({
     return out;
   }, [memberRows, statusFilter, assigneeFilter, statusOf, assigneeOf]);
 
+  // ArrowLeft/ArrowRight step through the filtered list while the manager
+  // modal is open. Skips when focus is inside a text field so typing in
+  // notes/comments isn't hijacked.
+  useEffect(() => {
+    if (!managerArticleId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      }
+      const idx = filtered.findIndex((r) => r.id === managerArticleId);
+      if (idx === -1) return;
+      const nextIdx =
+        e.key === 'ArrowRight'
+          ? Math.min(filtered.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
+      if (nextIdx === idx) return;
+      e.preventDefault();
+      setManagerArticleId(filtered[nextIdx].id);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [managerArticleId, filtered]);
+
   const counts = useMemo(() => {
     let published = 0;
     let inProgress = 0;
@@ -714,6 +740,24 @@ export function BacklogView({
     ? [managerLatestLitSearchRun]
     : initialLitSearchRuns.filter((run) => run.articleKey === managerRow?.articleKey);
 
+  // Position of the open row inside the filtered list, used to drive the
+  // modal's Prev/Next footer + arrow-key navigation. Recomputed when the
+  // filter changes underneath (e.g. status filter excludes the current
+  // row → index becomes -1, both callbacks go undefined).
+  const managerIndex = managerArticleId
+    ? filtered.findIndex((r) => r.id === managerArticleId)
+    : -1;
+  const managerOnPrev =
+    managerIndex > 0
+      ? () => setManagerArticleId(filtered[managerIndex - 1].id)
+      : undefined;
+  const managerOnNext =
+    managerIndex !== -1 && managerIndex < filtered.length - 1
+      ? () => setManagerArticleId(filtered[managerIndex + 1].id)
+      : undefined;
+  const managerPosition =
+    managerIndex !== -1 ? { index: managerIndex, total: filtered.length } : undefined;
+
   return (
     <Stack space="m">
       {actionError ? (
@@ -792,6 +836,7 @@ export function BacklogView({
       )}
       {managerArticleId && managerRow && managerRow.type === 'new' && (
         <ArticleManagerModalV2
+          key={managerArticleId}
           opener={{
             type: 'new',
             stage: 'backlog',
@@ -808,12 +853,16 @@ export function BacklogView({
             onStatusChange: (next, notes) =>
               handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
             onPipelineActionTriggered,
+            onPrev: managerOnPrev,
+            onNext: managerOnNext,
+            position: managerPosition,
           }}
           onClose={() => setManagerArticleId(null)}
         />
       )}
       {managerArticleId && managerRow && managerRow.type === 'update' && (
         <ArticleManagerModalV2
+          key={managerArticleId}
           opener={{
             type: 'update',
             stage: 'backlog',
@@ -828,6 +877,9 @@ export function BacklogView({
             viewerEmail,
             onStatusChange: (next, notes) =>
               handleStatusChange(managerRow.articleKey, managerArticleId, next, notes),
+            onPrev: managerOnPrev,
+            onNext: managerOnNext,
+            position: managerPosition,
           }}
           onClose={() => setManagerArticleId(null)}
         />

@@ -196,6 +196,24 @@ export async function markSourceCortexRegisteredAsAdmin(
   await pb.collection('articleSources').update(sourceId, { cortexSourceId });
 }
 
+export async function setSourceUrlAsAdmin(sourceId: string, url: string): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { url });
+}
+
+export async function setSourceDoiAsAdmin(sourceId: string, doi: string): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { doi });
+}
+
+export async function setSourceNotesAsAdmin(
+  sourceId: string,
+  notes: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, { notes });
+}
+
 /**
  * Renumber `priority` on the given source IDs in array order (1..N).
  * Editor-controlled ordering for the sources-approved priority list.
@@ -274,16 +292,80 @@ export async function bulkInsertArticleSourcesAsAdmin(
   const existing = await pb
     .collection<ArticleSourceRecord>('articleSources')
     .getFullList({ filter });
-  await Promise.all(existing.map((r) => pb.collection('articleSources').delete(r.id)));
-  for (const row of rows) {
-    await pb.collection('articleSources').create({
+  // Tolerate 404 on individual deletes — a concurrent caller (e.g. an
+  // n8n callback retrying) may have already removed the row. Anything
+  // else still throws so real errors aren't masked.
+  await Promise.all(
+    existing.map(async (r) => {
+      try {
+        await pb.collection('articleSources').delete(r.id);
+      } catch (e) {
+        const status = (e as { status?: number })?.status;
+        if (status !== 404) throw e;
+      }
+    }),
+  );
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    // PB rejects nulls on optional number columns and unknown keys (e.g.
+    // n8n may include `index`, `provider`, `year`, etc. that aren't on
+    // the schema). Drop null/undefined and project to the known column set
+    // so a single bad row can't 404/400 the whole batch.
+    const payload: Record<string, unknown> = {
       specialtySlug: slug,
       articleRecordId,
       articleKey,
-      ...row,
-    });
+    };
+    const allowed: ReadonlySet<keyof ArticleSourceRecord> = new Set([
+      'ribosomId',
+      'title',
+      'doi',
+      'url',
+      'journal',
+      'journalNlm',
+      'sourceType',
+      'predatoryJournalRisk',
+      'totalCitations',
+      'impactFactor',
+      'rank',
+      'subtopics',
+      'llmSummary',
+      'justification',
+      'superseded',
+      'priority',
+      'originalFilename',
+      'geminiFilename',
+      'uri',
+      'mimeType',
+      'cortexSourceId',
+      'reviewStatus',
+      'reviewerEmail',
+      'reviewedAt',
+      'notes',
+    ]);
+    for (const [k, v] of Object.entries(row)) {
+      if (v === null || v === undefined) continue;
+      if (allowed.has(k as keyof ArticleSourceRecord)) payload[k] = v;
+    }
+    try {
+      await pb.collection('articleSources').create(payload);
+      inserted++;
+    } catch (e) {
+      const pbErr = e as { status?: number; response?: { data?: unknown } };
+      console.error('[articleSources] insert rejected for row', {
+        index: i,
+        articleKey,
+        articleRecordId,
+        payload,
+        pbStatus: pbErr?.status,
+        pbDetail: pbErr?.response?.data,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      throw e;
+    }
   }
-  return rows.length;
+  return inserted;
 }
 
 /**

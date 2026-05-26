@@ -65,10 +65,23 @@ export const env = createEnv({
     // unblocks the orchestration UX before the API contract is final.
     CORTEX_API_URL: z.string().url().optional(),
     CORTEX_API_KEY: optionalString,
-    // Optional NCBI E-utilities API key. With a key NCBI permits ~10
-    // req/sec; without one the limit is ~3 req/sec and IP-rate-limited.
-    // The PubMed client paces accordingly.
-    NCBI_API_KEY: optionalString,
+    // n8n webhook that owns the literature-search pipeline (query gen +
+    // PubMed + ranking). The app POSTs per-article jobs and listens on
+    // /api/workflows/literature-search/callback for results — see
+    // src/lib/workflows/literature-search/dispatch.ts.
+    LIT_SEARCH_N8N_WEBHOOK_URL: z.string().url().optional(),
+    // Shared secret. Sent to n8n in the trigger payload's meta.callbackToken
+    // and required as `Authorization: Bearer <secret>` on inbound callbacks.
+    // Generate with `openssl rand -hex 32`.
+    LIT_SEARCH_N8N_CALLBACK_SECRET: optionalString,
+    // Optional override for the callback URL the dispatcher sends to n8n.
+    // When unset, the dispatcher uses `req.nextUrl.origin` — fine in
+    // production where the browser and the public app share a host. For
+    // local dev, set this to your tunnel URL (e.g.
+    // `https://<random>.trycloudflare.com`) so the browser can keep
+    // hitting http://localhost:3000 (avoiding mixed-content issues with
+    // the HTTP PocketBase) while n8n calls back through the tunnel.
+    LIT_SEARCH_N8N_CALLBACK_BASE_URL: z.string().url().optional(),
   },
   client: {
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
@@ -92,7 +105,9 @@ export const env = createEnv({
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
-    NCBI_API_KEY: process.env.NCBI_API_KEY,
+    LIT_SEARCH_N8N_WEBHOOK_URL: process.env.LIT_SEARCH_N8N_WEBHOOK_URL,
+    LIT_SEARCH_N8N_CALLBACK_SECRET: process.env.LIT_SEARCH_N8N_CALLBACK_SECRET,
+    LIT_SEARCH_N8N_CALLBACK_BASE_URL: process.env.LIT_SEARCH_N8N_CALLBACK_BASE_URL,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
   },
   emptyStringAsUndefined: true,

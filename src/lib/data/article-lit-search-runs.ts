@@ -47,10 +47,55 @@ function litSearchRunSortTime(row: ArticleLitSearchRunRecord): number {
   return row.startedAt ?? (Date.parse(row.created || '') || 0);
 }
 
+/**
+ * How long an `articleLitSearchRuns` row may stay `running` before the
+ * lazy reaper flips it to `failed`. n8n owns the actual search, so the
+ * app has no signal that work is still happening — a row stuck in
+ * `running` past this window means the callback was never received
+ * (n8n died, the workflow errored without the failure branch firing,
+ * the tunnel was down, etc.).
+ */
+const LIT_SEARCH_RUN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Mark stale `running` rows (older than the timeout window) as failed.
+ * Cheap: called lazily on read so we don't need a background worker.
+ * Errors are swallowed — a transient PB failure here shouldn't block the
+ * page render that called us.
+ */
+export async function reapStaleLitSearchRunsAsAdmin(slug?: string): Promise<void> {
+  try {
+    const pb = await createAdminClient();
+    const cutoff = Date.now() - LIT_SEARCH_RUN_TIMEOUT_MS;
+    const filterParts = [`status = "running"`, `startedAt < ${cutoff}`];
+    if (slug) filterParts.unshift(`specialtySlug = "${slug}"`);
+    const stale = await pb
+      .collection<ArticleLitSearchRunRecord>('articleLitSearchRuns')
+      .getFullList({ filter: filterParts.join(' && ') });
+    if (stale.length === 0) return;
+    await Promise.all(
+      stale.map((r) =>
+        pb.collection('articleLitSearchRuns').update(r.id, {
+          status: 'failed',
+          finishedAt: Date.now(),
+          errorMessage: `Timed out after ${LIT_SEARCH_RUN_TIMEOUT_MS / 60_000} minutes`,
+          sourcesCount: 0,
+        }),
+      ),
+    );
+  } catch (e) {
+    console.error('[lit-search] reapStaleLitSearchRunsAsAdmin failed', {
+      slug,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 export async function listArticleLitSearchRuns(
   slug: string,
 ): Promise<ArticleLitSearchRunRecord[]> {
   await connection();
+  await reapStaleLitSearchRunsAsAdmin(slug);
   const pb = await userClient();
   return pb.collection<ArticleLitSearchRunRecord>('articleLitSearchRuns').getFullList({
     filter: `specialtySlug = "${slug}"`,

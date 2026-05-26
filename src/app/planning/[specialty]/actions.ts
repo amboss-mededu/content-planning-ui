@@ -17,7 +17,10 @@ import {
   deleteArticleSourcesByArticleKeyAsAdmin,
   markSourceCortexRegisteredAsAdmin,
   setArticleSourceReviewAsAdmin,
+  setSourceDoiAsAdmin,
+  setSourceNotesAsAdmin,
   setSourcesPriorityAsAdmin,
+  setSourceUrlAsAdmin,
 } from '@/lib/data/article-sources';
 import {
   deleteWritingRunsForArticleAsAdmin,
@@ -163,6 +166,33 @@ export async function submitSourceCortexId(
   value: string,
 ): Promise<void> {
   await markSourceCortexRegisteredAsAdmin(sourceId, value);
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+export async function submitSourceUrl(
+  slug: string,
+  sourceId: string,
+  value: string,
+): Promise<void> {
+  await setSourceUrlAsAdmin(sourceId, value);
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+export async function submitSourceDoi(
+  slug: string,
+  sourceId: string,
+  value: string,
+): Promise<void> {
+  await setSourceDoiAsAdmin(sourceId, value);
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+export async function submitSourceNotes(
+  slug: string,
+  sourceId: string,
+  value: string,
+): Promise<void> {
+  await setSourceNotesAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
 
