@@ -50,6 +50,7 @@ export function InputRow({
   onChange,
   onRemove,
   onRequestAddSource,
+  contentLabel,
 }: {
   row: InputRowState;
   index: number;
@@ -58,6 +59,7 @@ export function InputRow({
   onChange: (patch: Partial<InputRowState>) => void;
   onRemove: () => void;
   onRequestAddSource: () => void;
+  contentLabel?: string;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -88,7 +90,10 @@ export function InputRow({
     alignItems: 'end',
   };
   const isHeaderRow = index === 0;
-  const urlLabel = row.kind === 'url' ? 'Content outline URL' : 'Content outline PDF';
+  const defaultLabel = row.kind === 'url' ? 'Content outline URL' : 'Content outline PDF';
+  const urlLabel = contentLabel
+    ? (row.kind === 'url' ? `${contentLabel} URL` : `${contentLabel} PDF`)
+    : defaultLabel;
 
   return (
     <Stack space="xxs">

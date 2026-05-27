@@ -1,6 +1,8 @@
 'use client';
 
 import { Callout, Card, CardBox, H5, Stack, Text } from '@amboss/design-system';
+import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { StartMilestonesModal } from '../[specialty]/pipeline/_components/start-milestones-modal';
 
 /**
  * Read-only Milestones tab — renders the ACGME-style output written at
@@ -10,13 +12,26 @@ import { Callout, Card, CardBox, H5, Stack, Text } from '@amboss/design-system';
  * so we try to parse + render it as a hierarchical tree and fall back to a
  * raw `<pre>` block when the string isn't valid JSON.
  */
-export function MilestonesView({ milestones }: { milestones: string | null }) {
+export function MilestonesView({
+  milestones,
+  specialtySlug,
+  sources,
+}: {
+  milestones: string | null;
+  specialtySlug: string;
+  sources: CodeSource[];
+}) {
   if (!milestones) {
     return (
       <Stack space="l">
         <Callout
           type="info"
-          text="No milestones have been approved for this specialty yet. Run the Extract milestones stage from the Pipeline tab."
+          text="No milestones have been approved for this specialty yet."
+        />
+        <StartMilestonesModal
+          specialtySlug={specialtySlug}
+          sources={sources}
+          running={false}
         />
       </Stack>
     );
@@ -27,6 +42,11 @@ export function MilestonesView({ milestones }: { milestones: string | null }) {
 
   return (
     <Stack space="l">
+      <StartMilestonesModal
+        specialtySlug={specialtySlug}
+        sources={sources}
+        running={false}
+      />
       <Card title="Milestones" titleAs="h3" outlined>
         <CardBox>
           <Stack space="m">

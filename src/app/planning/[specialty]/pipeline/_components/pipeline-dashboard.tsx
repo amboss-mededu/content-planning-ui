@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Button,
   Callout,
   Card,
   CardBox,
@@ -11,19 +10,19 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';
 import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
-import { LazyStartMapCodesForm } from './lazy-start-map-codes-form';
 import { PhaseGroup } from './phase-group';
+import { RunMapAllButton } from './run-all-mappings-button';
+import { RunConsolidationButton } from './run-consolidation-button';
 import { RunLitSearchButton } from './run-lit-search-button';
-import { SourcesCard } from './sources-card';
 import { StageCard } from './stage-card';
-import { StartMilestonesForm } from './start-milestones-form';
-import { StartRunForm } from './start-run-form';
+import { StartCodesModal } from './start-codes-modal';
+import { StartMilestonesModal } from './start-milestones-modal';
 
 type StagesMap = Record<StageName, StageContext | null>;
 
@@ -73,49 +72,14 @@ export function PipelineDashboard({
     run.status !== 'completed' &&
     run.status !== 'failed' &&
     run.status !== 'cancelled';
-  const extractCodesDone = stageState(stageStates, 'extract_codes') === 'complete';
-  const extractMilestonesDone =
-    stageState(stageStates, 'extract_milestones') === 'complete';
-  // "Is mapping complete for the specialty?" isn't the same as "did the last
-  // map_codes run finish" — sequential runs are allowed, each handling a
-  // subset of codes. The right signal is whether any codes are still
-  // unmapped. When none are, we fall through to the consolidation placeholder.
   const hasUnmappedCodes = unmappedCodeCount > 0;
-  const [showStartForm, setShowStartForm] = useState(false);
-  const [showMilestonesForm, setShowMilestonesForm] = useState(false);
-  const [showMapForm, setShowMapForm] = useState(false);
   const router = useRouter();
 
-  // While a run is active, poll the server for fresh stage/run data every 2s
-  // so the UI reflects progress without manual refresh. Stops automatically
-  // once the run transitions to a terminal state.
   useEffect(() => {
     if (!runActive) return;
     const id = setInterval(() => router.refresh(), 2000);
     return () => clearInterval(id);
   }, [runActive, router]);
-
-  // "Continue mapping" CTA on the Map codes card: cancel any zombie runs
-  // (so getCurrentPipelineRun stops insisting a run is active), reveal the
-  // existing Next-step start form, and scroll the form into view. The form
-  // lives in the Next step section above; this handler does not duplicate it.
-  const onContinueMapping = async () => {
-    try {
-      await fetch('/api/workflows/clear-stale-runs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ specialtySlug }),
-      });
-    } catch {
-      // Surfaced indirectly: if cancellation fails the next-step section
-      // will still show "Run in progress" after refresh, prompting another try.
-    }
-    setShowMapForm(true);
-    router.refresh();
-    requestAnimationFrame(() => {
-      document.getElementById('next-step')?.scrollIntoView({ behavior: 'smooth' });
-    });
-  };
 
   return (
     <Stack space="l">
@@ -128,212 +92,6 @@ export function PipelineDashboard({
         </Inline>
       ) : null}
       {run?.error ? <Callout type="error" text={run.error} /> : null}
-
-      <div id="next-step" />
-      <Stack space="s">
-        <H2>Next step</H2>
-        {(() => {
-          // Priority order:
-          //   1. A stage awaiting approval → render its full card so the
-          //      Approve/Reject buttons are right there.
-          //   2. A run is mid-flight → info callout (nothing to action).
-          //   3. Preprocessing incomplete → the corresponding start CTA.
-          //   4. Preprocessing done, mapping not run → mapping start CTA.
-          //   5. Mapping done → "Next: Consolidation" placeholder.
-          const codesStatus = stages.extract_codes?.stage.status;
-          const milestonesStatus = stages.extract_milestones?.stage.status;
-          const mapStatus = stages.map_codes?.stage.status;
-
-          if (mapStatus === 'awaiting_approval' && stages.map_codes) {
-            return (
-              <StageCard
-                title="Map codes"
-                description="Per-code LLM + AMBOSS MCP lookup. Review the mapped coverage + suggestions before approving."
-                stage={stages.map_codes.stage}
-                specialtySlug={specialtySlug}
-                stageName="map_codes"
-                events={stages.map_codes.events}
-                treatAsInProgress={hasUnmappedCodes}
-                unmappedCount={unmappedCodeCount}
-                mappedCount={mappedCodeCount}
-                hasOutput={stageHasOutput.map_codes ?? false}
-                manualState={stageState(stageStates, 'map_codes')}
-              />
-            );
-          }
-          if (codesStatus === 'awaiting_approval' && stages.extract_codes) {
-            return (
-              <StageCard
-                title="Extract codes"
-                description="Identify modules per PDF, then extract discrete items per module."
-                stage={stages.extract_codes.stage}
-                specialtySlug={specialtySlug}
-                stageName="extract_codes"
-                runUrls={stages.extract_codes.runUrls}
-                events={stages.extract_codes.events}
-                sources={sources}
-                hasOutput={stageHasOutput.extract_codes ?? false}
-                manualState={stageState(stageStates, 'extract_codes')}
-              />
-            );
-          }
-          if (milestonesStatus === 'awaiting_approval' && stages.extract_milestones) {
-            return (
-              <StageCard
-                title="Extract milestones"
-                description="Extract ACGME-style milestones for this specialty."
-                stage={stages.extract_milestones.stage}
-                specialtySlug={specialtySlug}
-                stageName="extract_milestones"
-                runUrls={stages.extract_milestones.runUrls}
-                events={stages.extract_milestones.events}
-                sources={milestoneSources}
-                hasOutput={stageHasOutput.extract_milestones ?? false}
-                manualState={stageState(stageStates, 'extract_milestones')}
-              />
-            );
-          }
-          if (runActive) {
-            return (
-              <Card title="Run in progress" titleAs="h3" outlined>
-                <CardBox>
-                  <Text color="secondary">
-                    A workflow run is active — polling every 2s. Expand the relevant phase
-                    below to watch progress.
-                  </Text>
-                </CardBox>
-              </Card>
-            );
-          }
-          if (!extractCodesDone) {
-            return showStartForm ? (
-              <Stack space="s">
-                <Inline space="s" vAlignItems="center">
-                  <H2>Extract codes</H2>
-                  <Button variant="secondary" onClick={() => setShowStartForm(false)}>
-                    Cancel
-                  </Button>
-                </Inline>
-                <Text color="secondary">Provide URLs or upload PDFs.</Text>
-                <StartRunForm specialtySlug={specialtySlug} sources={sources} />
-              </Stack>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowStartForm(true)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                <Card title="Extract codes" titleAs="h3" outlined>
-                  <CardBox>
-                    <Text color="secondary">
-                      Click to provide content outline URLs or upload PDFs for this run.
-                    </Text>
-                  </CardBox>
-                </Card>
-              </button>
-            );
-          }
-          if (!extractMilestonesDone) {
-            return showMilestonesForm ? (
-              <Stack space="s">
-                <Inline space="s" vAlignItems="center">
-                  <H2>Extract milestones</H2>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setShowMilestonesForm(false)}
-                  >
-                    Cancel
-                  </Button>
-                </Inline>
-                <Text color="secondary">Provide URLs or upload PDFs.</Text>
-                <StartMilestonesForm
-                  specialtySlug={specialtySlug}
-                  sources={milestoneSources}
-                />
-              </Stack>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowMilestonesForm(true)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                <Card title="Extract milestones" titleAs="h3" outlined>
-                  <CardBox>
-                    <Text color="secondary">
-                      Click to provide content outline URLs or upload PDFs. A single
-                      Gemini call produces a plain-text milestones document across every
-                      source.
-                    </Text>
-                  </CardBox>
-                </Card>
-              </button>
-            );
-          }
-          if (hasUnmappedCodes) {
-            return showMapForm ? (
-              <Stack space="s">
-                <Inline space="s" vAlignItems="center">
-                  <H2>Map codes</H2>
-                  <Button variant="secondary" onClick={() => setShowMapForm(false)}>
-                    Cancel
-                  </Button>
-                </Inline>
-                <LazyStartMapCodesForm
-                  specialtySlug={specialtySlug}
-                  unmappedCount={unmappedCodeCount}
-                  defaultContentBase={defaultContentBase}
-                />
-              </Stack>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowMapForm(true)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                <Card title="Map codes" titleAs="h3" outlined>
-                  <CardBox>
-                    <Text color="secondary">
-                      {`Click to map ${unmappedCodeCount} unmapped code${unmappedCodeCount === 1 ? '' : 's'} against the AMBOSS MCP server. Sequential runs are allowed — the CTA reappears as long as any codes remain unmapped.`}
-                    </Text>
-                  </CardBox>
-                </Card>
-              </button>
-            );
-          }
-          return (
-            <Card title="Next: Suggestion consolidation" titleAs="h3" outlined>
-              <CardBox>
-                <Text color="secondary">
-                  Combine code mappings into new-article and article-update candidates.
-                  Not yet implemented — this phase runs once the consolidation workflows
-                  are wired up.
-                </Text>
-              </CardBox>
-            </Card>
-          );
-        })()}
-      </Stack>
 
       <PhaseGroup title="Preprocessing">
         <Stack space="m">
@@ -348,7 +106,13 @@ export function PipelineDashboard({
             sources={sources}
             hasOutput={stageHasOutput.extract_codes ?? false}
             manualState={stageState(stageStates, 'extract_codes')}
-          />
+          >
+            <StartCodesModal
+              specialtySlug={specialtySlug}
+              sources={sources}
+              running={stages.extract_codes?.stage.status === 'running'}
+            />
+          </StageCard>
           <StageCard
             title="Extract milestones"
             description="Extract ACGME-style milestones for this specialty."
@@ -360,7 +124,13 @@ export function PipelineDashboard({
             sources={milestoneSources}
             hasOutput={stageHasOutput.extract_milestones ?? false}
             manualState={stageState(stageStates, 'extract_milestones')}
-          />
+          >
+            <StartMilestonesModal
+              specialtySlug={specialtySlug}
+              sources={milestoneSources}
+              running={stages.extract_milestones?.stage.status === 'running'}
+            />
+          </StageCard>
         </Stack>
       </PhaseGroup>
 
@@ -375,14 +145,16 @@ export function PipelineDashboard({
           treatAsInProgress={hasUnmappedCodes}
           unmappedCount={unmappedCodeCount}
           mappedCount={mappedCodeCount}
-          continueAction={
-            hasUnmappedCodes
-              ? { label: 'Continue mapping', onClick: onContinueMapping }
-              : undefined
-          }
           hasOutput={stageHasOutput.map_codes ?? false}
           manualState={stageState(stageStates, 'map_codes')}
-        />
+        >
+          <RunMapAllButton
+            specialtySlug={specialtySlug}
+            unmappedCount={unmappedCodeCount}
+            defaultContentBase={defaultContentBase}
+            running={stages.map_codes?.stage.status === 'running'}
+          />
+        </StageCard>
       </PhaseGroup>
 
       <PhaseGroup title="Suggestion consolidation">
@@ -396,7 +168,12 @@ export function PipelineDashboard({
             events={stages.consolidate_primary?.events ?? []}
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualState={stageState(stageStates, 'consolidate_primary')}
-          />
+          >
+            <RunConsolidationButton
+              specialtySlug={specialtySlug}
+              mappedCodeCount={mappedCodeCount}
+            />
+          </StageCard>
           <StageCard
             title="Articles (2nd consolidation)"
             description="Optional second pass over new-article candidates."
@@ -417,48 +194,58 @@ export function PipelineDashboard({
             hasOutput={stageHasOutput.consolidate_sections ?? false}
             manualState={stageState(stageStates, 'consolidate_sections')}
           />
-          <Stack space="s">
-            <StageCard
-              title="Literature search"
-              description={
-                litSearchStats.approvedTotal === 0
-                  ? 'Run a PubMed literature search for each approved article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
-                  : `Run a PubMed literature search for each approved article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
-              }
-              stage={stages.literature_search?.stage ?? null}
-              specialtySlug={specialtySlug}
-              stageName="literature_search"
-              events={stages.literature_search?.events ?? []}
-              hasOutput={stageHasOutput.literature_search ?? false}
-              manualState={stageState(stageStates, 'literature_search')}
-            />
-            <RunLitSearchButton
-              specialtySlug={specialtySlug}
-              waitingCount={litSearchStats.waitingForSources}
-              running={stages.literature_search?.stage.status === 'running'}
-            />
-          </Stack>
-          <Card outlined>
-            <CardBox>
-              <Stack space="s">
-                <H2>Draft articles</H2>
-                <Text size="s" color="secondary">
-                  {draftEligibleIds.length === 0
-                    ? 'Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
-                    : `Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
-                </Text>
-                <BulkDraftArticlesButton
-                  specialtySlug={specialtySlug}
-                  articleRecordIds={draftEligibleIds}
-                />
-              </Stack>
-            </CardBox>
-          </Card>
         </Stack>
       </PhaseGroup>
 
-      <SourcesCard kind="code" sources={sources} />
-      <SourcesCard kind="milestone" sources={milestoneSources} />
+      <H2>Articles</H2>
+      <Stack space="m">
+        <StageCard
+          title="Literature search"
+          description={
+            litSearchStats.approvedTotal === 0
+              ? 'Run a PubMed literature search for each approved article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
+              : `Run a PubMed literature search for each approved article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
+          }
+          stage={stages.literature_search?.stage ?? null}
+          specialtySlug={specialtySlug}
+          stageName="literature_search"
+          events={stages.literature_search?.events ?? []}
+          hasOutput={stageHasOutput.literature_search ?? false}
+          manualState={stageState(stageStates, 'literature_search')}
+        >
+          <RunLitSearchButton
+            specialtySlug={specialtySlug}
+            waitingCount={litSearchStats.waitingForSources}
+            running={stages.literature_search?.stage.status === 'running'}
+          />
+        </StageCard>
+        <Card outlined>
+          <CardBox>
+            <Stack space="s">
+              <H2>Draft articles</H2>
+              <Text size="s" color="secondary">
+                {draftEligibleIds.length === 0
+                  ? 'Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
+                  : `Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
+              </Text>
+              <BulkDraftArticlesButton
+                specialtySlug={specialtySlug}
+                articleRecordIds={draftEligibleIds}
+              />
+            </Stack>
+          </CardBox>
+        </Card>
+        <Card outlined>
+          <CardBox>
+            <Stack space="s">
+              <H2>Content drafting</H2>
+              <Text size="s" color="secondary">
+                Full content drafting pipeline. Work in progress.
+              </Text>
+            </Stack>
+          </CardBox>
+        </Card>
+      </Stack>
     </Stack>
   );
 }

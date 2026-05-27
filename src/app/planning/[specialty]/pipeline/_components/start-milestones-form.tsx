@@ -131,6 +131,7 @@ export function StartMilestonesForm({
               onChange={(patch) => updateRow(row.id, patch)}
               onRemove={() => removeRow(row.id)}
               onRequestAddSource={() => setAddSourceForRowId(row.id)}
+              contentLabel="Milestones"
             />
           ))}
           <Inline space="s">

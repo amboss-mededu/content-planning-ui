@@ -3,9 +3,9 @@ import {
   listCategoryOrchestration,
   listSourceCategoryProgress,
 } from '@/lib/data/categories';
-import { getTabOverrides } from '@/lib/data/specialties';
+import { listCodeSources } from '@/lib/data/code-sources';
+import { listCodeCount } from '@/lib/data/codes';
 import { CategoriesView } from '../../_components/categories-view';
-import { MarkStepCompleteButton } from '../../_components/mark-step-complete-button';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
 export default async function CategoriesPage({
@@ -22,21 +22,19 @@ export default async function CategoriesPage({
 }
 
 async function CategoriesData({ slug }: { slug: string }) {
-  const [rows, sourceRows, overrides] = await Promise.all([
+  const [rows, sourceRows, codeSources, codeCount] = await Promise.all([
     listCategoryOrchestration(slug),
     listSourceCategoryProgress(slug),
-    getTabOverrides(slug),
+    listCodeSources(),
+    listCodeCount(slug),
   ]);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <CategoriesView rows={rows} sourceRows={sourceRows} slug={slug} />
-      <div>
-        <MarkStepCompleteButton
-          slug={slug}
-          segment="categories"
-          isComplete={overrides.categories === true}
-        />
-      </div>
-    </div>
+    <CategoriesView
+      rows={rows}
+      sourceRows={sourceRows}
+      slug={slug}
+      codeSources={codeSources.map((s) => ({ slug: s.slug, name: s.name }))}
+      codeCount={codeCount}
+    />
   );
 }

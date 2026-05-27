@@ -14,6 +14,8 @@ import type {
   CategoryOrchestration,
   SourceCategoryProgress,
 } from '@/lib/data/categories';
+import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
 import { CategoryDetailsModal } from './category-details-modal';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { type Column, DataTable } from './data-table';
@@ -102,10 +104,14 @@ export function CategoriesView({
   rows,
   sourceRows,
   slug,
+  codeSources,
+  codeCount,
 }: {
   rows: CategoryOrchestration[];
   sourceRows: SourceCategoryProgress[];
   slug: string;
+  codeSources?: CodeSource[];
+  codeCount?: number;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<ViewMode>('consolidation');
@@ -356,6 +362,13 @@ export function CategoriesView({
       ) : (
         <SourceCategoriesTable rows={sourceRows} slug={slug} />
       )}
+      {codeCount === 0 && codeSources ? (
+        <StartCodesModal
+          specialtySlug={slug}
+          sources={codeSources}
+          running={false}
+        />
+      ) : null}
       {openBucket && (
         <CategoryDetailsModal
           bucket={openBucket}

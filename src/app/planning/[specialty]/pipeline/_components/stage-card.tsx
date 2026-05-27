@@ -615,8 +615,10 @@ export function StageCard({
     treatAsInProgress === true &&
     displayManualState === 'complete' &&
     status === 'completed';
-  const badgeLabel = inProgressOverride ? 'In progress' : STATUS_LABEL[status];
-  const badgeColor = inProgressOverride ? 'blue' : STATUS_COLOR[status];
+  const isActuallyRunning = rawStatus === 'running';
+  const isInProgress = inProgressOverride || (status === 'running' && !isActuallyRunning);
+  const badgeLabel = isActuallyRunning ? 'Running' : isInProgress ? 'In progress' : STATUS_LABEL[status];
+  const badgeColor = isActuallyRunning || isInProgress ? 'blue' : STATUS_COLOR[status];
   // Continue is only useful when nothing is mid-flight. While running or
   // awaiting_approval the user should drive the run via Cancel / Approve.
   const showContinue =
@@ -781,7 +783,7 @@ export function StageCard({
                   onOptimisticStateChange={setDisplayManualState}
                 />
               </Inline>
-              {children && status !== 'running' ? children : null}
+              {children ?? null}
               {expanded && stage ? (
                 <Stack space="xs">
                   {!useMapHistory && formatTs(stage.startedAt) ? (

@@ -9,7 +9,9 @@ import type {
 import type { MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
+import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { CodesView } from '../../_components/codes-view';
+import { StartCodesModal } from '../pipeline/_components/start-codes-modal';
 
 const PER_PAGE = 200;
 const EMPTY_IN_FLIGHT: MappingInFlightRecord[] = [];
@@ -29,10 +31,12 @@ export function CodesViewClient({
   slug,
   initialCodes,
   initialHasMore,
+  codeSources,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
+  codeSources?: CodeSource[];
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -244,6 +248,7 @@ export function CodesViewClient({
     : (summary?.unmappedCount ?? 0);
 
   return (
+    <>
     <CodesView
       codes={codes as unknown as Code[]}
       specialtySlug={slug}
@@ -259,6 +264,14 @@ export function CodesViewClient({
       remapLoading={remapLoading}
       onRequestRemapData={loadRemapData}
     />
+    {codes.length === 0 && codeSources ? (
+      <StartCodesModal
+        specialtySlug={slug}
+        sources={codeSources}
+        running={false}
+      />
+    ) : null}
+    </>
   );
 }
 
