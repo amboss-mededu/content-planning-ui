@@ -23,10 +23,6 @@ import {
   setArticleReviewAsAdmin,
 } from '@/lib/data/article-reviews';
 import {
-  createManualConsolidatedArticleAsAdmin,
-  deleteConsolidatedArticleByKeyAsAdmin,
-} from '@/lib/data/articles';
-import {
   deleteArticleSourcesByArticleKeyAsAdmin,
   markSourceCortexRegisteredAsAdmin,
   setArticleSourceReviewAsAdmin,
@@ -39,6 +35,10 @@ import {
   deleteWritingRunsForArticleAsAdmin,
   listDraftsForArticle,
 } from '@/lib/data/article-writing';
+import {
+  createManualConsolidatedArticleAsAdmin,
+  deleteConsolidatedArticleByKeyAsAdmin,
+} from '@/lib/data/articles';
 import {
   type BucketCode,
   listBucketCodes as listBucketCodesData,
@@ -679,7 +679,8 @@ export async function addManualArticle(
     specialtySlug: effectiveSlug,
     articleTitle: trimmed,
   });
-  if (!articleKey) return { articleKey: '', error: 'Could not derive a valid article key.' };
+  if (!articleKey)
+    return { articleKey: '', error: 'Could not derive a valid article key.' };
 
   const { id } = await createManualConsolidatedArticleAsAdmin(
     effectiveSlug,

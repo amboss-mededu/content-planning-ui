@@ -92,7 +92,9 @@ export function InputRow({
   const isHeaderRow = index === 0;
   const defaultLabel = row.kind === 'url' ? 'Content outline URL' : 'Content outline PDF';
   const urlLabel = contentLabel
-    ? (row.kind === 'url' ? `${contentLabel} URL` : `${contentLabel} PDF`)
+    ? row.kind === 'url'
+      ? `${contentLabel} URL`
+      : `${contentLabel} PDF`
     : defaultLabel;
 
   return (

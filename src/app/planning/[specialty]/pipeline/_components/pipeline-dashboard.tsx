@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  Callout,
-  Card,
-  CardBox,
-  H2,
-  Inline,
-  Stack,
-  Text,
-} from '@amboss/design-system';
+import { Callout, Card, CardBox, H2, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';

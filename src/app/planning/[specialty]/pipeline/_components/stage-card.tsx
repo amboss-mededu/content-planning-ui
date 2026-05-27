@@ -617,7 +617,11 @@ export function StageCard({
     status === 'completed';
   const isActuallyRunning = rawStatus === 'running';
   const isInProgress = inProgressOverride || (status === 'running' && !isActuallyRunning);
-  const badgeLabel = isActuallyRunning ? 'Running' : isInProgress ? 'In progress' : STATUS_LABEL[status];
+  const badgeLabel = isActuallyRunning
+    ? 'Running'
+    : isInProgress
+      ? 'In progress'
+      : STATUS_LABEL[status];
   const badgeColor = isActuallyRunning || isInProgress ? 'blue' : STATUS_COLOR[status];
   // Continue is only useful when nothing is mid-flight. While running or
   // awaiting_approval the user should drive the run via Cancel / Approve.
