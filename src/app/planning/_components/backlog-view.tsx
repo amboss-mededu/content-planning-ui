@@ -3,7 +3,10 @@
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import { deleteManualArticle, setBacklogStatus } from '@/app/planning/[specialty]/actions';
+import {
+  deleteManualArticle,
+  setBacklogStatus,
+} from '@/app/planning/[specialty]/actions';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,

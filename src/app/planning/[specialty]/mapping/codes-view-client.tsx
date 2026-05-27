@@ -249,28 +249,24 @@ export function CodesViewClient({
 
   return (
     <>
-    <CodesView
-      codes={codes as unknown as Code[]}
-      specialtySlug={slug}
-      canEdit={canEdit}
-      lockStatus={lockStatus}
-      supportReady={supportReady}
-      inFlightCodes={inFlightCodes}
-      categories={remapData?.categories ?? []}
-      unmappedCodes={remapData?.unmappedCodes ?? []}
-      unmappedCount={unmappedCount}
-      totalCount={totalCount}
-      loadState={loadState}
-      remapLoading={remapLoading}
-      onRequestRemapData={loadRemapData}
-    />
-    {codes.length === 0 && codeSources ? (
-      <StartCodesModal
+      <CodesView
+        codes={codes as unknown as Code[]}
         specialtySlug={slug}
-        sources={codeSources}
-        running={false}
+        canEdit={canEdit}
+        lockStatus={lockStatus}
+        supportReady={supportReady}
+        inFlightCodes={inFlightCodes}
+        categories={remapData?.categories ?? []}
+        unmappedCodes={remapData?.unmappedCodes ?? []}
+        unmappedCount={unmappedCount}
+        totalCount={totalCount}
+        loadState={loadState}
+        remapLoading={remapLoading}
+        onRequestRemapData={loadRemapData}
       />
-    ) : null}
+      {codes.length === 0 && codeSources ? (
+        <StartCodesModal specialtySlug={slug} sources={codeSources} running={false} />
+      ) : null}
     </>
   );
 }

@@ -6,8 +6,8 @@ import { useState } from 'react';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { MissingKeyModal } from './missing-key-modal';
 import {
-  DEFAULT_BACKUP_MODEL,
   backupModelKey,
+  DEFAULT_BACKUP_MODEL,
   readSpec,
   readSpecForStage,
 } from './model-selection-storage';
@@ -41,7 +41,9 @@ export function RunMapAllButton({
     setError(null);
     const primaryModel = readSpecForStage(specialtySlug, 'map_codes');
     if (!primaryModel) {
-      setError('No primary model configured for Map codes. Open the gear icon to pick one.');
+      setError(
+        'No primary model configured for Map codes. Open the gear icon to pick one.',
+      );
       return;
     }
     const backupModel = readSpec(backupModelKey(specialtySlug)) ?? DEFAULT_BACKUP_MODEL;

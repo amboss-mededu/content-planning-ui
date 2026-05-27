@@ -363,11 +363,7 @@ export function CategoriesView({
         <SourceCategoriesTable rows={sourceRows} slug={slug} />
       )}
       {codeCount === 0 && codeSources ? (
-        <StartCodesModal
-          specialtySlug={slug}
-          sources={codeSources}
-          running={false}
-        />
+        <StartCodesModal specialtySlug={slug} sources={codeSources} running={false} />
       ) : null}
       {openBucket && (
         <CategoryDetailsModal

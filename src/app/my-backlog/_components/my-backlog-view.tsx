@@ -3,6 +3,7 @@
 import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { AddArticleModal } from '@/app/planning/_components/add-article-modal';
 import { ArticleManagerModalV2 } from '@/app/planning/_components/article-manager-modal-v2';
 import { ArticleSourcesDrawer } from '@/app/planning/_components/article-sources-drawer';
 import {
@@ -20,7 +21,6 @@ import { LitSearchProgressBadge } from '@/app/planning/_components/lit-search-pr
 import { canRunLitSearch } from '@/app/planning/_components/pipeline-stage-gates';
 import { RunLitSearchRowButton } from '@/app/planning/_components/run-lit-search-row-button';
 import type { SectionRow } from '@/app/planning/_components/sections-view';
-import { AddArticleModal } from '@/app/planning/_components/add-article-modal';
 import { useLitSearchState } from '@/app/planning/_components/use-running-lit-search-articles';
 import {
   clearBacklogRow,
