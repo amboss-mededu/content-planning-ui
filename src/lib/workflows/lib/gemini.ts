@@ -15,7 +15,7 @@
  */
 
 import { google } from '@ai-sdk/google';
-import { generateText, Output, stepCountIs } from 'ai';
+import { generateText, stepCountIs } from 'ai';
 import { z } from 'zod';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
@@ -55,6 +55,34 @@ const ExtractCodesElementSchema = z.object({
   category: z.string(),
   description: z.string(),
 });
+
+/**
+ * Parse a model completion as a JSON array of `element`-shaped items.
+ *
+ * The phase steps run with `structuredOutputs: false` (Gemini can't combine a
+ * `responseSchema` grammar with the `url_context` tool), so we deliberately do
+ * NOT use the SDK's `Output.array`: that helper validates against a
+ * provider-enforced `{ elements: [...] }` wrapper which never materializes
+ * without the grammar — the model returns a bare array per the prompt, and
+ * `Output.array` then throws `response must be an object with an elements
+ * array`. Instead we parse and validate the text ourselves (same approach as
+ * `extractMilestonesForInputs`). Tolerates a markdown code fence in case the
+ * model wraps the payload.
+ */
+function parseJsonArray<T>(text: string, element: z.ZodType<T>): T[] {
+  let body = text.trim();
+  const fence = body.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
+  if (fence) body = fence[1].trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error(
+      `Model did not return valid JSON (first 200 chars): ${body.slice(0, 200)}`,
+    );
+  }
+  return z.array(element).parse(parsed);
+}
 
 // Both phase steps use url_context, which produces extra steps (one per URL
 // fetch). The structured-output emission counts as its own step too, so
@@ -126,13 +154,12 @@ Identify the base hierarchies in the document and return exclusively an output i
       system,
       prompt: userMessage,
       tools: googleUrlContextTool(input.model.provider),
-      output: Output.array({ element: IdentifyModulesElementSchema }),
       stopWhen: stepCountIs(MAX_STEPS),
       providerOptions: resolved.providerOptions,
       temperature: 1,
     });
 
-    const modules = result.output;
+    const modules = parseJsonArray(result.text, IdentifyModulesElementSchema);
     const durationMs = Date.now() - started;
     const usage = {
       inputTokens: result.usage?.inputTokens,
@@ -238,13 +265,12 @@ Extract all medical items from the document and return exclusively an output in 
       system,
       prompt: userMessage,
       tools: googleUrlContextTool(input.model.provider),
-      output: Output.array({ element: ExtractCodesElementSchema }),
       stopWhen: stepCountIs(MAX_STEPS),
       providerOptions: resolved.providerOptions,
       temperature: 1,
     });
 
-    const codes = result.output;
+    const codes = parseJsonArray(result.text, ExtractCodesElementSchema);
     const durationMs = Date.now() - started;
     const usage = {
       inputTokens: result.usage?.inputTokens,
