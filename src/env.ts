@@ -70,6 +70,12 @@ export const env = createEnv({
     // /api/workflows/literature-search/callback for results — see
     // src/lib/workflows/literature-search/dispatch.ts.
     LIT_SEARCH_N8N_WEBHOOK_URL: z.string().url().optional(),
+    // Header Auth secret for the outbound trigger. Sent as the
+    // `X-Lit-Search-Auth` header value when POSTing to the n8n webhook, and
+    // configured as the "Value" of the webhook node's Header Auth credential
+    // (its "Name" is the constant `X-Lit-Search-Auth`). Distinct from the
+    // inbound CALLBACK_SECRET below. Generate with `openssl rand -hex 32`.
+    LIT_SEARCH_N8N_AUTH_SECRET: optionalString,
     // Shared secret. Sent to n8n in the trigger payload's meta.callbackToken
     // and required as `Authorization: Bearer <secret>` on inbound callbacks.
     // Generate with `openssl rand -hex 32`.
@@ -106,6 +112,7 @@ export const env = createEnv({
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
     LIT_SEARCH_N8N_WEBHOOK_URL: process.env.LIT_SEARCH_N8N_WEBHOOK_URL,
+    LIT_SEARCH_N8N_AUTH_SECRET: process.env.LIT_SEARCH_N8N_AUTH_SECRET,
     LIT_SEARCH_N8N_CALLBACK_SECRET: process.env.LIT_SEARCH_N8N_CALLBACK_SECRET,
     LIT_SEARCH_N8N_CALLBACK_BASE_URL: process.env.LIT_SEARCH_N8N_CALLBACK_BASE_URL,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
