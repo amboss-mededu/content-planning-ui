@@ -75,10 +75,12 @@ import {
 import { isSafeUrl } from '@/lib/url';
 import type { ApprovalActionResult } from './actions.types';
 
-// Re-exported so consumers can keep importing the type from the actions
-// module if convenient. The canonical definition lives in
-// `./actions.types` to stay importable from non-server code.
-export type { ApprovalActionResult };
+// NOTE: This file carries the `'use server'` directive, so every *export* must
+// be an async server function. Re-exporting the type here (`export type { … }`)
+// is erased by TypeScript but the server-action compiler still emits a runtime
+// value reference, throwing `ApprovalActionResult is not defined` at load and
+// breaking every action in this module. Import the type from `./actions.types`
+// directly instead.
 
 function emptyResult(): ApprovalActionResult {
   return { articleReviewKeys: [], sectionReviewKeys: [], backlogKeys: [] };
