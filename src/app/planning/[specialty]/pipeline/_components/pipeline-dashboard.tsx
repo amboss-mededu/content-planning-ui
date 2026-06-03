@@ -4,7 +4,10 @@ import { Callout, Card, CardBox, H2, Inline, Stack, Text } from '@amboss/design-
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';
-import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
+import {
+  isStageRunningFresh,
+  type PipelineStageStates,
+} from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
@@ -102,7 +105,7 @@ export function PipelineDashboard({
             <StartCodesModal
               specialtySlug={specialtySlug}
               sources={sources}
-              running={stages.extract_codes?.stage.status === 'running'}
+              running={isStageRunningFresh(stages.extract_codes?.stage)}
             />
           </StageCard>
           <StageCard
@@ -120,7 +123,7 @@ export function PipelineDashboard({
             <StartMilestonesModal
               specialtySlug={specialtySlug}
               sources={milestoneSources}
-              running={stages.extract_milestones?.stage.status === 'running'}
+              running={isStageRunningFresh(stages.extract_milestones?.stage)}
             />
           </StageCard>
         </Stack>
@@ -144,7 +147,7 @@ export function PipelineDashboard({
             specialtySlug={specialtySlug}
             unmappedCount={unmappedCodeCount}
             defaultContentBase={defaultContentBase}
-            running={stages.map_codes?.stage.status === 'running'}
+            running={isStageRunningFresh(stages.map_codes?.stage)}
           />
         </StageCard>
       </PhaseGroup>
@@ -208,7 +211,7 @@ export function PipelineDashboard({
           <RunLitSearchButton
             specialtySlug={specialtySlug}
             waitingCount={litSearchStats.waitingForSources}
-            running={stages.literature_search?.stage.status === 'running'}
+            running={isStageRunningFresh(stages.literature_search?.stage)}
           />
         </StageCard>
         <Card outlined>

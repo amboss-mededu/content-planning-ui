@@ -3,6 +3,7 @@
 import { Button, Inline, Modal } from '@amboss/design-system';
 import { useState } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { RunningButton } from '../../../_components/running-button';
 import { StartRunForm } from './start-run-form';
 
 export function StartCodesModal({
@@ -16,7 +17,7 @@ export function StartCodesModal({
 }) {
   const [open, setOpen] = useState(false);
 
-  if (running) return null;
+  if (running) return <RunningButton />;
 
   return (
     <>

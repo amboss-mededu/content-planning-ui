@@ -3,6 +3,7 @@
 import { Callout, Card, CardBox, H5, Stack, Text } from '@amboss/design-system';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartMilestonesModal } from '../[specialty]/pipeline/_components/start-milestones-modal';
+import { useRefreshWhileRunning } from './use-refresh-while-running';
 
 /**
  * Read-only Milestones tab — renders the ACGME-style output written at
@@ -16,11 +17,14 @@ export function MilestonesView({
   milestones,
   specialtySlug,
   sources,
+  extractionRunning,
 }: {
   milestones: string | null;
   specialtySlug: string;
   sources: CodeSource[];
+  extractionRunning: boolean;
 }) {
+  useRefreshWhileRunning(extractionRunning);
   if (!milestones) {
     return (
       <Stack space="l">
@@ -31,7 +35,7 @@ export function MilestonesView({
         <StartMilestonesModal
           specialtySlug={specialtySlug}
           sources={sources}
-          running={false}
+          running={extractionRunning}
         />
       </Stack>
     );
@@ -45,7 +49,7 @@ export function MilestonesView({
       <StartMilestonesModal
         specialtySlug={specialtySlug}
         sources={sources}
-        running={false}
+        running={extractionRunning}
       />
       <Card title="Milestones" titleAs="h3" outlined>
         <CardBox>

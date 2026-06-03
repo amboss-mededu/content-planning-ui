@@ -11,6 +11,7 @@ import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { CodesView } from '../../_components/codes-view';
+import { useRefreshWhileRunning } from '../../_components/use-refresh-while-running';
 import { StartCodesModal } from '../pipeline/_components/start-codes-modal';
 
 const PER_PAGE = 200;
@@ -32,12 +33,15 @@ export function CodesViewClient({
   initialCodes,
   initialHasMore,
   codeSources,
+  extractionRunning,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   codeSources?: CodeSource[];
+  extractionRunning?: boolean;
 }) {
+  useRefreshWhileRunning(extractionRunning ?? false);
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loadState, setLoadState] = useState<CodeRowsLoadState>(
@@ -265,7 +269,11 @@ export function CodesViewClient({
         onRequestRemapData={loadRemapData}
       />
       {codes.length === 0 && codeSources ? (
-        <StartCodesModal specialtySlug={slug} sources={codeSources} running={false} />
+        <StartCodesModal
+          specialtySlug={slug}
+          sources={codeSources}
+          running={extractionRunning ?? false}
+        />
       ) : null}
     </>
   );

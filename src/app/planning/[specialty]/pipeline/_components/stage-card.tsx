@@ -19,13 +19,14 @@ import type {
   PipelineRunRow,
   PipelineStageRow,
 } from '@/lib/data/pipeline';
-import type { PipelineCardState } from '@/lib/pipeline-stage-state';
+import { isStageRunningFresh, type PipelineCardState } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import {
   type CodeSource,
   normalizeInputs,
   sourceLabel,
 } from '@/lib/workflows/lib/sources';
+import { AnimatedDotsBadge } from '../../../_components/animated-dots-badge';
 import { ApproveButton } from './approve-button';
 import { CancelButton } from './cancel-button';
 import { ModelSettingsPopover } from './model-settings-popover';
@@ -615,7 +616,11 @@ export function StageCard({
     treatAsInProgress === true &&
     displayManualState === 'complete' &&
     status === 'completed';
-  const isActuallyRunning = rawStatus === 'running';
+  // Only animate while the run is *freshly* running — a jammed stage stuck at
+  // `running` (e.g. its deferred body was dropped) stops animating after
+  // `FRESH_RUNNING_MS` instead of spinning forever. It stays cancellable above
+  // so the user can clear the jam.
+  const isActuallyRunning = isStageRunningFresh(stage);
   const isInProgress = inProgressOverride || (status === 'running' && !isActuallyRunning);
   const badgeLabel = isActuallyRunning
     ? 'Running'
@@ -696,7 +701,13 @@ export function StageCard({
   const headerInner = (
     <Inline space="s" vAlignItems="center">
       <H5 as="h4">{title}</H5>
-      <Badge text={badgeLabel} color={badgeColor} />
+      {isActuallyRunning ? (
+        // Live processing — cycle "Running" → "Running." → "Running.." → "..."
+        // so the dashboard mirrors the consolidation review's progress badge.
+        <AnimatedDotsBadge label={badgeLabel} color={badgeColor} />
+      ) : (
+        <Badge text={badgeLabel} color={badgeColor} />
+      )}
     </Inline>
   );
 

@@ -19,7 +19,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
-import { type NextRequest, NextResponse } from 'next/server';
+import { after, type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { listCodeSources } from '@/lib/data/code-sources';
 import {
@@ -93,22 +93,28 @@ export async function POST(req: NextRequest) {
       : {}),
     ...(extractInstructions ? { extractCodesInstructions: extractInstructions } : {}),
   });
-  await initPipelineStage({ runId, stage: 'extract_codes' });
+  // Persist `running` synchronously so a reload shows the in-progress state
+  // immediately — the background body below only starts after the response.
+  await initPipelineStage({ runId, stage: 'extract_codes', status: 'running' });
 
-  // Fire-and-forget: extraction continues in the background after this
-  // response. Unhandled rejections are logged so a thrown step doesn't
-  // crash the Node process.
-  void extractCodesPhase1({
-    runId,
-    specialtySlug: slug,
-    inputs,
-    identifyInstructions: identifyInstructions ?? undefined,
-    extractInstructions: extractInstructions ?? undefined,
-    model,
-    apiKeys,
-  }).catch((e) => {
-    console.error('[extract] Phase1 unhandled rejection', e);
-  });
+  // Defer extraction with `after()` rather than a bare `void` promise: Next
+  // tracks the callback and keeps it alive past the response, so the work
+  // actually runs to completion. A detached `void ...()` is dropped once the
+  // handler returns and the step never executes. Unhandled rejections are
+  // logged so a thrown step doesn't crash the Node process.
+  after(() =>
+    extractCodesPhase1({
+      runId,
+      specialtySlug: slug,
+      inputs,
+      identifyInstructions: identifyInstructions ?? undefined,
+      extractInstructions: extractInstructions ?? undefined,
+      model,
+      apiKeys,
+    }).catch((e) => {
+      console.error('[extract] Phase1 unhandled rejection', e);
+    }),
+  );
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');

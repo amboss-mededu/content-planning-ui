@@ -3,6 +3,7 @@
 import { Button, Inline, Modal } from '@amboss/design-system';
 import { useState } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { RunningButton } from '../../../_components/running-button';
 import { StartMilestonesForm } from './start-milestones-form';
 
 export function StartMilestonesModal({
@@ -16,7 +17,7 @@ export function StartMilestonesModal({
 }) {
   const [open, setOpen] = useState(false);
 
-  if (running) return null;
+  if (running) return <RunningButton />;
 
   return (
     <>

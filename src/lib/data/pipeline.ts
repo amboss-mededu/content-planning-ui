@@ -14,6 +14,7 @@ import type {
   PipelineStageRecord,
 } from '@/lib/pb/types';
 import { derivePhase, type Phase } from '@/lib/phase';
+import { isStageRunningFresh } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 // Pipeline runs/stages/events live in PocketBase. RSC pages and route
@@ -419,6 +420,42 @@ export async function getConsolidationLockState(
   return { locked, status };
 }
 
+/**
+ * Whether code/milestone extraction is *freshly* running for a specialty —
+ * drives the "Running…" Start-extraction buttons on the Categories, Mapping
+ * and Milestones tabs (which live outside the pipeline dashboard and so lack
+ * its 2s poll). Applies the same staleness guard (`isStageRunningFresh`) as the
+ * dashboard stage card, so a jammed run never pins a button to "Running…".
+ */
+export async function getExtractionRunning(
+  slug: string,
+): Promise<{ extract_codes: boolean; extract_milestones: boolean }> {
+  await connection();
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  type Latest = { status: string; startedAt: number };
+  const latest: Partial<Record<'extract_codes' | 'extract_milestones', Latest>> = {};
+  for (const r of runs) {
+    const stages = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: r.id }) });
+    for (const s of stages) {
+      if (s.stage !== 'extract_codes' && s.stage !== 'extract_milestones') continue;
+      const startedAt = s.startedAt ?? r.startedAt;
+      const prev = latest[s.stage];
+      if (!prev || startedAt > prev.startedAt) {
+        latest[s.stage] = { status: s.status, startedAt };
+      }
+    }
+  }
+  return {
+    extract_codes: isStageRunningFresh(latest.extract_codes),
+    extract_milestones: isStageRunningFresh(latest.extract_milestones),
+  };
+}
+
 // --- User-facing writes (cookie-authed) ------------------------------------
 
 export type PipelineRunPatch = {
@@ -482,12 +519,19 @@ export async function updatePipelineRun(
 export async function initPipelineStage(args: {
   runId: string;
   stage: StageName;
+  /** Initial stage status. Defaults to `'pending'`. Pass `'running'` to
+   *  persist the in-progress state synchronously inside the request, so a
+   *  reload shows "Running" immediately — before the (deferred) workflow
+   *  body has a chance to call `markStageRunning`. */
+  status?: 'pending' | 'running';
 }): Promise<{ id: string }> {
   const pb = await userClient();
+  const status = args.status ?? 'pending';
   const created = await pb.collection<PipelineStageRecord>('pipelineStages').create({
     runId: args.runId,
     stage: args.stage,
-    status: 'pending',
+    status,
+    ...(status === 'running' ? { startedAt: Date.now() } : {}),
   });
   return { id: created.id };
 }

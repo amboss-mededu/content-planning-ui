@@ -10,7 +10,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
-import { type NextRequest, NextResponse } from 'next/server';
+import { after, type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import {
@@ -79,21 +79,27 @@ export async function POST(req: NextRequest) {
     contentOutlineUrls: inputs,
     milestonesInstructions,
   });
-  await initPipelineStage({ runId, stage: 'extract_milestones' });
+  // Persist `running` synchronously so a reload shows the in-progress state
+  // immediately — the background body below only starts after the response.
+  await initPipelineStage({ runId, stage: 'extract_milestones', status: 'running' });
 
-  // Fire-and-forget: extraction continues past the response on this
-  // long-lived Node server. Catch unhandled rejections so a thrown step
-  // doesn't crash the process.
-  void extractMilestonesPhase1({
-    runId,
-    specialtySlug: slug,
-    inputs,
-    milestonesInstructions: milestonesInstructions ?? undefined,
-    model,
-    apiKeys,
-  }).catch((e) => {
-    console.error('[extract-milestones] Phase1 unhandled rejection', e);
-  });
+  // Defer extraction with `after()` rather than a bare `void` promise: Next
+  // tracks the callback and keeps it alive past the response, so the work
+  // actually runs to completion. A detached `void ...()` is dropped once the
+  // handler returns and the step never executes. Catch unhandled rejections
+  // so a thrown step doesn't crash the process.
+  after(() =>
+    extractMilestonesPhase1({
+      runId,
+      specialtySlug: slug,
+      inputs,
+      milestonesInstructions: milestonesInstructions ?? undefined,
+      model,
+      apiKeys,
+    }).catch((e) => {
+      console.error('[extract-milestones] Phase1 unhandled rejection', e);
+    }),
+  );
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');
