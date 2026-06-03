@@ -16,7 +16,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
-import { type NextRequest, NextResponse } from 'next/server';
+import { after, type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
 import {
@@ -242,28 +242,32 @@ export async function POST(req: NextRequest) {
       );
     }
   } else {
-    void (async () => {
-      await resetConsolidationScope({
-        specialtySlug: slug,
-        consolidationCategories,
-      });
-      await consolidatePrimaryWorkflow({
-        runId,
-        specialtySlug: slug,
-        consolidationCategories,
-        sourceCategories,
-        model,
-        apiKeys,
-        editorNote,
-      });
-    })().catch((e) => {
-      console.error('[consolidate-primary] workflow unhandled rejection', e);
-      void updatePipelineRun(runId, {
-        status: 'failed',
-        finishedAt: Date.now(),
-        error: e instanceof Error ? e.message : String(e),
-      }).catch(() => {});
-    });
+    // Defer with `after()` so Next keeps the work alive past the response. A
+    // bare `void ...()` is dropped once the handler returns and never runs.
+    after(() =>
+      (async () => {
+        await resetConsolidationScope({
+          specialtySlug: slug,
+          consolidationCategories,
+        });
+        await consolidatePrimaryWorkflow({
+          runId,
+          specialtySlug: slug,
+          consolidationCategories,
+          sourceCategories,
+          model,
+          apiKeys,
+          editorNote,
+        });
+      })().catch(async (e) => {
+        console.error('[consolidate-primary] workflow unhandled rejection', e);
+        await updatePipelineRun(runId, {
+          status: 'failed',
+          finishedAt: Date.now(),
+          error: e instanceof Error ? e.message : String(e),
+        }).catch(() => {});
+      }),
+    );
   }
 
   revalidateTag(`pipeline:${slug}`, 'max');
