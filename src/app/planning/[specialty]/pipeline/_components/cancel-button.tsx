@@ -4,6 +4,7 @@ import { Button } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
+import { refreshSpecialty } from '../../actions';
 
 const CONFIRM_MESSAGE =
   'Cancel this run? The workflow will be stopped and this stage (plus everything downstream) will be cleared.';
@@ -36,6 +37,10 @@ export function CancelButton({
         setError(body?.error ?? `HTTP ${res.status}`);
         return;
       }
+      // Cancel runs the same downstream-clearing cascade as reset; purge the
+      // whole /planning/<slug> client cache so every tab reflects the wipe,
+      // not just the current route (which is all router.refresh() covers).
+      await refreshSpecialty(specialtySlug);
       router.refresh();
     } finally {
       setSubmitting(false);

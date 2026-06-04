@@ -35,6 +35,44 @@ export function canSkipPipelineStage(stageName: string): boolean {
   return SKIPPABLE_SET.has(stageName);
 }
 
+/**
+ * A stage whose `status` is still `'running'` but whose `startedAt` is older
+ * than this is treated as jammed, not live. A fire-and-forget workflow that
+ * crashes (or whose deferred body is dropped) leaves the stage pinned at
+ * `'running'` forever; without this guard the UI would animate "Running…" and
+ * disable the Start button indefinitely.
+ */
+export const FRESH_RUNNING_MS = 15 * 60 * 1000;
+
+/**
+ * True when a stage is genuinely running *right now* — `status === 'running'`
+ * and it started within `FRESH_RUNNING_MS`.
+ *
+ * `startedAt` arrives in three shapes depending on the caller: a number (raw PB
+ * record, server-side), a `Date` (mapped row), or a string (a `Date` serialized
+ * across the RSC → client boundary). All three are coerced to epoch ms. If it's
+ * unreadable we **fail open** — a stage marked `running` is shown as running
+ * rather than silently hidden — so the freshness guard can only ever suppress a
+ * stage we can prove is stale, never an active one.
+ */
+export function isStageRunningFresh(
+  stage: { status: string; startedAt?: number | Date | string | null } | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!stage || stage.status !== 'running') return false;
+  const raw = stage.startedAt;
+  const startedAt =
+    raw instanceof Date
+      ? raw.getTime()
+      : typeof raw === 'number'
+        ? raw
+        : typeof raw === 'string'
+          ? Date.parse(raw)
+          : Number.NaN;
+  if (!Number.isFinite(startedAt)) return true;
+  return startedAt > now - FRESH_RUNNING_MS;
+}
+
 export function normalizePipelineStageStates(input: {
   states?: Record<string, unknown> | null;
   overrides?: Record<string, unknown> | null;

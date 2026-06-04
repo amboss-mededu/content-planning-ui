@@ -12,6 +12,7 @@
  */
 
 import { getStageAsAdmin } from '@/lib/data/pipeline';
+import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import {
   markStageAwaitingApproval,
   markStageCompleted,
@@ -140,6 +141,12 @@ export async function extractMilestonesPhase2(input: {
     }
     await writeApprovedMilestones(input.specialtySlug, milestones);
     await markStageCompleted(input.runId, 'extract_milestones', input.approvedBy);
+    // Auto-flip the card to "Completed" (the badge reflects the manual state).
+    await setPipelineStageStateAsAdmin(
+      input.specialtySlug,
+      'extract_milestones',
+      'complete',
+    );
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {

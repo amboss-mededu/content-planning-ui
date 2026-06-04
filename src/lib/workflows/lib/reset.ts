@@ -10,21 +10,32 @@
  * permission rules either way.
  */
 
+import { deleteArticleBacklogForSpecialtyAsAdmin } from '@/lib/data/article-backlog';
+import { deleteArticleLitSearchRunsForSpecialtyAsAdmin } from '@/lib/data/article-lit-search-runs';
+import { deleteArticleReviewsForSpecialtyAsAdmin } from '@/lib/data/article-reviews';
+import { deleteArticleSourcesForSpecialtyAsAdmin } from '@/lib/data/article-sources';
+import { deleteWritingRunsForSpecialtyAsAdmin } from '@/lib/data/article-writing';
 import {
   deleteArticleUpdateSuggestionsForSpecialtyAsAdmin,
   deleteConsolidatedArticlesForSpecialtyAsAdmin,
   deleteNewArticleSuggestionsForSpecialtyAsAdmin,
 } from '@/lib/data/articles';
+import { deleteCategoriesForSpecialtyAsAdmin } from '@/lib/data/categories';
 import {
   clearAllMappingsForSpecialtyAsAdmin,
   deleteCodesForSpecialtyAsAdmin,
 } from '@/lib/data/codes';
+import { deleteConsolidationCategoryReviewsForSpecialtyAsAdmin } from '@/lib/data/consolidation-category-reviews';
 import {
   cancelStaleRunsForSpecialty,
   resetStage as resetStagePb,
 } from '@/lib/data/pipeline';
+import { deleteSectionReviewsForSpecialtyAsAdmin } from '@/lib/data/section-reviews';
 import { deleteConsolidatedSectionsForSpecialtyAsAdmin } from '@/lib/data/sections';
-import { updateMilestonesAsAdmin } from '@/lib/data/specialties';
+import {
+  setPipelineStageStateAsAdmin,
+  updateMilestonesAsAdmin,
+} from '@/lib/data/specialties';
 import type { StageName } from './db-writes';
 
 const DOWNSTREAM: Record<StageName, StageName[]> = {
@@ -61,7 +72,9 @@ export function stagesToReset(stage: StageName): StageName[] {
 async function clearEditorDataForStage(stage: StageName, specialtySlug: string) {
   switch (stage) {
     case 'extract_codes':
+      // Codes + the category sheet derived from them (`codeCategories`).
       await deleteCodesForSpecialtyAsAdmin(specialtySlug);
+      await deleteCategoriesForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'extract_milestones':
       await updateMilestonesAsAdmin({
@@ -73,14 +86,28 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       await clearAllMappingsForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_primary':
+      // Suggestions + everything editorial that derives from them: the
+      // article/section approvals, the consolidation-category review flags,
+      // and the backlog rows those approvals created.
       await deleteNewArticleSuggestionsForSpecialtyAsAdmin(specialtySlug);
       await deleteArticleUpdateSuggestionsForSpecialtyAsAdmin(specialtySlug);
+      await deleteArticleReviewsForSpecialtyAsAdmin(specialtySlug);
+      await deleteSectionReviewsForSpecialtyAsAdmin(specialtySlug);
+      await deleteConsolidationCategoryReviewsForSpecialtyAsAdmin(specialtySlug);
+      await deleteArticleBacklogForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_articles':
       await deleteConsolidatedArticlesForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_sections':
       await deleteConsolidatedSectionsForSpecialtyAsAdmin(specialtySlug);
+      break;
+    case 'literature_search':
+      // Deepest article-pipeline artifacts: gathered sources, lit-search run
+      // history, and any drafts written from them.
+      await deleteArticleSourcesForSpecialtyAsAdmin(specialtySlug);
+      await deleteArticleLitSearchRunsForSpecialtyAsAdmin(specialtySlug);
+      await deleteWritingRunsForSpecialtyAsAdmin(specialtySlug);
       break;
   }
 }
@@ -103,6 +130,10 @@ export async function resetStageCascade(input: {
   for (const s of toReset) {
     await clearEditorDataForStage(s, input.specialtySlug);
     await resetStagePb({ runId: input.runId, stage: s });
+    // Clear the editor-controlled card state so a stage that had been flipped
+    // to `complete` (manually, or auto on run-finish) returns to `not_started`
+    // and the badge reflects the reset.
+    await setPipelineStageStateAsAdmin(input.specialtySlug, s, 'not_started');
   }
   // Belt-and-suspenders: for map_codes, a code that finished its agent call
   // before cancellation propagated could still have stamped mappedAt

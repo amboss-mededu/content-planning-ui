@@ -10,7 +10,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
-import { type NextRequest, NextResponse } from 'next/server';
+import { after, type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { listNewArticleSuggestionsAsAdmin } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
@@ -49,12 +49,16 @@ export async function POST(req: NextRequest) {
   const { id: runId } = await createPipelineRun({ specialtySlug: slug });
   await initPipelineStage({ runId, stage: 'consolidate_articles' });
 
-  void consolidateArticlesSecondaryWorkflow({
-    runId,
-    specialtySlug: slug,
-  }).catch((e) => {
-    console.error('[consolidate-articles] workflow unhandled rejection', e);
-  });
+  // Defer with `after()` so Next keeps the work alive past the response. A
+  // bare `void ...()` is dropped once the handler returns and never runs.
+  after(() =>
+    consolidateArticlesSecondaryWorkflow({
+      runId,
+      specialtySlug: slug,
+    }).catch((e) => {
+      console.error('[consolidate-articles] workflow unhandled rejection', e);
+    }),
+  );
 
   revalidateTag(`pipeline:${slug}`, 'max');
   revalidateTag('specialty-phases', 'max');

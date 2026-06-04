@@ -274,6 +274,30 @@ export async function setPipelineStageState(
 }
 
 /**
+ * Admin-client variant of {@link setPipelineStageState} for fire-and-forget
+ * workflow contexts that run outside a request cookie scope. Used to auto-flip
+ * the two extraction cards to `complete` when a run finishes, and to clear
+ * stage cards back to `not_started` as part of the reset cascade.
+ */
+export async function setPipelineStageStateAsAdmin(
+  slug: string,
+  stageName: string,
+  state: PipelineCardState,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  const current = normalizePipelineStageStates({
+    states: row.pipelineStageStates,
+    overrides: row.pipelineStageOverrides,
+    skipped: row.pipelineStageSkipped,
+  });
+  const next: Record<string, PipelineCardState> = { ...current, [stageName]: state };
+  await pb.collection('specialties').update(row.id, { pipelineStageStates: next });
+}
+
+/**
  * Workflow write — uses the admin client so it works outside a request
  * cookie context. Stores approved milestone text and bumps the
  * `lastSeededAt` timestamp. Pass `milestones: undefined` to clear (used

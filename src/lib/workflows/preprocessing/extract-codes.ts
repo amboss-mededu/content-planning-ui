@@ -1,21 +1,24 @@
 /**
- * Two-phase code extraction (preprocessing stage).
+ * Code extraction (preprocessing stage).
  *
  * Mirrors the n8n pipeline at `n8n_workflows/code_extraction/`:
  *   1. Phase 1 — per PDF URL, identify module/chapter headings (Gemini call).
  *   2. Phase 2 — per (url, module), extract discrete medical items.
- *   3. Assemble `ab_<slug>_<nnnn>` codes, stage them, await user approval.
- *   4. On approval, promote staged rows into the canonical `codes` table.
+ *   3. Assemble `ab_<slug>_<nnnn>` codes and stage them.
+ *   4. Promote staged rows straight into the canonical `codes` table.
  *
- * Approval is a hard split: `extractCodesPhase1` runs to `awaiting_approval`
- * and returns; the approve route handler invokes `extractCodesPhase2` to
- * promote the staged rows into the canonical `codes` table. The route
- * fires Phase 1 with `void` so the HTTP response returns immediately and
- * the long-running extraction continues in the background.
+ * There is no approval gate: `extractCodesPhase1` runs end-to-end and, on
+ * success, clears the specialty's existing codes and promotes the freshly
+ * extracted rows into `codes` (so a re-run replaces rather than appends),
+ * then marks the run completed. The route fires Phase 1 via `after()` so the
+ * HTTP response returns immediately while extraction continues in the
+ * background. `extractCodesPhase2` is kept only to resolve any legacy
+ * `awaiting_approval` runs via /api/workflows/approve.
  */
 
+import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
+import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import {
-  markStageAwaitingApproval,
   markStageCompleted,
   markStageFailed,
   markStageRunning,
@@ -141,7 +144,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       rawCodes,
     );
     const totals = await aggregateStageMetrics(input.runId, 'extract_codes');
-    await markStageAwaitingApproval(input.runId, 'extract_codes', {
+    const summary = {
       extracted: inserted,
       pdfs: input.inputs.length,
       modules: perUrlCategories.length,
@@ -152,12 +155,24 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       outputTokens: totals.outputTokens,
       reasoningTokens: totals.reasoningTokens,
       costUsd: totals.costUsd,
-    });
+    };
+    // No approval gate: promote straight into the canonical `codes` table so the
+    // codes appear in Mapping/Categories immediately. Clear the specialty's
+    // existing codes first so a re-run replaces rather than duplicates — the
+    // `codes` schema has no unique constraint on `code`, and bulk insert is
+    // create-only.
+    await deleteCodesForSpecialtyAsAdmin(input.specialtySlug);
+    await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
+    await markStageCompleted(input.runId, 'extract_codes', undefined, summary);
+    // Auto-flip the card to "Completed" — the badge reflects the manual stage
+    // state, so without this a finished run would still read "Not started".
+    await setPipelineStageStateAsAdmin(input.specialtySlug, 'extract_codes', 'complete');
+    await updatePipelineRunStatus(input.runId, 'completed');
     await logEvent({
       runId: input.runId,
       stage: 'extract_codes',
       level: 'info',
-      message: `Extraction complete. Awaiting approval — ${inserted} codes staged.`,
+      message: `Extraction complete — ${inserted} codes added.`,
       metrics: {
         durationMs: totals.durationMs ?? undefined,
         inputTokens: totals.inputTokens,

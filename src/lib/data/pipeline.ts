@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
+import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   ContentInput,
@@ -14,6 +15,7 @@ import type {
   PipelineStageRecord,
 } from '@/lib/pb/types';
 import { derivePhase, type Phase } from '@/lib/phase';
+import { isStageRunningFresh } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 // Pipeline runs/stages/events live in PocketBase. RSC pages and route
@@ -419,6 +421,71 @@ export async function getConsolidationLockState(
   return { locked, status };
 }
 
+export type ExtractionStageState = {
+  /** Freshly running right now (status `running` within the staleness window). */
+  running: boolean;
+  /** Latest run for this stage finished successfully. */
+  completed: boolean;
+  /** Owning run id of the latest stage row — needed to reset/re-run. */
+  runId: string | null;
+};
+
+/**
+ * Live state of the two extraction stages for a specialty — drives the
+ * Start / Running… / Re-run buttons on the Categories, Mapping and Milestones
+ * tabs (which live outside the pipeline dashboard and so lack its 2s poll).
+ * `running` applies the same staleness guard (`isStageRunningFresh`) as the
+ * dashboard stage card, so a jammed run never pins a button to "Running…".
+ *
+ * For codes, `hasDownstream` reports whether any mapping has run (mapped code
+ * count > 0) — the Re-run flow uses it to decide between a plain confirm and
+ * the destructive typed-confirm that wipes all downstream work.
+ */
+export async function getExtractionState(slug: string): Promise<{
+  extract_codes: ExtractionStageState & { hasDownstream: boolean };
+  extract_milestones: ExtractionStageState;
+}> {
+  await connection();
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  type Latest = { status: string; startedAt: number; runId: string };
+  const latest: Partial<Record<'extract_codes' | 'extract_milestones', Latest>> = {};
+  for (const r of runs) {
+    const stages = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: r.id }) });
+    for (const s of stages) {
+      if (s.stage !== 'extract_codes' && s.stage !== 'extract_milestones') continue;
+      const startedAt = s.startedAt ?? r.startedAt;
+      const prev = latest[s.stage];
+      if (!prev || startedAt > prev.startedAt) {
+        latest[s.stage] = { status: s.status, startedAt, runId: r.id };
+      }
+    }
+  }
+  const [codeCount, unmappedCount] = await Promise.all([
+    listCodeCount(slug),
+    listUnmappedCodeCount(slug),
+  ]);
+  const codes = latest.extract_codes;
+  const milestones = latest.extract_milestones;
+  return {
+    extract_codes: {
+      running: isStageRunningFresh(codes),
+      completed: codes?.status === 'completed',
+      runId: codes?.runId ?? null,
+      hasDownstream: codeCount - unmappedCount > 0,
+    },
+    extract_milestones: {
+      running: isStageRunningFresh(milestones),
+      completed: milestones?.status === 'completed',
+      runId: milestones?.runId ?? null,
+    },
+  };
+}
+
 // --- User-facing writes (cookie-authed) ------------------------------------
 
 export type PipelineRunPatch = {
@@ -482,12 +549,19 @@ export async function updatePipelineRun(
 export async function initPipelineStage(args: {
   runId: string;
   stage: StageName;
+  /** Initial stage status. Defaults to `'pending'`. Pass `'running'` to
+   *  persist the in-progress state synchronously inside the request, so a
+   *  reload shows "Running" immediately — before the (deferred) workflow
+   *  body has a chance to call `markStageRunning`. */
+  status?: 'pending' | 'running';
 }): Promise<{ id: string }> {
   const pb = await userClient();
+  const status = args.status ?? 'pending';
   const created = await pb.collection<PipelineStageRecord>('pipelineStages').create({
     runId: args.runId,
     stage: args.stage,
-    status: 'pending',
+    status,
+    ...(status === 'running' ? { startedAt: Date.now() } : {}),
   });
   return { id: created.id };
 }
@@ -668,12 +742,24 @@ export async function writeExtractedCodesAsAdmin(args: {
   const pb = await createAdminClient();
   const now = Date.now();
   for (const r of args.rows) {
-    await pb.collection('extractedCodes').create({
-      runId: args.runId,
-      specialtySlug: args.specialtySlug,
-      ...r,
-      createdAt: now,
-    });
+    try {
+      await pb.collection('extractedCodes').create({
+        runId: args.runId,
+        specialtySlug: args.specialtySlug,
+        ...r,
+        createdAt: now,
+      });
+    } catch (e) {
+      // PocketBase surfaces a generic "Failed to create record" that hides
+      // which field/value was rejected. Re-throw with the offending code and
+      // the validation detail so a bad row is diagnosable instead of failing
+      // the whole extraction opaquely.
+      const detail =
+        e && typeof e === 'object' && 'response' in e
+          ? JSON.stringify((e as { response?: unknown }).response)
+          : String(e);
+      throw new Error(`extractedCodes create failed for code "${r.code}": ${detail}`);
+    }
   }
 }
 

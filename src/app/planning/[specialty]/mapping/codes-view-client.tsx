@@ -11,6 +11,7 @@ import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { CodesView } from '../../_components/codes-view';
+import { useRefreshWhileRunning } from '../../_components/use-refresh-while-running';
 import { StartCodesModal } from '../pipeline/_components/start-codes-modal';
 
 const PER_PAGE = 200;
@@ -32,12 +33,20 @@ export function CodesViewClient({
   initialCodes,
   initialHasMore,
   codeSources,
+  extractionState,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   codeSources?: CodeSource[];
+  extractionState?: {
+    running: boolean;
+    completed: boolean;
+    runId: string | null;
+    hasDownstream: boolean;
+  };
 }) {
+  useRefreshWhileRunning(extractionState?.running ?? false);
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loadState, setLoadState] = useState<CodeRowsLoadState>(
@@ -63,6 +72,18 @@ export function CodesViewClient({
       setSummary(null);
       setRemapData(null);
       setRemapLoading(false);
+      return;
+    }
+
+    // An authoritative empty first page means the codes were wiped (e.g. the
+    // extraction was reset). The merge-only path below only adds/updates rows
+    // and never drops deleted ones, so clear explicitly instead of leaving
+    // stale rows on screen until the periodic full reconcile catches up.
+    if (initialCodes.length === 0) {
+      nextPageRef.current = 2;
+      setCodes([]);
+      setHasMore(false);
+      setLoadState('complete');
       return;
     }
 
@@ -265,7 +286,14 @@ export function CodesViewClient({
         onRequestRemapData={loadRemapData}
       />
       {codes.length === 0 && codeSources ? (
-        <StartCodesModal specialtySlug={slug} sources={codeSources} running={false} />
+        <StartCodesModal
+          specialtySlug={slug}
+          sources={codeSources}
+          running={extractionState?.running ?? false}
+          completed={extractionState?.completed ?? false}
+          hasDownstream={extractionState?.hasDownstream ?? false}
+          runId={extractionState?.runId ?? null}
+        />
       ) : null}
     </>
   );

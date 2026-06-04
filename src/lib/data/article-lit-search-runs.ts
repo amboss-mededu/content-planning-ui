@@ -175,3 +175,17 @@ export async function deleteArticleLitSearchRunsByArticleKeyAsAdmin(
   await Promise.all(rows.map((r) => pb.collection('articleLitSearchRuns').delete(r.id)));
   return rows.length;
 }
+
+/**
+ * Wipe every `articleLitSearchRuns` row for a whole specialty. Part of the
+ * full clean-slate cascade when code extraction is re-run.
+ */
+export async function deleteArticleLitSearchRunsForSpecialtyAsAdmin(
+  slug: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<ArticleLitSearchRunRecord>('articleLitSearchRuns')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(rows.map((r) => pb.collection('articleLitSearchRuns').delete(r.id)));
+}

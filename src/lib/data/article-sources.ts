@@ -386,3 +386,18 @@ export async function deleteArticleSourcesByArticleKeyAsAdmin(
   await Promise.all(rows.map((r) => pb.collection('articleSources').delete(r.id)));
   return rows.length;
 }
+
+/**
+ * Wipe every `articleSources` row for a whole specialty. Part of the
+ * full clean-slate cascade when code extraction is re-run — the literature
+ * search that produced these is downstream of the codes being replaced.
+ */
+export async function deleteArticleSourcesForSpecialtyAsAdmin(
+  slug: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<ArticleSourceRecord>('articleSources').getFullList({
+    filter: `specialtySlug = "${slug}"`,
+  });
+  await Promise.all(rows.map((r) => pb.collection('articleSources').delete(r.id)));
+}

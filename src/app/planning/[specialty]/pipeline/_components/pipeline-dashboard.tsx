@@ -4,7 +4,10 @@ import { Callout, Card, CardBox, H2, Inline, Stack, Text } from '@amboss/design-
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';
-import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
+import {
+  isStageRunningFresh,
+  type PipelineStageStates,
+} from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
@@ -64,14 +67,23 @@ export function PipelineDashboard({
     run.status !== 'completed' &&
     run.status !== 'failed' &&
     run.status !== 'cancelled';
+  // Poll while the run row is non-terminal OR any stage is freshly running.
+  // The run can resolve to a terminal/stale row (e.g. work kicked off from
+  // another tab, or a run parked at awaiting_approval) while a stage is still
+  // mid-flight — relying on `runActive` alone left this dashboard frozen while
+  // the Mapping/Categories tabs (which poll on stage-running) kept updating.
+  const anyStageRunning = Object.values(stages).some((ctx) =>
+    isStageRunningFresh(ctx?.stage),
+  );
+  const shouldPoll = runActive || anyStageRunning;
   const hasUnmappedCodes = unmappedCodeCount > 0;
   const router = useRouter();
 
   useEffect(() => {
-    if (!runActive) return;
+    if (!shouldPoll) return;
     const id = setInterval(() => router.refresh(), 2000);
     return () => clearInterval(id);
-  }, [runActive, router]);
+  }, [shouldPoll, router]);
 
   return (
     <Stack space="l">
@@ -102,7 +114,10 @@ export function PipelineDashboard({
             <StartCodesModal
               specialtySlug={specialtySlug}
               sources={sources}
-              running={stages.extract_codes?.stage.status === 'running'}
+              running={isStageRunningFresh(stages.extract_codes?.stage)}
+              completed={stages.extract_codes?.stage?.status === 'completed'}
+              hasDownstream={mappedCodeCount > 0}
+              runId={stages.extract_codes?.stage?.runId ?? null}
             />
           </StageCard>
           <StageCard
@@ -120,7 +135,9 @@ export function PipelineDashboard({
             <StartMilestonesModal
               specialtySlug={specialtySlug}
               sources={milestoneSources}
-              running={stages.extract_milestones?.stage.status === 'running'}
+              running={isStageRunningFresh(stages.extract_milestones?.stage)}
+              completed={stages.extract_milestones?.stage?.status === 'completed'}
+              runId={stages.extract_milestones?.stage?.runId ?? null}
             />
           </StageCard>
         </Stack>
@@ -144,7 +161,7 @@ export function PipelineDashboard({
             specialtySlug={specialtySlug}
             unmappedCount={unmappedCodeCount}
             defaultContentBase={defaultContentBase}
-            running={stages.map_codes?.stage.status === 'running'}
+            running={isStageRunningFresh(stages.map_codes?.stage)}
           />
         </StageCard>
       </PhaseGroup>
@@ -208,7 +225,7 @@ export function PipelineDashboard({
           <RunLitSearchButton
             specialtySlug={specialtySlug}
             waitingCount={litSearchStats.waitingForSources}
-            running={stages.literature_search?.stage.status === 'running'}
+            running={isStageRunningFresh(stages.literature_search?.stage)}
           />
         </StageCard>
         <Card outlined>

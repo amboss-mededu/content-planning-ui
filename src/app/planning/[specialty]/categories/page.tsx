@@ -5,6 +5,7 @@ import {
 } from '@/lib/data/categories';
 import { listCodeSources } from '@/lib/data/code-sources';
 import { listCodeCount } from '@/lib/data/codes';
+import { getExtractionState } from '@/lib/data/pipeline';
 import { CategoriesView } from '../../_components/categories-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
 
@@ -22,11 +23,12 @@ export default async function CategoriesPage({
 }
 
 async function CategoriesData({ slug }: { slug: string }) {
-  const [rows, sourceRows, codeSources, codeCount] = await Promise.all([
+  const [rows, sourceRows, codeSources, codeCount, extraction] = await Promise.all([
     listCategoryOrchestration(slug),
     listSourceCategoryProgress(slug),
     listCodeSources(),
     listCodeCount(slug),
+    getExtractionState(slug),
   ]);
   return (
     <CategoriesView
@@ -35,6 +37,7 @@ async function CategoriesData({ slug }: { slug: string }) {
       slug={slug}
       codeSources={codeSources.map((s) => ({ slug: s.slug, name: s.name }))}
       codeCount={codeCount}
+      extractionState={extraction.extract_codes}
     />
   );
 }

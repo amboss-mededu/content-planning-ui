@@ -8,7 +8,7 @@ import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
-import { listUnmappedCodeCount } from '@/lib/data/codes';
+import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
 import { getCurrentPipelineRun } from '@/lib/data/pipeline';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
@@ -76,6 +76,7 @@ export async function getTabsComplete(
     specialty,
     run,
     unmappedCount,
+    codeCount,
     consolidatedArticles,
     articleReviews,
     consolidatedSections,
@@ -85,6 +86,7 @@ export async function getTabsComplete(
     readSpecialtyForTabs(slug),
     getCurrentPipelineRun(slug),
     listUnmappedCodeCount(slug),
+    listCodeCount(slug),
     listConsolidatedArticles(slug),
     listArticleReviews(slug),
     listConsolidatedSections(slug),
@@ -96,10 +98,11 @@ export async function getTabsComplete(
   const pipelineDone = derivePhase(run) === 'completed';
   const milestonesDone =
     typeof specialty.milestones === 'string' && specialty.milestones.length > 0;
-  // Guard: before any pipeline has produced codes, unmappedCount is
-  // trivially 0; require a run to have happened before treating Mapping
-  // as auto-complete.
-  const mappingDone = hasRun && unmappedCount === 0;
+  // Guard: a jammed or zero-code run leaves `unmappedCount` trivially 0,
+  // which previously made Categories/Mapping auto-complete with nothing
+  // extracted. Require codes to actually exist (and a run to have happened)
+  // before treating Mapping as complete.
+  const mappingDone = hasRun && codeCount > 0 && unmappedCount === 0;
 
   let decidedArticles = 0;
   let articleApprovalsHaveBacklog = true;

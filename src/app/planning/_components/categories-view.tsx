@@ -20,6 +20,7 @@ import { CategoryDetailsModal } from './category-details-modal';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { type Column, DataTable } from './data-table';
 import { useConsolidationRerun } from './use-consolidation-rerun';
+import { useRefreshWhileRunning } from './use-refresh-while-running';
 import {
   type PipelineRunSettlement,
   useRerunningCategories,
@@ -106,14 +107,22 @@ export function CategoriesView({
   slug,
   codeSources,
   codeCount,
+  extractionState,
 }: {
   rows: CategoryOrchestration[];
   sourceRows: SourceCategoryProgress[];
   slug: string;
   codeSources?: CodeSource[];
   codeCount?: number;
+  extractionState?: {
+    running: boolean;
+    completed: boolean;
+    runId: string | null;
+    hasDownstream: boolean;
+  };
 }) {
   const router = useRouter();
+  useRefreshWhileRunning(extractionState?.running ?? false);
   const [mode, setMode] = useState<ViewMode>('consolidation');
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const {
@@ -363,7 +372,14 @@ export function CategoriesView({
         <SourceCategoriesTable rows={sourceRows} slug={slug} />
       )}
       {codeCount === 0 && codeSources ? (
-        <StartCodesModal specialtySlug={slug} sources={codeSources} running={false} />
+        <StartCodesModal
+          specialtySlug={slug}
+          sources={codeSources}
+          running={extractionState?.running ?? false}
+          completed={extractionState?.completed ?? false}
+          hasDownstream={extractionState?.hasDownstream ?? false}
+          runId={extractionState?.runId ?? null}
+        />
       ) : null}
       {openBucket && (
         <CategoryDetailsModal
