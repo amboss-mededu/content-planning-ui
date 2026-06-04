@@ -10,10 +10,10 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleDraftRunRecord,
   ArticleLitSearchRunRecord,
   ArticleReviewRecord,
   ArticleSourceRecord,
-  ArticleWritingRunRecord,
   ReviewCommentRecord,
   SectionReviewRecord,
 } from '@/lib/pb/types';
@@ -34,12 +34,12 @@ import {
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { DraftArticleButton } from './draft-article-button';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { canRunLitSearch } from './pipeline-stage-gates';
 import { RegisterCortexButton } from './register-cortex-button';
 import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
-import { StartWritingButton } from './start-writing-button';
 import { useLitSearchState } from './use-running-lit-search-articles';
 
 export type BacklogRow = {
@@ -112,7 +112,7 @@ export function BacklogView({
   initialSourcesByArticleKey,
   initialLitSearchRuns,
   initialCommentsByArticle,
-  initialWritingRuns,
+  initialDraftRuns,
   viewerEmail,
 }: {
   slug: string;
@@ -125,7 +125,7 @@ export function BacklogView({
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialLitSearchRuns: ArticleLitSearchRunRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
-  initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
+  initialDraftRuns?: Record<string, ArticleDraftRunRecord>;
   viewerEmail?: string;
 }) {
   const router = useRouter();
@@ -710,7 +710,7 @@ export function BacklogView({
       key: 'draft',
       label: 'Draft',
       description:
-        'Kick off the 6-pass LLM article draft. New articles only — updates use a different editorial path.',
+        'Send the sources + parameters to the n8n article-creation workflow. New articles only — updates use a different editorial path.',
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
@@ -727,11 +727,16 @@ export function BacklogView({
               sourcesCount={r.sourcesCount}
               registeredSourcesCount={r.registeredSourcesCount}
             />
-            <StartWritingButton
+            <DraftArticleButton
               slug={slug}
               articleRecordId={r.id}
+              articleKey={r.articleKey}
+              articleTitle={r.articleTitle ?? ''}
+              sources={initialSourcesByArticleKey[r.articleKey] ?? []}
               hasSources={r.sourcesCount > 0}
-              initialRun={initialWritingRuns?.[r.id] ?? null}
+              viewerEmail={viewerEmail}
+              initialRun={initialDraftRuns?.[r.id] ?? null}
+              size="s"
             />
           </Inline>
         ),

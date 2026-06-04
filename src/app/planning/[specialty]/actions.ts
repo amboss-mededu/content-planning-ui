@@ -14,6 +14,7 @@ import {
   setArticleBacklogAssigneeAsAdmin,
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
+import { deleteArticleDraftRunsByArticleKeyAsAdmin } from '@/lib/data/article-draft-runs';
 import { computeArticleKey } from '@/lib/data/article-keys';
 import { deleteArticleLitSearchRunsByArticleKeyAsAdmin } from '@/lib/data/article-lit-search-runs';
 import {
@@ -579,6 +580,7 @@ export async function resetArticle(
   await deleteWritingRunsForArticleAsAdmin(slug, articleRecordId);
   await deleteArticleSourcesByArticleKeyAsAdmin(slug, articleKey);
   await deleteArticleLitSearchRunsByArticleKeyAsAdmin(slug, articleKey);
+  await deleteArticleDraftRunsByArticleKeyAsAdmin(slug, articleKey);
   await deleteReviewCommentsForArticleAsAdmin(slug, articleKey);
   // NOTE: do NOT clear `articleReviews` here. The specialty backlog
   // page (`/planning/<slug>/backlog`) gates which articles appear by

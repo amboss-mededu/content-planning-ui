@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
+import { listLatestDraftRunsForArticles } from '@/lib/data/article-draft-runs';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleLitSearchRuns } from '@/lib/data/article-lit-search-runs';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
-import { listLatestWritingRunsForArticles } from '@/lib/data/article-writing';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
@@ -126,7 +126,7 @@ async function BacklogData({ slug }: { slug: string }) {
     users,
     commentsByArticleKind,
     user,
-    writingRunsByArticle,
+    draftRunsByArticle,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
     listArticleReviews(slug),
@@ -139,7 +139,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listAssignableUsers(),
     listReviewComments(slug, 'article'),
     getCurrentUser(),
-    listLatestWritingRunsForArticles(slug),
+    listLatestDraftRunsForArticles(slug),
   ]);
 
   const categoryLookup: CategoryLookup = {};
@@ -218,7 +218,7 @@ async function BacklogData({ slug }: { slug: string }) {
       initialSourcesByArticleKey={sourcesByKey}
       initialLitSearchRuns={litSearchRuns}
       initialCommentsByArticle={initialCommentsByArticle}
-      initialWritingRuns={writingRunsByArticle}
+      initialDraftRuns={draftRunsByArticle}
       viewerEmail={user?.email ?? undefined}
     />
   );

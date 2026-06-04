@@ -48,6 +48,7 @@ import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import { DraftArticleButton } from './draft-article-button';
 import { LitSearchPhase1Panel } from './lit-search-phase1-panel';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import {
@@ -59,7 +60,6 @@ import {
   phaseFromStatus,
 } from './pipeline-stage-gates';
 import type { SectionRow } from './sections-view';
-import { StartWritingButton } from './start-writing-button';
 import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
 // ---------------------------------------------------------------------------
@@ -779,6 +779,7 @@ function BacklogManagerView({
             slug={slug}
             articleKey={article.articleKey}
             articleRecordId={article.id}
+            articleTitle={article.articleTitle ?? ''}
             viewerEmail={viewerEmail}
             onAdvance={pickStatus}
             onPipelineActionTriggered={onPipelineActionTriggered}
@@ -1903,6 +1904,7 @@ function PhaseBody({
   slug,
   articleKey,
   articleRecordId,
+  articleTitle,
   viewerEmail,
   onAdvance,
   onPipelineActionTriggered,
@@ -1921,6 +1923,7 @@ function PhaseBody({
   slug: string;
   articleKey: string;
   articleRecordId: string;
+  articleTitle: string;
   viewerEmail?: string;
   onAdvance: (next: ArticleBacklogStatus) => void;
   onPipelineActionTriggered?: () => void;
@@ -2027,10 +2030,14 @@ function PhaseBody({
         <Text color="secondary">{copy}</Text>
         {canDraft(status) ? (
           <Inline space="s" vAlignItems="center">
-            <StartWritingButton
+            <DraftArticleButton
               slug={slug}
               articleRecordId={articleRecordId}
+              articleKey={articleKey}
+              articleTitle={articleTitle}
+              sources={sources}
               hasSources={sources.length > 0}
+              viewerEmail={viewerEmail}
               initialRun={null}
             />
           </Inline>

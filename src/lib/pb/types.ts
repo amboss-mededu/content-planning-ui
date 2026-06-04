@@ -278,6 +278,28 @@ export interface ArticleLitSearchRunRecord extends PbRecord {
   sourcesCount?: number;
 }
 
+// --- Collection: articleDraftRuns ------------------------------------------
+
+export type ArticleDraftRunStatus = 'running' | 'completed' | 'failed';
+
+export interface ArticleDraftRunRecord extends PbRecord {
+  specialtySlug: string;
+  articleKey: string;
+  articleRecordId: string;
+  status: ArticleDraftRunStatus;
+  /** ms since epoch */
+  startedAt?: number;
+  /** ms since epoch */
+  finishedAt?: number;
+  errorMessage?: string;
+  /** Editor handle/initials submitted with the draft (n8n `handle` field). */
+  handle?: string;
+  language?: string;
+  articleLength?: string;
+  /** Google Drive doc/folder URL returned by the n8n callback on success. */
+  outputUrl?: string;
+}
+
 // --- Collection: reviewComments --------------------------------------------
 
 export type ReviewRecordKind = 'article' | 'section';
