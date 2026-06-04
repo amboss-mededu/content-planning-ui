@@ -59,20 +59,76 @@ const LENGTH_OPTIONS = [
 const HANDLE_STORAGE_KEY = 'draft-article-handle';
 
 /**
- * Build the priority-ordered, numbered ribosomId list the n8n form expects
- * (e.g. "1. 37656 2. 19121 3. 37655") from the article's approved sources.
+ * Build the priority-ordered, numbered ribosomId list the n8n form expects,
+ * one per line:
+ *   1. 37656
+ *   2. 19121
+ * Sourced from the article's approved sources, ordered by editor priority.
+ *
+ * The id is read from `cortexSourceId` — in this pipeline the value editors
+ * enter in the Phase-3 "Source ID" column doubles as the ribosomId the source
+ * PDFs are named after.
  */
 function buildFileMetadata(sources: ArticleSourceRecord[]): string {
   return sources
-    .filter((s) => s.reviewStatus === 'approved' && s.ribosomId)
+    .filter((s) => s.reviewStatus === 'approved' && s.cortexSourceId)
     .slice()
     .sort(
       (a, b) =>
         (a.priority ?? Number.POSITIVE_INFINITY) -
         (b.priority ?? Number.POSITIVE_INFINITY),
     )
-    .map((s, i) => `${i + 1}. ${s.ribosomId}`)
-    .join(' ');
+    .map((s, i) => `${i + 1}. ${s.cortexSourceId}`)
+    .join('\n');
+}
+
+/**
+ * Extract the ribosomIds from the numbered fileMetadata text. Tolerates both
+ * the newline form ("1. 37656\n2. 19121") and an inline/space form, and a
+ * bare comma/newline list if the editor wiped the numbering.
+ */
+function parseRibosomIds(text: string): string[] {
+  const ids: string[] = [];
+  const re = /\d+\.\s*(\S+)/g;
+  let m: RegExpExecArray | null = re.exec(text);
+  while (m !== null) {
+    ids.push(m[1]);
+    m = re.exec(text);
+  }
+  if (ids.length === 0) {
+    return text
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return ids;
+}
+
+/**
+ * Ensure the uploaded PDFs correspond 1:1 to the listed ribosomIds — same
+ * count, and each ribosomId has a file named `<ribosomId>.pdf`. Returns an
+ * error string, or null when they match.
+ */
+function validateFilesMatchRibosomIds(
+  ribosomIds: string[],
+  files: File[],
+): string | null {
+  const basenames = files.map((f) => f.name.replace(/\.pdf$/i, ''));
+  if (ribosomIds.length !== files.length) {
+    return `You listed ${ribosomIds.length} ribosomID(s) but attached ${files.length} file(s) — they must match 1:1.`;
+  }
+  const fileSet = new Set(basenames.map((b) => b.toLowerCase()));
+  const idSet = new Set(ribosomIds.map((id) => id.toLowerCase()));
+  const missing = ribosomIds.filter((id) => !fileSet.has(id.toLowerCase()));
+  const extra = basenames.filter((b) => !idSet.has(b.toLowerCase()));
+  if (missing.length > 0 || extra.length > 0) {
+    const parts: string[] = [];
+    if (missing.length > 0) parts.push(`missing file(s) for: ${missing.join(', ')}`);
+    if (extra.length > 0)
+      parts.push(`unexpected file(s): ${extra.map((e) => `${e}.pdf`).join(', ')}`);
+    return `Files must be named <ribosomId>.pdf — ${parts.join('; ')}.`;
+  }
+  return null;
 }
 
 type Props = {
@@ -282,6 +338,11 @@ function DraftArticleDialog({
     if (!files || files.length === 0) {
       return setError('Attach at least one source PDF (named <ribosomId>.pdf).');
     }
+    const mismatch = validateFilesMatchRibosomIds(
+      parseRibosomIds(fileMetadata),
+      Array.from(files),
+    );
+    if (mismatch) return setError(mismatch);
 
     setSubmitting(true);
     try {
@@ -360,10 +421,10 @@ function DraftArticleDialog({
           <Textarea
             label="RibosomIDs ordered by priority"
             name="draft-article-file-metadata"
-            hint="Prefilled from approved sources. Edit if the upload order differs."
+            hint="Auto-filled from the approved sources (priority order), one per line. Edit if needed — each ID must have a matching <ribosomId>.pdf below."
             value={fileMetadata}
             resize="vertical"
-            rows={3}
+            rows={6}
             onChange={(e) => setFileMetadata(e.target.value)}
           />
           <Stack space="xxs">

@@ -37,6 +37,7 @@ import {
   submitSourcesOrder,
   submitSourceUrl,
 } from '../[specialty]/actions';
+import { AddSourceModal } from './add-source-modal';
 import type { ArticleRow } from './articles-view';
 import {
   type ArticleManagerPhase,
@@ -1929,6 +1930,7 @@ function PhaseBody({
   onPipelineActionTriggered?: () => void;
 }) {
   const copy = PHASE_COPY[phase];
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
 
   if (phase === 1) {
     const litEligible = canRunLitSearch(status, sources.length);
@@ -2012,6 +2014,14 @@ function PhaseBody({
           >
             Ready to draft
           </Button>
+          <Button
+            variant="secondary"
+            size="s"
+            leftIcon="plus"
+            onClick={() => setAddSourceOpen(true)}
+          >
+            Add source
+          </Button>
           {!draftReady ? (
             <Text size="xs" color="secondary">
               {missingIds > 0
@@ -2020,6 +2030,13 @@ function PhaseBody({
             </Text>
           ) : null}
         </Inline>
+        <AddSourceModal
+          open={addSourceOpen}
+          slug={slug}
+          articleKey={articleKey}
+          articleRecordId={articleRecordId}
+          onClose={() => setAddSourceOpen(false)}
+        />
       </Stack>
     );
   }

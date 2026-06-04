@@ -24,6 +24,7 @@ import {
   setArticleReviewAsAdmin,
 } from '@/lib/data/article-reviews';
 import {
+  createArticleSourceAsAdmin,
   deleteArticleSourcesByArticleKeyAsAdmin,
   markSourceCortexRegisteredAsAdmin,
   setArticleSourceReviewAsAdmin,
@@ -214,6 +215,46 @@ export async function submitSourceNotes(
 ): Promise<void> {
   await setSourceNotesAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+/**
+ * Manually add a source to an article from the prioritisation step. The
+ * editor supplies at least a ribosomId + title; it's created pre-approved
+ * and appended to the priority order so it shows up in the draft.
+ */
+export async function addArticleSource(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  fields: {
+    sourceId: string;
+    title: string;
+    url?: string;
+    journal?: string;
+    doi?: string;
+    sourceType?: string;
+  },
+): Promise<{ error?: string }> {
+  const sourceId = fields.sourceId.trim();
+  const title = fields.title.trim();
+  if (!sourceId) return { error: 'Source ID is required.' };
+  if (!title) return { error: 'Title is required.' };
+  const url = fields.url?.trim() ?? '';
+  if (url && !isSafeUrl(url)) {
+    return { error: 'URL must start with http:// or https://' };
+  }
+  const user = await getCurrentUser();
+  await createArticleSourceAsAdmin(slug, articleRecordId, articleKey, {
+    sourceId,
+    title,
+    url: url || undefined,
+    journal: fields.journal?.trim() || undefined,
+    doi: fields.doi?.trim() || undefined,
+    sourceType: fields.sourceType?.trim() || undefined,
+    reviewerEmail: user?.email ?? '',
+  });
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return {};
 }
 
 /**
