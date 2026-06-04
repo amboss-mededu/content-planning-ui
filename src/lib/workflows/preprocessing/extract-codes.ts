@@ -17,6 +17,7 @@
  */
 
 import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
+import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import {
   markStageCompleted,
   markStageFailed,
@@ -163,6 +164,9 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     await deleteCodesForSpecialtyAsAdmin(input.specialtySlug);
     await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
     await markStageCompleted(input.runId, 'extract_codes', undefined, summary);
+    // Auto-flip the card to "Completed" — the badge reflects the manual stage
+    // state, so without this a finished run would still read "Not started".
+    await setPipelineStageStateAsAdmin(input.specialtySlug, 'extract_codes', 'complete');
     await updatePipelineRunStatus(input.runId, 'completed');
     await logEvent({
       runId: input.runId,
