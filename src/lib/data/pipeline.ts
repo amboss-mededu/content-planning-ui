@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
+import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   ContentInput,
@@ -420,22 +421,36 @@ export async function getConsolidationLockState(
   return { locked, status };
 }
 
+export type ExtractionStageState = {
+  /** Freshly running right now (status `running` within the staleness window). */
+  running: boolean;
+  /** Latest run for this stage finished successfully. */
+  completed: boolean;
+  /** Owning run id of the latest stage row — needed to reset/re-run. */
+  runId: string | null;
+};
+
 /**
- * Whether code/milestone extraction is *freshly* running for a specialty —
- * drives the "Running…" Start-extraction buttons on the Categories, Mapping
- * and Milestones tabs (which live outside the pipeline dashboard and so lack
- * its 2s poll). Applies the same staleness guard (`isStageRunningFresh`) as the
+ * Live state of the two extraction stages for a specialty — drives the
+ * Start / Running… / Re-run buttons on the Categories, Mapping and Milestones
+ * tabs (which live outside the pipeline dashboard and so lack its 2s poll).
+ * `running` applies the same staleness guard (`isStageRunningFresh`) as the
  * dashboard stage card, so a jammed run never pins a button to "Running…".
+ *
+ * For codes, `hasDownstream` reports whether any mapping has run (mapped code
+ * count > 0) — the Re-run flow uses it to decide between a plain confirm and
+ * the destructive typed-confirm that wipes all downstream work.
  */
-export async function getExtractionRunning(
-  slug: string,
-): Promise<{ extract_codes: boolean; extract_milestones: boolean }> {
+export async function getExtractionState(slug: string): Promise<{
+  extract_codes: ExtractionStageState & { hasDownstream: boolean };
+  extract_milestones: ExtractionStageState;
+}> {
   await connection();
   const pb = await userClient();
   const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
     filter: pb.filter('specialtySlug = {:slug}', { slug }),
   });
-  type Latest = { status: string; startedAt: number };
+  type Latest = { status: string; startedAt: number; runId: string };
   const latest: Partial<Record<'extract_codes' | 'extract_milestones', Latest>> = {};
   for (const r of runs) {
     const stages = await pb
@@ -446,13 +461,28 @@ export async function getExtractionRunning(
       const startedAt = s.startedAt ?? r.startedAt;
       const prev = latest[s.stage];
       if (!prev || startedAt > prev.startedAt) {
-        latest[s.stage] = { status: s.status, startedAt };
+        latest[s.stage] = { status: s.status, startedAt, runId: r.id };
       }
     }
   }
+  const [codeCount, unmappedCount] = await Promise.all([
+    listCodeCount(slug),
+    listUnmappedCodeCount(slug),
+  ]);
+  const codes = latest.extract_codes;
+  const milestones = latest.extract_milestones;
   return {
-    extract_codes: isStageRunningFresh(latest.extract_codes),
-    extract_milestones: isStageRunningFresh(latest.extract_milestones),
+    extract_codes: {
+      running: isStageRunningFresh(codes),
+      completed: codes?.status === 'completed',
+      runId: codes?.runId ?? null,
+      hasDownstream: codeCount - unmappedCount > 0,
+    },
+    extract_milestones: {
+      running: isStageRunningFresh(milestones),
+      completed: milestones?.status === 'completed',
+      runId: milestones?.runId ?? null,
+    },
   };
 }
 

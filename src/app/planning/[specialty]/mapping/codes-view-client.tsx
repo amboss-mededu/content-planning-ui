@@ -33,15 +33,20 @@ export function CodesViewClient({
   initialCodes,
   initialHasMore,
   codeSources,
-  extractionRunning,
+  extractionState,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   codeSources?: CodeSource[];
-  extractionRunning?: boolean;
+  extractionState?: {
+    running: boolean;
+    completed: boolean;
+    runId: string | null;
+    hasDownstream: boolean;
+  };
 }) {
-  useRefreshWhileRunning(extractionRunning ?? false);
+  useRefreshWhileRunning(extractionState?.running ?? false);
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loadState, setLoadState] = useState<CodeRowsLoadState>(
@@ -272,7 +277,10 @@ export function CodesViewClient({
         <StartCodesModal
           specialtySlug={slug}
           sources={codeSources}
-          running={extractionRunning ?? false}
+          running={extractionState?.running ?? false}
+          completed={extractionState?.completed ?? false}
+          hasDownstream={extractionState?.hasDownstream ?? false}
+          runId={extractionState?.runId ?? null}
         />
       ) : null}
     </>

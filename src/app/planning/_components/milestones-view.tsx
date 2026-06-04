@@ -17,14 +17,14 @@ export function MilestonesView({
   milestones,
   specialtySlug,
   sources,
-  extractionRunning,
+  extractionState,
 }: {
   milestones: string | null;
   specialtySlug: string;
   sources: CodeSource[];
-  extractionRunning: boolean;
+  extractionState: { running: boolean; completed: boolean; runId: string | null };
 }) {
-  useRefreshWhileRunning(extractionRunning);
+  useRefreshWhileRunning(extractionState.running);
   if (!milestones) {
     return (
       <Stack space="l">
@@ -35,7 +35,9 @@ export function MilestonesView({
         <StartMilestonesModal
           specialtySlug={specialtySlug}
           sources={sources}
-          running={extractionRunning}
+          running={extractionState.running}
+          completed={extractionState.completed}
+          runId={extractionState.runId}
         />
       </Stack>
     );
@@ -49,7 +51,9 @@ export function MilestonesView({
       <StartMilestonesModal
         specialtySlug={specialtySlug}
         sources={sources}
-        running={extractionRunning}
+        running={extractionState.running}
+        completed={extractionState.completed}
+        runId={extractionState.runId}
       />
       <Card title="Milestones" titleAs="h3" outlined>
         <CardBox>

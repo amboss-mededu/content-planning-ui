@@ -115,6 +115,9 @@ export function PipelineDashboard({
               specialtySlug={specialtySlug}
               sources={sources}
               running={isStageRunningFresh(stages.extract_codes?.stage)}
+              completed={stages.extract_codes?.stage?.status === 'completed'}
+              hasDownstream={mappedCodeCount > 0}
+              runId={stages.extract_codes?.stage?.runId ?? null}
             />
           </StageCard>
           <StageCard
@@ -133,6 +136,8 @@ export function PipelineDashboard({
               specialtySlug={specialtySlug}
               sources={milestoneSources}
               running={isStageRunningFresh(stages.extract_milestones?.stage)}
+              completed={stages.extract_milestones?.stage?.status === 'completed'}
+              runId={stages.extract_milestones?.stage?.runId ?? null}
             />
           </StageCard>
         </Stack>

@@ -107,17 +107,22 @@ export function CategoriesView({
   slug,
   codeSources,
   codeCount,
-  extractionRunning,
+  extractionState,
 }: {
   rows: CategoryOrchestration[];
   sourceRows: SourceCategoryProgress[];
   slug: string;
   codeSources?: CodeSource[];
   codeCount?: number;
-  extractionRunning?: boolean;
+  extractionState?: {
+    running: boolean;
+    completed: boolean;
+    runId: string | null;
+    hasDownstream: boolean;
+  };
 }) {
   const router = useRouter();
-  useRefreshWhileRunning(extractionRunning ?? false);
+  useRefreshWhileRunning(extractionState?.running ?? false);
   const [mode, setMode] = useState<ViewMode>('consolidation');
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const {
@@ -370,7 +375,10 @@ export function CategoriesView({
         <StartCodesModal
           specialtySlug={slug}
           sources={codeSources}
-          running={extractionRunning ?? false}
+          running={extractionState?.running ?? false}
+          completed={extractionState?.completed ?? false}
+          hasDownstream={extractionState?.hasDownstream ?? false}
+          runId={extractionState?.runId ?? null}
         />
       ) : null}
       {openBucket && (
