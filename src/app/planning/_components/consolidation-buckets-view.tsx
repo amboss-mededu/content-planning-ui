@@ -1,26 +1,16 @@
 'use client';
 
-import {
-  Badge,
-  Notification,
-  SegmentedControl,
-  Stack,
-  Text,
-  Tooltip,
-} from '@amboss/design-system';
+import { Badge, Notification, Stack, Text, Tooltip } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type ReactNode, useCallback, useState } from 'react';
 import type {
   CategoryOrchestration,
   SourceCategoryProgress,
 } from '@/lib/data/categories';
-import type { CodeSource } from '@/lib/workflows/lib/sources';
-import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
 import { CategoryDetailsModal } from './category-details-modal';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { type Column, DataTable } from './data-table';
 import { useConsolidationRerun } from './use-consolidation-rerun';
-import { useRefreshWhileRunning } from './use-refresh-while-running';
 import {
   type PipelineRunSettlement,
   useRerunningCategories,
@@ -90,8 +80,6 @@ function nullableCount(value: number | null): ReactNode {
   return value === null ? '—' : value;
 }
 
-type ViewMode = 'consolidation' | 'source';
-
 function settlementErrorMessage(settlement: PipelineRunSettlement): string | null {
   if (settlement.status !== 'failed' && settlement.status !== 'cancelled') return null;
   const categories = settlement.categories.join(', ');
@@ -101,29 +89,14 @@ function settlementErrorMessage(settlement: PipelineRunSettlement): string | nul
   }`;
 }
 
-export function CategoriesView({
+export function ConsolidationBucketsView({
   rows,
-  sourceRows,
   slug,
-  codeSources,
-  codeCount,
-  extractionState,
 }: {
   rows: CategoryOrchestration[];
-  sourceRows: SourceCategoryProgress[];
   slug: string;
-  codeSources?: CodeSource[];
-  codeCount?: number;
-  extractionState?: {
-    running: boolean;
-    completed: boolean;
-    runId: string | null;
-    hasDownstream: boolean;
-  };
 }) {
   const router = useRouter();
-  useRefreshWhileRunning(extractionState?.running ?? false);
-  const [mode, setMode] = useState<ViewMode>('consolidation');
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const {
     rerun,
@@ -337,16 +310,6 @@ export function CategoriesView({
 
   return (
     <Stack space="m">
-      <SegmentedControl
-        label="Categories view"
-        isLabelHidden
-        value={mode}
-        onChange={(v) => setMode(v === 'source' ? 'source' : 'consolidation')}
-        options={[
-          { name: 'mode', value: 'consolidation', label: 'Consolidation buckets' },
-          { name: 'mode', value: 'source', label: 'Source categories' },
-        ]}
-      />
       {consolidationError ? (
         <Notification
           type="error"
@@ -356,31 +319,17 @@ export function CategoriesView({
           onClickDismiss={dismissConsolidationError}
         />
       ) : null}
-      {mode === 'consolidation' ? (
-        <DataTable
-          rows={rows}
-          columns={columns}
-          getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
-          emptyText="No consolidation buckets found."
-          storageKey={`categories-table:${slug}`}
-          onRowClick={(r) => {
-            if (r.isUnbucketed) return;
-            setOpenCategory(r.consolidationCategory);
-          }}
-        />
-      ) : (
-        <SourceCategoriesTable rows={sourceRows} slug={slug} />
-      )}
-      {codeCount === 0 && codeSources ? (
-        <StartCodesModal
-          specialtySlug={slug}
-          sources={codeSources}
-          running={extractionState?.running ?? false}
-          completed={extractionState?.completed ?? false}
-          hasDownstream={extractionState?.hasDownstream ?? false}
-          runId={extractionState?.runId ?? null}
-        />
-      ) : null}
+      <DataTable
+        rows={rows}
+        columns={columns}
+        getRowKey={(r, i) => `${r.consolidationCategory}-${i}`}
+        emptyText="No consolidation buckets found."
+        storageKey={`categories-table:${slug}`}
+        onRowClick={(r) => {
+          if (r.isUnbucketed) return;
+          setOpenCategory(r.consolidationCategory);
+        }}
+      />
       {openBucket && (
         <CategoryDetailsModal
           bucket={openBucket}
@@ -402,7 +351,7 @@ export function CategoriesView({
 // Source-category table (backup view)
 // ---------------------------------------------------------------------------
 
-function SourceCategoriesTable({
+export function SourceCategoriesTable({
   rows,
   slug,
 }: {
@@ -452,7 +401,7 @@ function SourceCategoriesTable({
     <Stack space="m">
       <Text color="secondary">
         {rows.length} source-ontology categories from the codes table. Backup view — the
-        consolidation buckets above are the primary surface.
+        Consolidation buckets view is the primary surface.
       </Text>
       <DataTable
         rows={rows}

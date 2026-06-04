@@ -1,11 +1,15 @@
 import { Suspense } from 'react';
+import {
+  listCategoryOrchestration,
+  listSourceCategoryProgress,
+} from '@/lib/data/categories';
 import { listCodeSources } from '@/lib/data/code-sources';
-import { listCodeTableRowsPage } from '@/lib/data/codes';
+import { listCodeCount, listCodeTableRowsPage } from '@/lib/data/codes';
 import { getExtractionState } from '@/lib/data/pipeline';
+import { MappingView } from '../../_components/mapping-view';
 import { TableSkeleton } from '../../_components/table-skeleton';
-import { CodesViewClient } from './codes-view-client';
 
-export default async function CodesPage({
+export default async function MappingPage({
   params,
 }: {
   params: Promise<{ specialty: string }>;
@@ -14,24 +18,31 @@ export default async function CodesPage({
 
   return (
     <Suspense fallback={<TableSkeleton columns={7} rows={15} />}>
-      <CodesPageData slug={slug} />
+      <MappingData slug={slug} />
     </Suspense>
   );
 }
 
-async function CodesPageData({ slug }: { slug: string }) {
-  const [firstPage, codeSources, extraction] = await Promise.all([
-    listCodeTableRowsPage(slug, 1, 200),
-    listCodeSources(),
-    getExtractionState(slug),
-  ]);
+async function MappingData({ slug }: { slug: string }) {
+  const [firstPage, rows, sourceRows, codeSources, codeCount, extraction] =
+    await Promise.all([
+      listCodeTableRowsPage(slug, 1, 200),
+      listCategoryOrchestration(slug),
+      listSourceCategoryProgress(slug),
+      listCodeSources(),
+      listCodeCount(slug),
+      getExtractionState(slug),
+    ]);
 
   return (
-    <CodesViewClient
+    <MappingView
       slug={slug}
       initialCodes={firstPage.items}
       initialHasMore={firstPage.hasMore}
+      rows={rows}
+      sourceRows={sourceRows}
       codeSources={codeSources.map((s) => ({ slug: s.slug, name: s.name }))}
+      codeCount={codeCount}
       extractionState={extraction.extract_codes}
     />
   );

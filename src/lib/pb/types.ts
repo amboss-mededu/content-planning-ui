@@ -37,7 +37,7 @@ export interface SpecialtyRecord extends PbRecord {
   region?: string;
   language?: string;
   /** Per-tab manual "mark step complete" override, keyed by tab segment
-   *  (e.g. `''` for Overview, `'categories'`). OR-merged with the
+   *  (e.g. `''` for Overview, `'mapping'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */
   tabOverrides?: Record<string, boolean>;
   /** Legacy per-stage "mark step complete" override. Read fallback only;
