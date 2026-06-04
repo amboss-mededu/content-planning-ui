@@ -11,7 +11,6 @@ const TABS = [
   { label: 'Overview', segment: '', numbered: false },
   { label: 'Pipeline', segment: 'pipeline', numbered: false },
   { label: 'Milestones', segment: 'milestones', numbered: true },
-  { label: 'Categories', segment: 'categories', numbered: true },
   { label: 'Mapping', segment: 'mapping', numbered: true },
   // Single parent for the three consolidation surfaces. Lands on the
   // review screen by default; the in-page SegmentedControl (see

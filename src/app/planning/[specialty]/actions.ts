@@ -626,7 +626,6 @@ const KNOWN_TAB_SEGMENTS = new Set([
   '',
   'pipeline',
   'milestones',
-  'categories',
   'mapping',
   'consolidation-review',
   'articles',

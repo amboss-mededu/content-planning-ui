@@ -9,10 +9,7 @@ import type {
 import type { MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
-import type { CodeSource } from '@/lib/workflows/lib/sources';
-import { CodesView } from '../../_components/codes-view';
-import { useRefreshWhileRunning } from '../../_components/use-refresh-while-running';
-import { StartCodesModal } from '../pipeline/_components/start-codes-modal';
+import { CodesView } from './codes-view';
 
 const PER_PAGE = 200;
 const EMPTY_IN_FLIGHT: MappingInFlightRecord[] = [];
@@ -32,21 +29,11 @@ export function CodesViewClient({
   slug,
   initialCodes,
   initialHasMore,
-  codeSources,
-  extractionState,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
-  codeSources?: CodeSource[];
-  extractionState?: {
-    running: boolean;
-    completed: boolean;
-    runId: string | null;
-    hasDownstream: boolean;
-  };
 }) {
-  useRefreshWhileRunning(extractionState?.running ?? false);
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loadState, setLoadState] = useState<CodeRowsLoadState>(
@@ -269,33 +256,21 @@ export function CodesViewClient({
     : (summary?.unmappedCount ?? 0);
 
   return (
-    <>
-      <CodesView
-        codes={codes as unknown as Code[]}
-        specialtySlug={slug}
-        canEdit={canEdit}
-        lockStatus={lockStatus}
-        supportReady={supportReady}
-        inFlightCodes={inFlightCodes}
-        categories={remapData?.categories ?? []}
-        unmappedCodes={remapData?.unmappedCodes ?? []}
-        unmappedCount={unmappedCount}
-        totalCount={totalCount}
-        loadState={loadState}
-        remapLoading={remapLoading}
-        onRequestRemapData={loadRemapData}
-      />
-      {codes.length === 0 && codeSources ? (
-        <StartCodesModal
-          specialtySlug={slug}
-          sources={codeSources}
-          running={extractionState?.running ?? false}
-          completed={extractionState?.completed ?? false}
-          hasDownstream={extractionState?.hasDownstream ?? false}
-          runId={extractionState?.runId ?? null}
-        />
-      ) : null}
-    </>
+    <CodesView
+      codes={codes as unknown as Code[]}
+      specialtySlug={slug}
+      canEdit={canEdit}
+      lockStatus={lockStatus}
+      supportReady={supportReady}
+      inFlightCodes={inFlightCodes}
+      categories={remapData?.categories ?? []}
+      unmappedCodes={remapData?.unmappedCodes ?? []}
+      unmappedCount={unmappedCount}
+      totalCount={totalCount}
+      loadState={loadState}
+      remapLoading={remapLoading}
+      onRequestRemapData={loadRemapData}
+    />
   );
 }
 

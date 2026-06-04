@@ -38,7 +38,7 @@ async function OverviewData({ slug }: { slug: string }) {
       label: 'Categories',
       value: counts.sourceCategories,
       hint: `${counts.consolidationCategories} consolidation categories`,
-      href: `${base}/categories`,
+      href: `${base}/mapping?view=consolidation`,
     },
     {
       label: 'New articles',

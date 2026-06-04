@@ -52,7 +52,6 @@ export const TAB_SEGMENTS = [
   '',
   'pipeline',
   'milestones',
-  'categories',
   'mapping',
   'articles',
   'sections',
@@ -67,7 +66,7 @@ export type TabSegment = (typeof TAB_SEGMENTS)[number];
  * editor's manual per-tab override stored on `specialties.tabOverrides`.
  *
  * Returns a map keyed by tab segment. Tabs without an auto-derive rule
- * (Overview, Categories) rely entirely on the override map.
+ * (Overview) rely entirely on the override map.
  */
 export async function getTabsComplete(
   slug: string,
@@ -163,14 +162,10 @@ export async function getTabsComplete(
     Object.keys(backlog).length > 0 &&
     Object.values(backlog).every((row) => row.status === 'published');
 
-  // Categories are produced during code extraction and finalized once
-  // every code is mapped — so the Categories tab auto-completes on the
-  // same signal as Mapping.
   const auto: Record<TabSegment, boolean> = {
     '': false,
     pipeline: pipelineDone,
     milestones: milestonesDone,
-    categories: mappingDone,
     mapping: mappingDone,
     articles: articlesDone,
     sections: sectionsDone,
