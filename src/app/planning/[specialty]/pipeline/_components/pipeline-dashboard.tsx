@@ -67,14 +67,23 @@ export function PipelineDashboard({
     run.status !== 'completed' &&
     run.status !== 'failed' &&
     run.status !== 'cancelled';
+  // Poll while the run row is non-terminal OR any stage is freshly running.
+  // The run can resolve to a terminal/stale row (e.g. work kicked off from
+  // another tab, or a run parked at awaiting_approval) while a stage is still
+  // mid-flight — relying on `runActive` alone left this dashboard frozen while
+  // the Mapping/Categories tabs (which poll on stage-running) kept updating.
+  const anyStageRunning = Object.values(stages).some((ctx) =>
+    isStageRunningFresh(ctx?.stage),
+  );
+  const shouldPoll = runActive || anyStageRunning;
   const hasUnmappedCodes = unmappedCodeCount > 0;
   const router = useRouter();
 
   useEffect(() => {
-    if (!runActive) return;
+    if (!shouldPoll) return;
     const id = setInterval(() => router.refresh(), 2000);
     return () => clearInterval(id);
-  }, [runActive, router]);
+  }, [shouldPoll, router]);
 
   return (
     <Stack space="l">
