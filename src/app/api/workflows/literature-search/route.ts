@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
   // browser (avoiding mixed-content with the HTTP PocketBase) while n8n
   // calls back through a tunnel. Falls back to the request origin, which
   // is what production wants.
-  const callbackOrigin = env.LIT_SEARCH_N8N_CALLBACK_BASE_URL ?? req.nextUrl.origin;
+  const callbackOrigin = env.N8N_CALLBACK_BASE_URL ?? req.nextUrl.origin;
   const callbackUrl = new URL(
     '/api/workflows/literature-search/callback',
     callbackOrigin,
