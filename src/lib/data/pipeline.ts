@@ -712,12 +712,24 @@ export async function writeExtractedCodesAsAdmin(args: {
   const pb = await createAdminClient();
   const now = Date.now();
   for (const r of args.rows) {
-    await pb.collection('extractedCodes').create({
-      runId: args.runId,
-      specialtySlug: args.specialtySlug,
-      ...r,
-      createdAt: now,
-    });
+    try {
+      await pb.collection('extractedCodes').create({
+        runId: args.runId,
+        specialtySlug: args.specialtySlug,
+        ...r,
+        createdAt: now,
+      });
+    } catch (e) {
+      // PocketBase surfaces a generic "Failed to create record" that hides
+      // which field/value was rejected. Re-throw with the offending code and
+      // the validation detail so a bad row is diagnosable instead of failing
+      // the whole extraction opaquely.
+      const detail =
+        e && typeof e === 'object' && 'response' in e
+          ? JSON.stringify((e as { response?: unknown }).response)
+          : String(e);
+      throw new Error(`extractedCodes create failed for code "${r.code}": ${detail}`);
+    }
   }
 }
 
