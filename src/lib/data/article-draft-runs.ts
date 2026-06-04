@@ -101,6 +101,33 @@ export async function claimArticleDraftRunAsAdmin(input: {
   return claimArticleDraftRunWithClient(pb, input);
 }
 
+export async function getArticleDraftRunAsAdmin(
+  runRecordId: string,
+): Promise<ArticleDraftRunRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb
+      .collection<ArticleDraftRunRecord>('articleDraftRuns')
+      .getOne(runRecordId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Manually abort an in-flight draft. n8n owns the job, so this just marks
+ * the row terminal (`cancelled`, distinct from `failed`) — the UI unblocks
+ * and the partial-unique index frees up so a retry can claim a fresh run.
+ */
+export async function cancelArticleDraftRunAsAdmin(runRecordId: string): Promise<void> {
+  const pb = await createAdminClient();
+  await pb.collection('articleDraftRuns').update(runRecordId, {
+    status: 'cancelled',
+    finishedAt: Date.now(),
+    errorMessage: '',
+  });
+}
+
 export async function finishArticleDraftRunAsAdmin(
   runRecordId: string,
   patch: DraftRunPatch,

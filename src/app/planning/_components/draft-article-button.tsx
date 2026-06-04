@@ -44,6 +44,7 @@ const STATUS_BADGE: Record<
   running: { color: 'blue', label: 'Drafting' },
   completed: { color: 'green', label: 'Drafted' },
   failed: { color: 'gray', label: 'Failed' },
+  cancelled: { color: 'gray', label: 'Cancelled' },
 };
 
 const LENGTH_OPTIONS = [
@@ -102,6 +103,7 @@ export function DraftArticleButton({
   const router = useRouter();
   const [run, setRun] = useState<ArticleDraftRunRecord | null>(initialRun);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inFlight = run?.status === 'running';
@@ -122,24 +124,60 @@ export function DraftArticleButton({
     setRun(initialRun);
   }, [initialRun]);
 
-  const onStarted = useCallback(() => {
-    // Optimistic: stamp a local "running" row so the badge appears before the
-    // first poll round trip.
-    setRun({
-      id: 'pending',
-      status: 'running',
-      specialtySlug: slug,
-      articleKey,
-      articleRecordId,
-    } as unknown as ArticleDraftRunRecord);
-    setDialogOpen(false);
-    router.refresh();
-  }, [slug, articleKey, articleRecordId, router]);
+  const onStarted = useCallback(
+    (draftRunId: string) => {
+      // Optimistic: stamp a local "running" row so the badge appears before
+      // the first poll round trip. Carry the real run id so Cancel works
+      // immediately (even in the modal, which loads with initialRun=null).
+      setRun({
+        id: draftRunId || 'pending',
+        status: 'running',
+        specialtySlug: slug,
+        articleKey,
+        articleRecordId,
+      } as unknown as ArticleDraftRunRecord);
+      setDialogOpen(false);
+      router.refresh();
+    },
+    [slug, articleKey, articleRecordId, router],
+  );
+
+  const cancel = useCallback(async () => {
+    const runId = run?.id;
+    if (!runId || runId === 'pending' || cancelling) return;
+    setCancelling(true);
+    try {
+      await fetch('/api/workflows/cancel-draft-article', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId }),
+      });
+      setRun((prev) =>
+        prev ? ({ ...prev, status: 'cancelled' } as ArticleDraftRunRecord) : prev,
+      );
+      router.refresh();
+    } finally {
+      setCancelling(false);
+    }
+  }, [run?.id, cancelling, router]);
 
   if (inFlight) {
     return (
       <Inline space="xs" vAlignItems="center">
         <Badge text={STATUS_BADGE.running.label} color="blue" />
+        {run && run.id !== 'pending' ? (
+          <Button
+            variant="tertiary"
+            size="s"
+            disabled={cancelling}
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              void cancel();
+            }}
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        ) : null}
       </Inline>
     );
   }
@@ -218,7 +256,7 @@ function DraftArticleDialog({
   defaultFileMetadata: string;
   viewerEmail?: string;
   onClose: () => void;
-  onStarted: () => void;
+  onStarted: (draftRunId: string) => void;
 }) {
   const [title, setTitle] = useState(articleTitle);
   const [language, setLanguage] = useState('en');
@@ -266,11 +304,16 @@ function DraftArticleDialog({
         method: 'POST',
         body: form,
       });
+      const j = (await res.json().catch(() => ({}))) as {
+        draftRunId?: string;
+        error?: string;
+      };
+      // 409 = a draft is already running for this article; reuse its id so
+      // the badge + Cancel target the live run.
       if (!res.ok && res.status !== 409) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
-      onStarted();
+      onStarted(j.draftRunId ?? '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start draft.');
     } finally {

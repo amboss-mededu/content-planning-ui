@@ -260,7 +260,7 @@ export type SourceReviewStatus = 'approved' | 'rejected';
 
 // --- Collection: articleLitSearchRuns --------------------------------------
 
-export type ArticleLitSearchRunStatus = 'running' | 'completed' | 'failed';
+export type ArticleLitSearchRunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ArticleLitSearchRunRecord extends PbRecord {
   specialtySlug: string;
@@ -280,7 +280,7 @@ export interface ArticleLitSearchRunRecord extends PbRecord {
 
 // --- Collection: articleDraftRuns ------------------------------------------
 
-export type ArticleDraftRunStatus = 'running' | 'completed' | 'failed';
+export type ArticleDraftRunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ArticleDraftRunRecord extends PbRecord {
   specialtySlug: string;

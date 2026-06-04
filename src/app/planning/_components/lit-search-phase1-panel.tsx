@@ -4,6 +4,7 @@ import { Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ArticleLitSearchRunRecord } from '@/lib/pb/types';
+import { CancelLitSearchButton } from './cancel-lit-search-button';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
@@ -48,6 +49,11 @@ export function LitSearchPhase1Panel({
   const previousRunning = useRef(false);
 
   const isRunning = optimisticBusy || liveInFlight;
+  // The run id is only known once a real `running` row exists (live signal);
+  // during the pure-optimistic window there's nothing to cancel yet.
+  const runningRunId = liveInFlight
+    ? (litState.latestByArticleKey.get(articleKey)?.id ?? null)
+    : null;
   // Click-level errors (POST refused) take precedence — they're the most
   // recent. Otherwise show the latest backend failure for this article.
   // Suppress while running so we don't show a stale red banner under the
@@ -125,6 +131,12 @@ export function LitSearchPhase1Panel({
       {isRunning ? (
         <Inline space="s" vAlignItems="center">
           <LitSearchProgressBadge />
+          {runningRunId ? (
+            <CancelLitSearchButton
+              runId={runningRunId}
+              onCancelled={() => setOptimisticBusy(false)}
+            />
+          ) : null}
         </Inline>
       ) : (
         <Stack space="xs">

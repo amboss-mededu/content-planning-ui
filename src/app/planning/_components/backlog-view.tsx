@@ -31,6 +31,7 @@ import {
   STATUS_OPTIONS,
   WAITING_STATUSES,
 } from './backlog-constants';
+import { CancelLitSearchButton } from './cancel-lit-search-button';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
@@ -687,7 +688,13 @@ export function BacklogView({
           );
         }
         if (isLitSearchRunning(r.articleKey)) {
-          return <LitSearchProgressBadge />;
+          const litRunId = litSearchState.latestByArticleKey.get(r.articleKey)?.id;
+          return (
+            <Inline space="xxs" vAlignItems="center">
+              <LitSearchProgressBadge />
+              {litRunId ? <CancelLitSearchButton runId={litRunId} /> : null}
+            </Inline>
+          );
         }
         if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
           return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
