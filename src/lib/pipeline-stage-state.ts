@@ -46,18 +46,30 @@ export const FRESH_RUNNING_MS = 15 * 60 * 1000;
 
 /**
  * True when a stage is genuinely running *right now* — `status === 'running'`
- * and it started within `FRESH_RUNNING_MS`. Accepts both the row shape
- * (`startedAt: Date`) and the raw record shape (`startedAt: number`), so the
- * client stage card and the server `getExtractionRunning` helper share one
- * source of truth.
+ * and it started within `FRESH_RUNNING_MS`.
+ *
+ * `startedAt` arrives in three shapes depending on the caller: a number (raw PB
+ * record, server-side), a `Date` (mapped row), or a string (a `Date` serialized
+ * across the RSC → client boundary). All three are coerced to epoch ms. If it's
+ * unreadable we **fail open** — a stage marked `running` is shown as running
+ * rather than silently hidden — so the freshness guard can only ever suppress a
+ * stage we can prove is stale, never an active one.
  */
 export function isStageRunningFresh(
-  stage: { status: string; startedAt?: number | Date | null } | null | undefined,
+  stage: { status: string; startedAt?: number | Date | string | null } | null | undefined,
   now: number = Date.now(),
 ): boolean {
   if (!stage || stage.status !== 'running') return false;
   const raw = stage.startedAt;
-  const startedAt = raw instanceof Date ? raw.getTime() : (raw ?? 0);
+  const startedAt =
+    raw instanceof Date
+      ? raw.getTime()
+      : typeof raw === 'number'
+        ? raw
+        : typeof raw === 'string'
+          ? Date.parse(raw)
+          : Number.NaN;
+  if (!Number.isFinite(startedAt)) return true;
   return startedAt > now - FRESH_RUNNING_MS;
 }
 
