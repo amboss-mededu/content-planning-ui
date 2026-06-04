@@ -133,16 +133,6 @@ export function StageStatePopover({
           }}
         >
           <Badge text={badgeLabel} color={badgeColor} />
-          <span
-            aria-hidden
-            style={{
-              fontSize: 10,
-              lineHeight: 1,
-              color: 'var(--color-gray-500, #737373)',
-            }}
-          >
-            ▾
-          </span>
         </button>
       </Popover>
       {error ? <Text color="error">{error}</Text> : null}
