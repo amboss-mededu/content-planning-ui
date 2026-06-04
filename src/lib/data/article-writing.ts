@@ -286,5 +286,26 @@ export async function deleteWritingRunsForArticleAsAdmin(
   return { runs: runs.length, drafts: draftCount };
 }
 
+/**
+ * Wipe every writing run + draft pass for a whole specialty. Part of the
+ * full clean-slate cascade when code extraction is re-run. Drafts are
+ * deleted first (by `specialtySlug`) so a mid-cascade failure can't orphan
+ * a draft whose run row is already gone.
+ */
+export async function deleteWritingRunsForSpecialtyAsAdmin(
+  slug: string,
+): Promise<{ runs: number; drafts: number }> {
+  const pb = await createAdminClient();
+  const drafts = await pb
+    .collection<ArticleDraftRecord>('articleDrafts')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(drafts.map((d) => pb.collection('articleDrafts').delete(d.id)));
+  const runs = await pb
+    .collection<ArticleWritingRunRecord>('articleWritingRuns')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(runs.map((r) => pb.collection('articleWritingRuns').delete(r.id)));
+  return { runs: runs.length, drafts: drafts.length };
+}
+
 /** Re-export so route handlers don't have to import types separately. */
 export type { ArticleWritingRunStatus };
