@@ -11,6 +11,7 @@ import {
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { refreshSpecialty } from '../../actions';
 
 type RerunStage = 'extract_codes' | 'extract_milestones';
 
@@ -75,6 +76,11 @@ export function RerunExtractionButton({
       }
       setGate(0);
       setConfirmText('');
+      // router.refresh() only clears the current route's client cache; the
+      // reset wiped data the Mapping / Categories / consolidation tabs read, so
+      // purge the whole /planning/<slug> client cache via revalidatePath in a
+      // server action — otherwise those tabs show stale rows on next visit.
+      await refreshSpecialty(specialtySlug);
       router.refresh();
       onResetComplete();
     } catch (e) {

@@ -75,6 +75,18 @@ export function CodesViewClient({
       return;
     }
 
+    // An authoritative empty first page means the codes were wiped (e.g. the
+    // extraction was reset). The merge-only path below only adds/updates rows
+    // and never drops deleted ones, so clear explicitly instead of leaving
+    // stale rows on screen until the periodic full reconcile catches up.
+    if (initialCodes.length === 0) {
+      nextPageRef.current = 2;
+      setCodes([]);
+      setHasMore(false);
+      setLoadState('complete');
+      return;
+    }
+
     setCodes((prev) => mergePageInto(prev, initialCodes));
   }, [slug, initialCodes, initialHasMore]);
 
