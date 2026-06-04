@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Badge,
   Box,
   Button,
   Card,
@@ -30,7 +29,7 @@ import { AnimatedDotsBadge } from '../../../_components/animated-dots-badge';
 import { ApproveButton } from './approve-button';
 import { CancelButton } from './cancel-button';
 import { ModelSettingsPopover } from './model-settings-popover';
-import { StageStateControl } from './stage-state-control';
+import { StageStatePopover } from './stage-state-popover';
 
 /**
  * Persist a boolean flag in localStorage. Defaults to `false` on first paint
@@ -698,17 +697,44 @@ export function StageCard({
   // For stages without a default model (none today — DEFAULT_MODELS covers all
   // catalog stages), the popover would render an empty body; we still mount
   // it so the surface is consistent across cards.
-  const headerInner = (
-    <Inline space="s" vAlignItems="center">
+  // The title doubles as the card collapse toggle; the badge sits beside it as
+  // its own control (clicking it opens the state popover) — so the two click
+  // targets don't fight, the collapse handler wraps only the title.
+  const titleNode = collapsible ? (
+    <button
+      type="button"
+      onClick={() => setBodyCollapsed(!bodyCollapsed)}
+      aria-expanded={!bodyCollapsed}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: 0,
+        margin: 0,
+        cursor: 'pointer',
+        textAlign: 'left',
+        font: 'inherit',
+        color: 'inherit',
+      }}
+    >
       <H5 as="h4">{title}</H5>
-      {isActuallyRunning ? (
-        // Live processing — cycle "Running" → "Running." → "Running.." → "..."
-        // so the dashboard mirrors the consolidation review's progress badge.
-        <AnimatedDotsBadge label={badgeLabel} color={badgeColor} />
-      ) : (
-        <Badge text={badgeLabel} color={badgeColor} />
-      )}
-    </Inline>
+    </button>
+  ) : (
+    <H5 as="h4">{title}</H5>
+  );
+
+  const badgeNode = isActuallyRunning ? (
+    // Live processing — cycle "Running" → "Running." → "Running.." → "..."
+    // so the dashboard mirrors the consolidation review's progress badge.
+    <AnimatedDotsBadge label={badgeLabel} color={badgeColor} />
+  ) : (
+    <StageStatePopover
+      slug={specialtySlug}
+      stageName={stageName}
+      state={displayManualState}
+      badgeLabel={badgeLabel}
+      badgeColor={badgeColor}
+      onOptimisticStateChange={setDisplayManualState}
+    />
   );
 
   return (
@@ -717,28 +743,10 @@ export function StageCard({
         <Box vSpace="m" lSpace="l" rSpace="l">
           <Inline space="s" vAlignItems="center">
             <div style={{ flex: 1, minWidth: 0 }}>
-              {collapsible ? (
-                <button
-                  type="button"
-                  onClick={() => setBodyCollapsed(!bodyCollapsed)}
-                  aria-expanded={!bodyCollapsed}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    width: '100%',
-                    font: 'inherit',
-                    color: 'inherit',
-                  }}
-                >
-                  {headerInner}
-                </button>
-              ) : (
-                headerInner
-              )}
+              <Inline space="s" vAlignItems="center">
+                {titleNode}
+                {badgeNode}
+              </Inline>
             </div>
             <ModelSettingsPopover specialtySlug={specialtySlug} stage={stageName} />
           </Inline>
@@ -754,6 +762,9 @@ export function StageCard({
                 <Text color="secondary">{stage.errorMessage}</Text>
               ) : null}
               <Inline space="s" vAlignItems="center">
+                {/* Start / Running… / Re-run trigger sits first, with Show
+                    details inline to its right once the step has run. */}
+                {children ?? null}
                 {hasDetails ? (
                   <Button variant="tertiary" onClick={() => setExpanded((x) => !x)}>
                     {expanded ? 'Hide details' : 'Show details'}
@@ -791,14 +802,7 @@ export function StageCard({
                     {continuing ? 'Working…' : continueAction.label}
                   </Button>
                 ) : null}
-                <StageStateControl
-                  slug={specialtySlug}
-                  stageName={stageName}
-                  state={displayManualState}
-                  onOptimisticStateChange={setDisplayManualState}
-                />
               </Inline>
-              {children ?? null}
               {expanded && stage ? (
                 <Stack space="xs">
                   {!useMapHistory && formatTs(stage.startedAt) ? (
