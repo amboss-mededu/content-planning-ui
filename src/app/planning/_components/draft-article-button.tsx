@@ -7,8 +7,9 @@
  *
  * Three visual states (same shape as StartWritingButton):
  *   1. Idle / terminal — a primary "Draft article" button (disabled when the
- *      row has 0 sources). A completed run also surfaces an "Open draft"
- *      link to the Google Drive doc.
+ *      row has 0 sources). A completed run also surfaces an "Open folder"
+ *      link to the Google Drive output folder plus a "Drafts" dropdown of the
+ *      per-stage drafts (outputLinks) returned by the n8n callback.
  *   2. Running — a "Drafting" badge. n8n owns the job (no cancel endpoint),
  *      so there's nothing to abort; a stale row is reaped after the timeout.
  *
@@ -20,9 +21,9 @@ import {
   Badge,
   Button,
   Callout,
+  DropdownMenu,
   Inline,
   Input,
-  Link,
   Modal,
   Select,
   Stack,
@@ -32,10 +33,66 @@ import {
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ArticleDraftLink,
   ArticleDraftRunRecord,
   ArticleDraftRunStatus,
   ArticleSourceRecord,
 } from '@/lib/pb/types';
+import { isSafeUrl } from '@/lib/url';
+import { AnimatedDotsBadge } from './animated-dots-badge';
+
+/**
+ * Dropdown of the draft outputs returned by the n8n callback: the whole Drive
+ * folder at the top, then each per-stage draft Google Doc (`outputLinks`).
+ * Exported so the article modal can render it next to its "Article status"
+ * header while the trigger button sits on the line below.
+ */
+export function DraftLinksMenu({
+  links,
+  folderUrl,
+}: {
+  links: ArticleDraftLink[];
+  /** The whole Drive folder — prepended as the first menu item when present. */
+  folderUrl?: string | null;
+}) {
+  const safeFolder = folderUrl && isSafeUrl(folderUrl) ? folderUrl : null;
+  if (links.length === 0 && !safeFolder) return null;
+  const menuItems = [
+    ...(safeFolder
+      ? [
+          {
+            label: '📁 Open Drive folder',
+            onSelect: () => {
+              window.open(safeFolder, '_blank', 'noopener,noreferrer');
+            },
+          },
+        ]
+      : []),
+    ...links.map((d) => ({
+      label: d.name,
+      onSelect: () => {
+        window.open(d.link, '_blank', 'noopener,noreferrer');
+      },
+    })),
+  ];
+  return (
+    // Stop the backlog row's onRowClick (which opens the modal) from firing
+    // when the editor opens the drafts menu.
+    // biome-ignore lint/a11y/noStaticElementInteractions: layout wrapper, only stops propagation
+    <span
+      onClick={(e) => (e as React.MouseEvent).stopPropagation()}
+      onKeyDown={(e) => (e as React.KeyboardEvent).stopPropagation()}
+    >
+      <DropdownMenu
+        label="Drafts"
+        iconName="external-link"
+        size="s"
+        triggerAriaLabel="Open generated drafts"
+        menuItems={menuItems}
+      />
+    </span>
+  );
+}
 
 const STATUS_BADGE: Record<
   ArticleDraftRunStatus,
@@ -143,6 +200,20 @@ type Props = {
   initialRun?: ArticleDraftRunRecord | null;
   /** Trigger button size — 's' in the dense backlog table, 'm' in the modal. */
   size?: 's' | 'm';
+  /** Hide the status badge — the caller renders it elsewhere (e.g. next to a
+   *  section header). The action buttons (Re-draft / Drafts / Cancel) still
+   *  render. */
+  hideBadge?: boolean;
+  /** Hide the "Drafts" per-stage links dropdown — the caller renders it
+   *  elsewhere (via the exported `DraftLinksMenu`). */
+  hideDrafts?: boolean;
+  /** Extra gate on the draft trigger beyond `hasSources` — e.g. every approved
+   *  source must carry a Source ID. When false the trigger is disabled and
+   *  `draftDisabledHint` is shown. Defaults to enabled. */
+  draftReady?: boolean;
+  /** Hint shown next to the (disabled) trigger explaining why drafting is
+   *  blocked when `draftReady` is false. */
+  draftDisabledHint?: string;
 };
 
 export function DraftArticleButton({
@@ -155,6 +226,10 @@ export function DraftArticleButton({
   viewerEmail,
   initialRun = null,
   size = 'm',
+  hideBadge = false,
+  hideDrafts = false,
+  draftReady = true,
+  draftDisabledHint,
 }: Props) {
   const router = useRouter();
   const [run, setRun] = useState<ArticleDraftRunRecord | null>(initialRun);
@@ -220,7 +295,9 @@ export function DraftArticleButton({
   if (inFlight) {
     return (
       <Inline space="xs" vAlignItems="center">
-        <Badge text={STATUS_BADGE.running.label} color="blue" />
+        {hideBadge ? null : (
+          <AnimatedDotsBadge label={STATUS_BADGE.running.label} color="blue" />
+        )}
         {run && run.id !== 'pending' ? (
           <Button
             variant="tertiary"
@@ -238,13 +315,13 @@ export function DraftArticleButton({
     );
   }
 
-  const completedUrl =
-    run?.status === 'completed' && run.outputUrl ? run.outputUrl : null;
+  const draftLinks =
+    run?.status === 'completed' && Array.isArray(run.outputLinks) ? run.outputLinks : [];
 
   return (
     <>
       <Inline space="xs" vAlignItems="center">
-        {run ? (
+        {run && !hideBadge ? (
           <Badge
             text={STATUS_BADGE[run.status].label}
             color={STATUS_BADGE[run.status].color}
@@ -253,7 +330,7 @@ export function DraftArticleButton({
         <Button
           variant="primary"
           size={size}
-          disabled={!hasSources}
+          disabled={!hasSources || !draftReady}
           onClick={(e) => {
             (e as React.MouseEvent).stopPropagation();
             setDialogOpen(true);
@@ -261,21 +338,16 @@ export function DraftArticleButton({
         >
           {run ? 'Re-draft' : 'Draft article'}
         </Button>
-        {completedUrl ? (
-          <Link
-            href={completedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            size="xs"
-            color="accent"
-            onClick={(e) => (e as React.MouseEvent).stopPropagation()}
-          >
-            Open draft
-          </Link>
-        ) : null}
+        {hideDrafts ? null : (
+          <DraftLinksMenu links={draftLinks} folderUrl={run?.outputUrl ?? null} />
+        )}
         {!hasSources && !run ? (
           <Text size="xs" color="secondary">
             No sources
+          </Text>
+        ) : hasSources && !draftReady && draftDisabledHint ? (
+          <Text size="xs" color="secondary">
+            {draftDisabledHint}
           </Text>
         ) : null}
       </Inline>
