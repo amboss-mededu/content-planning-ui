@@ -40,7 +40,15 @@ import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { dispatchLiteratureSearch } from '@/lib/workflows/literature-search';
 
-type Body = { specialtySlug?: string; articleRecordIds?: string[] };
+type Body = {
+  specialtySlug?: string;
+  articleRecordIds?: string[];
+  /** Re-search: bypass the waiting-for-sources eligibility gate so an
+   *  article that already has sources can be searched again. Requires an
+   *  explicit `articleRecordIds` set so it can't re-search the whole
+   *  backlog. The callback replaces the prior sources with the fresh set. */
+  force?: boolean;
+};
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
@@ -73,10 +81,14 @@ export async function POST(req: NextRequest) {
   const filterIds = Array.isArray(body.articleRecordIds)
     ? new Set(body.articleRecordIds.filter((s) => typeof s === 'string' && s.length > 0))
     : null;
+  // Re-search bypasses the waiting-for-sources gate, but only for an
+  // explicit subset — never the whole backlog.
+  const forceReSearch = body.force === true && filterIds !== null;
   const eligible = suggestions.filter((r) => {
     if (!r.id || !r.articleKey) return false;
     if (reviews[r.articleKey]?.status !== 'approved') return false;
     if (filterIds && !filterIds.has(r.id)) return false;
+    if (forceReSearch) return true;
     const status = backlog[r.articleKey]?.status;
     return (
       status === undefined || status === 'unassigned' || status === 'waiting-for-sources'
