@@ -10,16 +10,17 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleDraftRunRecord,
   ArticleLitSearchRunRecord,
   ArticleReviewRecord,
   ArticleSourceRecord,
-  ArticleWritingRunRecord,
   ReviewCommentRecord,
   SectionReviewRecord,
 } from '@/lib/pb/types';
 import { useApprovalState } from '@/lib/pb/use-approval-state';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import { AddArticleModal } from './add-article-modal';
+import { AnimatedDotsBadge } from './animated-dots-badge';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
 import { ArticleSourcesDrawer } from './article-sources-drawer';
 import { BacklogBulkToolbar } from './backlog-bulk-toolbar';
@@ -29,17 +30,21 @@ import {
   STATUS_COLOR,
   STATUS_LABEL,
   STATUS_OPTIONS,
+  statusBucket,
+  statusOptionValue,
   WAITING_STATUSES,
 } from './backlog-constants';
+import { CancelLitSearchButton } from './cancel-lit-search-button';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode } from './code-utils';
 import { type Column, DataTable } from './data-table';
+import { DraftArticleButton } from './draft-article-button';
+import { DriveUrlField } from './drive-url-field';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { canRunLitSearch } from './pipeline-stage-gates';
 import { RegisterCortexButton } from './register-cortex-button';
 import { RunLitSearchRowButton } from './run-lit-search-row-button';
 import type { SectionRow } from './sections-view';
-import { StartWritingButton } from './start-writing-button';
 import { useLitSearchState } from './use-running-lit-search-articles';
 
 export type BacklogRow = {
@@ -112,7 +117,7 @@ export function BacklogView({
   initialSourcesByArticleKey,
   initialLitSearchRuns,
   initialCommentsByArticle,
-  initialWritingRuns,
+  initialDraftRuns,
   viewerEmail,
 }: {
   slug: string;
@@ -125,7 +130,7 @@ export function BacklogView({
   initialSourcesByArticleKey: Record<string, ArticleSourceRecord[]>;
   initialLitSearchRuns: ArticleLitSearchRunRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
-  initialWritingRuns?: Record<string, ArticleWritingRunRecord>;
+  initialDraftRuns?: Record<string, ArticleDraftRunRecord>;
   viewerEmail?: string;
 }) {
   const router = useRouter();
@@ -265,9 +270,32 @@ export function BacklogView({
     (key: string): string => backlog[key]?.assigneeEmail ?? '',
     [backlog],
   );
+  const draftFolderUrlOf = useCallback(
+    (key: string): string => backlog[key]?.draftFolderUrl ?? '',
+    [backlog],
+  );
   const isLitSearchRunning = useCallback(
     (articleKey: string): boolean => litSearchState.inFlight.has(articleKey),
     [litSearchState.inFlight],
+  );
+  // Per-article draft-run state, mirrored from the already-loaded
+  // `initialDraftRuns` (keyed by articleRecordId; each row also carries
+  // articleKey). Drives the animated "Drafting…" badge in the status
+  // column + the modal header. Kept fresh by the DraftArticleButton's own
+  // 5s router.refresh() poll while a run is in flight — no new timer here.
+  const draftRunByArticleKey = useMemo(() => {
+    const m = new Map<string, ArticleDraftRunRecord>();
+    if (initialDraftRuns) {
+      for (const run of Object.values(initialDraftRuns)) {
+        if (run.articleKey) m.set(run.articleKey, run);
+      }
+    }
+    return m;
+  }, [initialDraftRuns]);
+  const isDraftRunning = useCallback(
+    (articleKey: string): boolean =>
+      draftRunByArticleKey.get(articleKey)?.status === 'running',
+    [draftRunByArticleKey],
   );
 
   const memberRows = useMemo(() => {
@@ -300,7 +328,14 @@ export function BacklogView({
   const filtered = useMemo(() => {
     let out = memberRows;
     if (statusFilter) {
-      out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
+      // Bucket-aware match: the filter offers the 3 collapsed buckets, so
+      // "Choose sources" must match every pre-draft status, not just the
+      // representative `waiting-for-sources` value.
+      const wantBucket = statusBucket(statusFilter as ArticleBacklogStatus);
+      out = out.filter((r) => {
+        const s = statusOf(r.articleKey);
+        return s !== undefined && statusBucket(s) === wantBucket;
+      });
     }
     if (assigneeFilter) {
       if (assigneeFilter === '__unassigned__') {
@@ -501,6 +536,25 @@ export function BacklogView({
       filterable: true,
     },
     {
+      key: 'driveUrl',
+      label: 'Google Drive URL',
+      description:
+        'Drive folder for the latest draft. Auto-filled when a draft runs (replaced on re-run); editable.',
+      width: 170,
+      verticalAlign: 'middle',
+      align: 'left',
+      accessor: (r) => draftFolderUrlOf(r.articleKey) || null,
+      type: 'string',
+      render: (r) => (
+        <DriveUrlField
+          slug={slug}
+          articleKey={r.articleKey}
+          articleRecordId={r.id}
+          value={draftFolderUrlOf(r.articleKey)}
+        />
+      ),
+    },
+    {
       key: 'codes',
       label: 'Codes',
       description: 'Codes assigned to the article in consolidation.',
@@ -522,18 +576,25 @@ export function BacklogView({
       accessor: (r) =>
         isLitSearchRunning(r.articleKey)
           ? 'Search in progress...'
-          : STATUS_LABEL[statusOf(r.articleKey)],
+          : isDraftRunning(r.articleKey)
+            ? 'Drafting...'
+            : STATUS_LABEL[statusOf(r.articleKey)],
       type: 'string',
       filterable: true,
       filterOptions: STATUS_OPTIONS.map((o) => ({ value: o.label, label: o.label })),
       filterValue: (r) =>
         isLitSearchRunning(r.articleKey)
           ? 'Search in progress...'
-          : STATUS_LABEL[statusOf(r.articleKey)],
+          : isDraftRunning(r.articleKey)
+            ? 'Drafting...'
+            : STATUS_LABEL[statusOf(r.articleKey)],
       render: (r) => {
         const s = statusOf(r.articleKey);
         if (isLitSearchRunning(r.articleKey)) {
           return <LitSearchProgressBadge />;
+        }
+        if (isDraftRunning(r.articleKey)) {
+          return <AnimatedDotsBadge label="Drafting" color="blue" />;
         }
         return (
           <span
@@ -543,7 +604,7 @@ export function BacklogView({
             <select
               aria-label="Status"
               style={statusOverlayStyle}
-              value={s}
+              value={statusOptionValue(s)}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
@@ -687,7 +748,13 @@ export function BacklogView({
           );
         }
         if (isLitSearchRunning(r.articleKey)) {
-          return <LitSearchProgressBadge />;
+          const litRunId = litSearchState.latestByArticleKey.get(r.articleKey)?.id;
+          return (
+            <Inline space="xxs" vAlignItems="center">
+              <LitSearchProgressBadge />
+              {litRunId ? <CancelLitSearchButton runId={litRunId} /> : null}
+            </Inline>
+          );
         }
         if (canRunLitSearch(statusOf(r.articleKey), r.sourcesCount)) {
           return <RunLitSearchRowButton slug={slug} articleRecordId={r.id} />;
@@ -710,7 +777,7 @@ export function BacklogView({
       key: 'draft',
       label: 'Draft',
       description:
-        'Kick off the 6-pass LLM article draft. New articles only — updates use a different editorial path.',
+        'Send the sources + parameters to the n8n article-creation workflow. New articles only — updates use a different editorial path.',
       width: 220,
       verticalAlign: 'middle',
       align: 'left',
@@ -727,11 +794,16 @@ export function BacklogView({
               sourcesCount={r.sourcesCount}
               registeredSourcesCount={r.registeredSourcesCount}
             />
-            <StartWritingButton
+            <DraftArticleButton
               slug={slug}
               articleRecordId={r.id}
+              articleKey={r.articleKey}
+              articleTitle={r.articleTitle ?? ''}
+              sources={initialSourcesByArticleKey[r.articleKey] ?? []}
               hasSources={r.sourcesCount > 0}
-              initialRun={initialWritingRuns?.[r.id] ?? null}
+              viewerEmail={viewerEmail}
+              initialRun={initialDraftRuns?.[r.id] ?? null}
+              size="s"
             />
           </Inline>
         ),
@@ -764,6 +836,10 @@ export function BacklogView({
   const managerLitSearchRuns = managerLatestLitSearchRun
     ? [managerLatestLitSearchRun]
     : initialLitSearchRuns.filter((run) => run.articleKey === managerRow?.articleKey);
+  // Latest draft run for the open article, so the modal header can show the
+  // animated "Drafting…" badge and the Article-tab lifecycle controls can
+  // target the live run (cancel/re-draft).
+  const managerDraftRun = managerRow ? (initialDraftRuns?.[managerRow.id] ?? null) : null;
 
   // Position of the open row inside the filtered list, used to drive the
   // modal's Prev/Next footer + arrow-key navigation. Recomputed when the
@@ -874,6 +950,7 @@ export function BacklogView({
             currentBacklogRow: backlog[managerRow.articleKey],
             sources: sourcesByArticleKey[managerRow.articleKey] ?? [],
             litSearchRuns: managerLitSearchRuns,
+            draftRun: managerDraftRun,
             initialComments: initialCommentsByArticle[managerRow.articleKey] ?? [],
             initialNotes: backlog[managerRow.articleKey]?.notes ?? '',
             categoryLookup,

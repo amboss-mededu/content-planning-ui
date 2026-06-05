@@ -21,6 +21,7 @@ import {
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
+  ArticleDraftRunRecord,
   ArticleLitSearchRunRecord,
   ArticleSourceRecord,
   ReviewCommentRecord,
@@ -28,7 +29,6 @@ import type {
 } from '@/lib/pb/types';
 import { isSafeUrl } from '@/lib/url';
 import {
-  getLatestDraftForArticle,
   resetArticle,
   submitSourceCortexId,
   submitSourceDoi,
@@ -37,21 +37,25 @@ import {
   submitSourcesOrder,
   submitSourceUrl,
 } from '../[specialty]/actions';
+import { AddSourceModal } from './add-source-modal';
+import { AnimatedDotsBadge } from './animated-dots-badge';
 import type { ArticleRow } from './articles-view';
 import {
   type ArticleManagerPhase,
   PHASE_LABEL,
   STATUS_COLOR,
   STATUS_LABEL,
+  STATUS_OPTIONS,
+  statusOptionValue,
 } from './backlog-constants';
 import type { BacklogRow } from './backlog-view';
 import { CodeChipList } from './code-chip';
 import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { CommentsSection } from './comments-section';
+import { DraftArticleButton, DraftLinksMenu } from './draft-article-button';
 import { LitSearchPhase1Panel } from './lit-search-phase1-panel';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import {
-  canApproveSources,
   canDraft,
   canRunLitSearch,
   canStartDraft,
@@ -59,7 +63,6 @@ import {
   phaseFromStatus,
 } from './pipeline-stage-gates';
 import type { SectionRow } from './sections-view';
-import { StartWritingButton } from './start-writing-button';
 import { deriveLitSearchSnapshot } from './use-running-lit-search-articles';
 
 // ---------------------------------------------------------------------------
@@ -135,6 +138,9 @@ export type ManagerOpener =
       currentBacklogRow?: ArticleBacklogRecord;
       sources: ArticleSourceRecord[];
       litSearchRuns?: ArticleLitSearchRunRecord[];
+      /** Latest draft run for this article (or null). Drives the animated
+       *  "Drafting…" header badge and the Article-tab lifecycle controls. */
+      draftRun?: ArticleDraftRunRecord | null;
       initialComments: ReviewCommentRecord[];
       initialNotes: string;
       categoryLookup: CategoryLookup;
@@ -628,6 +634,7 @@ function BacklogManagerView({
     currentBacklogRow,
     sources: openerSources,
     litSearchRuns: openerLitSearchRuns,
+    draftRun,
     initialComments,
     initialNotes,
     categoryLookup,
@@ -670,18 +677,7 @@ function BacklogManagerView({
     [openerLitSearchRuns],
   );
   const isLitSearchRunning = litSearchSnapshot.inFlight.has(article.articleKey);
-
-  // The article's real phase, derived from the persisted status.
-  const actualPhase = phaseFromStatus(currentStatus);
-  // The phase the editor is *looking at*. Defaults to actual phase but
-  // can be dragged backwards by chip clicks (pure navigation — no PB
-  // write). When the article advances (lit-search completes, writer
-  // finishes, or the editor re-runs an earlier phase), the effect below
-  // pulls viewedPhase forward so the panel follows.
-  const [viewedPhase, setViewedPhase] = useState<ArticleManagerPhase>(actualPhase);
-  useEffect(() => {
-    setViewedPhase(actualPhase);
-  }, [actualPhase]);
+  const isDraftRunning = draftRun?.status === 'running';
 
   async function pickStatus(next: ArticleBacklogStatus) {
     // Persist any dirty notes with the same status write so the user
@@ -704,7 +700,6 @@ function BacklogManagerView({
   return (
     <Modal
       header={article.articleTitle ?? 'Manage article'}
-      subHeader={`Currently: ${STATUS_LABEL[currentStatus]}`}
       isFullScreen
       isDismissible
       onAction={() => onClose()}
@@ -733,12 +728,18 @@ function BacklogManagerView({
         >
           <SharedHeader
             title={article.articleTitle ?? '(untitled)'}
-            decisionBadge={{
-              text: STATUS_LABEL[currentStatus],
-              color: STATUS_COLOR[currentStatus],
-            }}
+            decisionBadge={null}
             decisionBadgeNode={
-              isLitSearchRunning ? <LitSearchProgressBadge /> : undefined
+              isLitSearchRunning ? (
+                <LitSearchProgressBadge />
+              ) : isDraftRunning ? (
+                <AnimatedDotsBadge label="Drafting" color="blue" />
+              ) : (
+                <ClickableStatusBadge
+                  status={currentStatus}
+                  onStatusChange={pickStatus}
+                />
+              )
             }
             metaInline={
               <Inline space="s">
@@ -766,21 +767,27 @@ function BacklogManagerView({
             </Stack>
           )}
 
-          <Stepper
-            actualPhase={actualPhase}
-            viewedPhase={viewedPhase}
-            onPick={setViewedPhase}
-          />
-          <PhaseBody
-            phase={viewedPhase}
-            status={currentStatus}
-            sources={sources}
-            litSearchRuns={openerLitSearchRuns ?? []}
+          {sources.length > 0 || canDraft(currentStatus) || draftRun ? (
+            <ArticleBar
+              slug={slug}
+              articleKey={article.articleKey}
+              articleRecordId={article.id}
+              articleTitle={article.articleTitle ?? ''}
+              sources={sources}
+              viewerEmail={viewerEmail}
+              draftRun={draftRun ?? null}
+              status={currentStatus}
+            />
+          ) : null}
+          <SourcesSection
             slug={slug}
             articleKey={article.articleKey}
             articleRecordId={article.id}
+            sources={sources}
+            status={currentStatus}
+            litSearchRuns={openerLitSearchRuns ?? []}
             viewerEmail={viewerEmail}
-            onAdvance={pickStatus}
+            isLitSearchRunning={isLitSearchRunning}
             onPipelineActionTriggered={onPipelineActionTriggered}
           />
 
@@ -1719,95 +1726,6 @@ const circleBase: CSSProperties = {
 
 const PHASES: ArticleManagerPhase[] = [1, 2, 3, 4, 5, 6, 7];
 
-function DraftPreview({
-  slug,
-  articleRecordId,
-}: {
-  slug: string;
-  articleRecordId: string;
-}) {
-  type State =
-    | { kind: 'loading' }
-    | { kind: 'empty' }
-    | { kind: 'ready'; pass: string; output: string; finishedAt?: number }
-    | { kind: 'error'; message: string };
-  const [state, setState] = useState<State>({ kind: 'loading' });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ kind: 'loading' });
-    getLatestDraftForArticle(slug, articleRecordId)
-      .then((d) => {
-        if (cancelled) return;
-        if (!d) {
-          setState({ kind: 'empty' });
-          return;
-        }
-        setState({
-          kind: 'ready',
-          pass: d.pass,
-          output: d.output,
-          finishedAt: d.finishedAt,
-        });
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        const message = e instanceof Error ? e.message : String(e);
-        setState({ kind: 'error', message });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug, articleRecordId]);
-
-  if (state.kind === 'loading') {
-    return (
-      <Text size="s" color="secondary">
-        Loading draft…
-      </Text>
-    );
-  }
-  if (state.kind === 'error') {
-    return (
-      <Text size="s" color="error">
-        Failed to load draft: {state.message}
-      </Text>
-    );
-  }
-  if (state.kind === 'empty') {
-    return (
-      <Text size="s" color="secondary">
-        No completed draft yet.
-      </Text>
-    );
-  }
-  return (
-    <Stack space="xs">
-      <Text size="xs" color="secondary">
-        Pass: {state.pass}
-        {state.finishedAt ? ` · ${new Date(state.finishedAt).toLocaleString()}` : ''}
-      </Text>
-      <div
-        style={{
-          maxHeight: '50vh',
-          overflow: 'auto',
-          border: '1px solid rgba(0, 0, 0, 0.12)',
-          borderRadius: 6,
-          padding: 16,
-          background: 'white',
-          fontSize: 14,
-          lineHeight: 1.5,
-        }}
-        // Output is HTML from our own LLM pipeline; not user input. v1
-        // skips sanitization. If risk concerns surface later, wrap with
-        // DOMPurify.
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted internal LLM output
-        dangerouslySetInnerHTML={{ __html: state.output }}
-      />
-    </Stack>
-  );
-}
-
 function Stepper({
   actualPhase,
   viewedPhase,
@@ -1885,186 +1803,357 @@ function Stepper({
   );
 }
 
-const PHASE_COPY: Record<ArticleManagerPhase, string> = {
-  1: 'No sources fetched yet. Run a literature search to gather and rank candidates from Gemini web search, PubMed, and Google Scholar for this article.',
-  2: 'The LLM ranked these sources. Approve the ones to keep and reject the rest — then advance to prioritize.',
-  3: 'Drag to reorder by priority. Paste the Cortex Source ID for every approved source — the draft step needs all of them.',
-  4: 'Article draft is being generated. The dispatcher runs up to 3 articles concurrently.',
-  5: "Preview the latest draft. When you've finished editing in Cortex, mark the article ready to publish.",
-  6: 'Final QC check before publishing. Mark as published when the article is live.',
-  7: 'Article is published.',
-};
+// ---------------------------------------------------------------------------
+// Stacked layout: a slim Article bar on top (draft controls + on-demand
+// preview) and the Sources work area below (Approve/Prioritize toggle + the
+// sources table). Replaces the old two-tab presentation — the status engine
+// (phaseFromStatus / pickStatus / the clickable header badge) is unchanged.
+// ---------------------------------------------------------------------------
 
-function PhaseBody({
-  phase,
-  status,
-  sources,
-  litSearchRuns,
+// The draft-run status badge (animated while running) — rendered next to the
+// "Article status" header so the action buttons can sit on the line below.
+function DraftRunBadge({ run }: { run: ArticleDraftRunRecord | null }) {
+  if (!run) return null;
+  if (run.status === 'running') {
+    return <AnimatedDotsBadge label="Drafting" color="blue" />;
+  }
+  if (run.status === 'completed') return <Badge text="Drafted" color="green" />;
+  if (run.status === 'failed') return <Badge text="Failed" color="gray" />;
+  return <Badge text="Cancelled" color="gray" />;
+}
+
+// Article-status section — the badge sits on the header line; the
+// DraftArticleButton (draft / re-draft / cancel + Drafts links) and "Mark
+// published" sit on the line below. Rendered only once the article can be
+// drafted or already has a run.
+function ArticleBar({
   slug,
   articleKey,
   articleRecordId,
+  articleTitle,
+  sources,
   viewerEmail,
-  onAdvance,
-  onPipelineActionTriggered,
+  draftRun,
+  status,
 }: {
-  /** The phase the user is *viewing* — drives which panel renders. May lag
-   *  behind `status` when the editor has chip-navigated to an earlier
-   *  phase to review/redo it. */
-  phase: ArticleManagerPhase;
-  /** The article's *real* status — drives the in-panel action gates
-   *  (`canRunLitSearch`, `canDraft`). A phase-1 view of a phase-5 article
-   *  shows the copy but no run button, because the lit-search route would
-   *  no-op anyway. */
-  status: ArticleBacklogStatus;
-  sources: ArticleSourceRecord[];
-  litSearchRuns: ArticleLitSearchRunRecord[];
   slug: string;
   articleKey: string;
   articleRecordId: string;
+  articleTitle: string;
+  sources: ArticleSourceRecord[];
   viewerEmail?: string;
-  onAdvance: (next: ArticleBacklogStatus) => void;
-  onPipelineActionTriggered?: () => void;
+  draftRun: ArticleDraftRunRecord | null;
+  status: ArticleBacklogStatus;
 }) {
-  const copy = PHASE_COPY[phase];
-
-  if (phase === 1) {
-    const litEligible = canRunLitSearch(status, sources.length);
-    if (litEligible) {
-      return (
-        <LitSearchPhase1Panel
-          slug={slug}
-          articleKey={articleKey}
-          articleRecordId={articleRecordId}
-          copy={copy}
-          initialRuns={litSearchRuns}
-          onTriggered={onPipelineActionTriggered}
-        />
-      );
-    }
-    return (
-      <Stack space="m">
-        <Text color="secondary">
-          {`Literature search already ran for this article — ${sources.length} candidate${sources.length === 1 ? '' : 's'} retrieved. Use the chips above to step forward through the pipeline.`}
-        </Text>
-      </Stack>
-    );
-  }
-
-  if (phase === 2) {
-    const approveEnabled = canApproveSources(sources);
-    return (
-      <Stack space="m">
-        <Text color="secondary">{copy}</Text>
-        <SourcesTable
-          sources={sources}
-          slug={slug}
-          viewerEmail={viewerEmail}
-          mode="curation"
-        />
-        <Inline space="s" vAlignItems="center">
-          <Button
-            variant="primary"
-            size="s"
-            disabled={!approveEnabled}
-            onClick={() => onAdvance('sources-approved')}
-          >
-            Approve sources
-          </Button>
-          {!approveEnabled ? (
-            <Text size="xs" color="secondary">
-              Approve at least one source to continue.
-            </Text>
-          ) : null}
-        </Inline>
-      </Stack>
-    );
-  }
-
-  if (phase === 3) {
-    const visible = sources
-      .filter((s) => s.reviewStatus === 'approved')
-      .slice()
-      .sort(
-        (a, b) =>
-          (a.priority ?? Number.POSITIVE_INFINITY) -
-          (b.priority ?? Number.POSITIVE_INFINITY),
-      );
-    const draftReady = canStartDraft(sources);
-    const missingIds = missingCortexIdCount(sources);
-    return (
-      <Stack space="m">
-        <Text color="secondary">{copy}</Text>
-        <SourcesTable
-          sources={visible}
-          slug={slug}
-          viewerEmail={viewerEmail}
-          mode="priority"
-        />
-        <Inline space="s" vAlignItems="center">
-          <Button
-            variant="primary"
-            size="s"
-            disabled={!draftReady}
-            onClick={() => onAdvance('ready-for-llm-draft')}
-          >
-            Ready to draft
-          </Button>
-          {!draftReady ? (
-            <Text size="xs" color="secondary">
-              {missingIds > 0
-                ? `Paste Source IDs for ${missingIds} more source${missingIds === 1 ? '' : 's'} to continue.`
-                : 'Approve at least one source to continue.'}
-            </Text>
-          ) : null}
-        </Inline>
-      </Stack>
-    );
-  }
-
-  if (phase === 4) {
-    return (
-      <Stack space="m">
-        <Text color="secondary">{copy}</Text>
-        {canDraft(status) ? (
-          <Inline space="s" vAlignItems="center">
-            <StartWritingButton
-              slug={slug}
-              articleRecordId={articleRecordId}
-              hasSources={sources.length > 0}
-              initialRun={null}
-            />
-          </Inline>
-        ) : null}
-      </Stack>
-    );
-  }
-
-  // Phases 5, 6, 7 — preview the latest draft + advance buttons.
+  const completed = draftRun?.status === 'completed';
+  const draftLinks =
+    completed && Array.isArray(draftRun?.outputLinks) ? draftRun.outputLinks : [];
+  const runFolderUrl = completed ? (draftRun?.outputUrl ?? null) : null;
+  // Drafting unlocks only once every approved source carries a Source ID.
+  const draftReady = canStartDraft(sources);
+  const hasApproved = sources.some((s) => s.reviewStatus === 'approved');
+  const draftDisabledHint = draftReady
+    ? undefined
+    : hasApproved
+      ? `Add a Source ID to every approved source (${missingCortexIdCount(sources)} missing).`
+      : 'Approve at least one source to draft.';
   return (
-    <Stack space="m">
-      <Text color="secondary">{copy}</Text>
-      <DraftPreview slug={slug} articleRecordId={articleRecordId} />
-      {phase === 5 ? (
-        <Inline space="s" vAlignItems="center">
-          <Button
-            variant="primary"
-            size="s"
-            onClick={() => onAdvance('ready-to-publish')}
-          >
-            Mark ready to publish
-          </Button>
-        </Inline>
-      ) : null}
-      {phase === 6 ? (
-        <Inline space="s" vAlignItems="center">
-          <Button variant="primary" size="s" onClick={() => onAdvance('published')}>
-            Mark published
-          </Button>
-        </Inline>
-      ) : null}
+    <Stack space="xs">
+      <Inline space="s" vAlignItems="center">
+        <Text size="s" weight="bold">
+          Article status
+        </Text>
+        <DraftRunBadge run={draftRun} />
+        <DraftLinksMenu links={draftLinks} folderUrl={runFolderUrl} />
+      </Inline>
+      <Inline space="s" vAlignItems="center">
+        <DraftArticleButton
+          slug={slug}
+          articleRecordId={articleRecordId}
+          articleKey={articleKey}
+          articleTitle={articleTitle}
+          sources={sources}
+          hasSources={sources.length > 0}
+          viewerEmail={viewerEmail}
+          initialRun={draftRun}
+          hideBadge
+          hideDrafts
+          draftReady={draftReady}
+          draftDisabledHint={draftDisabledHint}
+        />
+        {status === 'published' ? (
+          <Text size="xs" color="secondary">
+            Published
+          </Text>
+        ) : null}
+      </Inline>
     </Stack>
   );
 }
+
+// Sources work area — the main body of the modal. Before any sources land it's
+// the literature-search entry point; afterwards it's an Approve/Prioritize
+// toggle over the sources table, plus Re-search.
+function SourcesSection({
+  slug,
+  articleKey,
+  articleRecordId,
+  sources,
+  status,
+  litSearchRuns,
+  viewerEmail,
+  isLitSearchRunning,
+  onPipelineActionTriggered,
+}: {
+  slug: string;
+  articleKey: string;
+  articleRecordId: string;
+  sources: ArticleSourceRecord[];
+  status: ArticleBacklogStatus;
+  litSearchRuns: ArticleLitSearchRunRecord[];
+  viewerEmail?: string;
+  isLitSearchRunning: boolean;
+  onPipelineActionTriggered?: () => void;
+}) {
+  const [view, setView] = useState<'approve' | 'prioritize'>(
+    phaseFromStatus(status) >= 3 ? 'prioritize' : 'approve',
+  );
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
+
+  // No sources yet → the search entry point. Results fill the table below.
+  if (canRunLitSearch(status, sources.length)) {
+    return (
+      <LitSearchPhase1Panel
+        slug={slug}
+        articleKey={articleKey}
+        articleRecordId={articleRecordId}
+        copy={PHASE_COPY[1]}
+        initialRuns={litSearchRuns}
+        onTriggered={onPipelineActionTriggered}
+      />
+    );
+  }
+
+  const approvedSorted = sources
+    .filter((s) => s.reviewStatus === 'approved')
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.priority ?? Number.POSITIVE_INFINITY) -
+        (b.priority ?? Number.POSITIVE_INFINITY),
+    );
+  const draftReady = canStartDraft(sources);
+  const missingIds = missingCortexIdCount(sources);
+
+  return (
+    <Stack space="xs">
+      <Text size="s" weight="bold">
+        Sources
+      </Text>
+      <Inline space="s" vAlignItems="center">
+        <SegmentedControl
+          label="Sources view"
+          isLabelHidden
+          value={view}
+          onChange={(v) => setView(v === 'prioritize' ? 'prioritize' : 'approve')}
+          size="s"
+          options={[
+            { name: 'sources-view', value: 'approve', label: 'Approve' },
+            { name: 'sources-view', value: 'prioritize', label: 'Prioritize' },
+          ]}
+        />
+        <ReSearchSourcesButton
+          slug={slug}
+          articleRecordId={articleRecordId}
+          running={isLitSearchRunning}
+          onTriggered={onPipelineActionTriggered}
+        />
+      </Inline>
+      {view === 'approve' ? (
+        <>
+          <Text size="xs" color="secondary">
+            {PHASE_COPY[2]}
+          </Text>
+          <SourcesTable
+            sources={sources}
+            slug={slug}
+            viewerEmail={viewerEmail}
+            mode="curation"
+          />
+        </>
+      ) : (
+        <>
+          <Text size="xs" color="secondary">
+            {PHASE_COPY[3]}
+          </Text>
+          <SourcesTable
+            sources={approvedSorted}
+            slug={slug}
+            viewerEmail={viewerEmail}
+            mode="priority"
+          />
+          <Inline space="s" vAlignItems="center">
+            <Button
+              variant="secondary"
+              size="s"
+              leftIcon="plus"
+              onClick={() => setAddSourceOpen(true)}
+            >
+              Add source
+            </Button>
+            {!draftReady ? (
+              <Text size="xs" color="secondary">
+                {missingIds > 0
+                  ? `Paste Source IDs for ${missingIds} more source${missingIds === 1 ? '' : 's'} — drafting unlocks once every approved source has one.`
+                  : 'Approve at least one source to draft.'}
+              </Text>
+            ) : null}
+          </Inline>
+          <AddSourceModal
+            open={addSourceOpen}
+            slug={slug}
+            articleKey={articleKey}
+            articleRecordId={articleRecordId}
+            onClose={() => setAddSourceOpen(false)}
+          />
+        </>
+      )}
+    </Stack>
+  );
+}
+
+// Transparent native <select> overlaid on the status Badge in the modal
+// header — click the badge to pick any status directly (same pattern as the
+// backlog table's status column). This is the single status control: there's
+// no separate "set status" dropdown or "back one stage" button.
+const statusOverlayStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  opacity: 0,
+  cursor: 'pointer',
+  border: 0,
+  padding: 0,
+  margin: 0,
+  background: 'transparent',
+};
+
+function ClickableStatusBadge({
+  status,
+  onStatusChange,
+}: {
+  status: ArticleBacklogStatus;
+  onStatusChange: (next: ArticleBacklogStatus) => void | Promise<void>;
+}) {
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}>
+      <Badge text={STATUS_LABEL[status]} color={STATUS_COLOR[status]} />
+      <select
+        aria-label="Status"
+        style={statusOverlayStyle}
+        value={statusOptionValue(status)}
+        onChange={(e) => void onStatusChange(e.target.value as ArticleBacklogStatus)}
+      >
+        {STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+// Re-search trigger for the Sources tab — re-runs the literature search even
+// after sources exist (force flag), replacing the current candidate set.
+// Shown once sources are present; the initial search is the Approve step's
+// empty-state panel.
+function ReSearchSourcesButton({
+  slug,
+  articleRecordId,
+  running,
+  onTriggered,
+}: {
+  slug: string;
+  articleRecordId: string;
+  /** A literature search is already in flight for this article. */
+  running: boolean;
+  onTriggered?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onClick = async () => {
+    if (busy || running) return;
+    const ok = window.confirm(
+      'Re-searching replaces the current sources (and their approve / Source-ID ' +
+        'decisions) with a fresh candidate set, and returns the article to the ' +
+        'Approve step. Continue?',
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    onTriggered?.();
+    try {
+      const res = await fetch('/api/workflows/literature-search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          specialtySlug: slug,
+          articleRecordIds: [articleRecordId],
+          force: true,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        skipped?: boolean;
+        reason?: string;
+      };
+      if (!res.ok) {
+        setError(body.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      if (body.skipped) {
+        setError(
+          body.reason === 'already_running'
+            ? 'Search already in progress'
+            : 'Not eligible for re-search',
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Inline space="xs" vAlignItems="center">
+      <Button
+        variant="secondary"
+        size="s"
+        disabled={busy || running}
+        onClick={() => void onClick()}
+      >
+        {busy || running ? 'Searching…' : 'Re-search sources'}
+      </Button>
+      {error ? (
+        <Text size="xs" color="error">
+          {error}
+        </Text>
+      ) : null}
+    </Inline>
+  );
+}
+
+const PHASE_COPY: Record<ArticleManagerPhase, string> = {
+  1: 'No sources fetched yet. Run a literature search to gather and rank candidates from Gemini web search, PubMed, and Google Scholar for this article.',
+  2: 'The LLM ranked these sources. Approve the ones to keep and reject the rest — approved sources show up in the Prioritize step.',
+  3: 'Drag to reorder by priority. Paste the Cortex Source ID for every approved source — the draft step needs all of them.',
+  4: 'Article draft is being generated. The dispatcher runs up to 3 articles concurrently.',
+  5: 'Preview the latest draft. Continue editing in Cortex; set the status from the header badge when the article moves forward.',
+  6: 'Final QC check before publishing. Mark as published when the article is live.',
+  7: 'Article is published.',
+};
 
 // ===========================================================================
 // type='update' · stage='review-*' — Per-section + per-article review surface

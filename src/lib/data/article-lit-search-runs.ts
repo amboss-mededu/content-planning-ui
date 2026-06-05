@@ -5,6 +5,7 @@ import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleLitSearchRunRecord } from '@/lib/pb/types';
+import { maybeFinalizePipelineRun } from '@/lib/workflows/literature-search/finalize';
 import {
   claimArticleLitSearchRunWithClient,
   type LitSearchRunClaim,
@@ -143,6 +144,35 @@ export async function finishArticleLitSearchRunAsAdmin(
     finishedAt: Date.now(),
     errorMessage: patch.errorMessage ?? '',
   });
+}
+
+/**
+ * Manually abort an in-flight per-article literature search. n8n owns the
+ * search, so this just marks the row `cancelled` (distinct from `failed`)
+ * and finalizes the parent pipeline run/stage if this was the last active
+ * article. Returns the (pre-update) row so callers can revalidate by slug;
+ * null if missing. No-op returning the row when already terminal.
+ */
+export async function cancelArticleLitSearchRunAsAdmin(
+  runRecordId: string,
+): Promise<ArticleLitSearchRunRecord | null> {
+  const pb = await createAdminClient();
+  let row: ArticleLitSearchRunRecord;
+  try {
+    row = await pb
+      .collection<ArticleLitSearchRunRecord>('articleLitSearchRuns')
+      .getOne(runRecordId);
+  } catch {
+    return null;
+  }
+  if (row.status !== 'running') return row;
+  await pb.collection('articleLitSearchRuns').update(runRecordId, {
+    status: 'cancelled',
+    finishedAt: Date.now(),
+    errorMessage: '',
+  });
+  if (row.runId) await maybeFinalizePipelineRun(row.runId);
+  return row;
 }
 
 export async function attachPipelineRunToLitSearchRunsAsAdmin(

@@ -2,7 +2,7 @@
  * Callback endpoint for the n8n literature-search workflow.
  *
  * POST /api/workflows/literature-search/callback
- *   Authorization: Bearer <LIT_SEARCH_N8N_CALLBACK_SECRET>
+ *   Authorization: Bearer <N8N_CALLBACK_SECRET>
  *   body: {
  *     status: 'completed' | 'failed',
  *     meta: {
@@ -63,7 +63,7 @@ type CallbackBody = {
 };
 
 export async function POST(req: NextRequest) {
-  const secret = env.LIT_SEARCH_N8N_CALLBACK_SECRET;
+  const secret = env.N8N_CALLBACK_SECRET;
   if (!secret) {
     return NextResponse.json(
       { error: 'callback secret not configured' },

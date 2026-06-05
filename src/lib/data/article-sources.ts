@@ -252,6 +252,71 @@ export async function setArticleSourceReviewAsAdmin(
   });
 }
 
+const SOURCE_TYPE_VALUES: ReadonlySet<string> = new Set([
+  'guideline',
+  'systematic_review',
+  'clinical_review',
+  'meta_analysis',
+  'case_report',
+  'vet_content',
+  'non_english',
+  'other',
+]);
+
+/**
+ * Create a single manually-added source for an article. Editor-chosen, so
+ * it's pre-`approved` and appended after the existing sources in priority
+ * order — appears immediately in the prioritisation list and the draft.
+ */
+export async function createArticleSourceAsAdmin(
+  slug: string,
+  articleRecordId: string,
+  articleKey: string,
+  fields: {
+    /** The "Source ID" — doubles as the ribosomId (PDF name) and the Cortex
+     *  source id in this pipeline. */
+    sourceId: string;
+    title: string;
+    url?: string;
+    journal?: string;
+    doi?: string;
+    sourceType?: string;
+    reviewerEmail?: string;
+  },
+): Promise<ArticleSourceRecord> {
+  const pb = await createAdminClient();
+  const existing = await pb
+    .collection<ArticleSourceRecord>('articleSources')
+    .getFullList({
+      filter: `specialtySlug = "${slug}" && articleKey = "${articleKey}"`,
+    });
+  const next =
+    existing.reduce((max, s) => Math.max(max, s.rank ?? 0, s.priority ?? 0), 0) + 1;
+  const payload: Record<string, unknown> = {
+    specialtySlug: slug,
+    articleRecordId,
+    // The Source ID drives the draft prefill (cortexSourceId) and the source
+    // PDF name (ribosomId); populate both, and the Cortex id satisfies the
+    // Ready-to-draft gate.
+    cortexSourceId: fields.sourceId,
+    ribosomId: fields.sourceId,
+    articleKey,
+    title: fields.title,
+    rank: next,
+    priority: next,
+    reviewStatus: 'approved',
+    reviewerEmail: fields.reviewerEmail ?? '',
+    reviewedAt: Date.now(),
+  };
+  if (fields.url) payload.url = fields.url;
+  if (fields.journal) payload.journal = fields.journal;
+  if (fields.doi) payload.doi = fields.doi;
+  if (fields.sourceType && SOURCE_TYPE_VALUES.has(fields.sourceType)) {
+    payload.sourceType = fields.sourceType;
+  }
+  return pb.collection<ArticleSourceRecord>('articleSources').create(payload);
+}
+
 /**
  * Bulk-insert ranked sources for a single article from the
  * literature-search worker. Admin-side (no cookies in scope). Replaces

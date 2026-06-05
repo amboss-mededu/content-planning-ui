@@ -48,12 +48,12 @@ export async function dispatchLiteratureSearch(
 ): Promise<DispatchLiteratureSearchResult> {
   const stage = 'literature_search' as const;
   const webhookUrl = env.LIT_SEARCH_N8N_WEBHOOK_URL;
-  const callbackToken = env.LIT_SEARCH_N8N_CALLBACK_SECRET;
+  const callbackToken = env.N8N_CALLBACK_SECRET;
 
   if (!webhookUrl || !callbackToken) {
     const msg = !webhookUrl
       ? 'LIT_SEARCH_N8N_WEBHOOK_URL is not configured'
-      : 'LIT_SEARCH_N8N_CALLBACK_SECRET is not configured';
+      : 'N8N_CALLBACK_SECRET is not configured';
     await Promise.all(
       input.articles.map((article) =>
         finishArticleLitSearchRunAsAdmin(article.litSearchRunId, {
@@ -100,7 +100,16 @@ export async function dispatchLiteratureSearch(
     try {
       const res = await fetch(webhookUrl, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // Outbound Header Auth. The n8n webhook's Header Auth credential is
+          // configured with Name = the constant `X-Lit-Search-Auth` and
+          // Value = LIT_SEARCH_N8N_AUTH_SECRET. Omitted when unset so a
+          // webhook without auth still works in local/dev.
+          ...(env.LIT_SEARCH_N8N_AUTH_SECRET
+            ? { 'X-Lit-Search-Auth': env.LIT_SEARCH_N8N_AUTH_SECRET }
+            : {}),
+        },
         body: JSON.stringify(body),
       });
       if (!res.ok) {

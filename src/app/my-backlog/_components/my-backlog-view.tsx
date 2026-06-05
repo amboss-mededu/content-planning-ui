@@ -12,6 +12,8 @@ import {
   STATUS_COLOR,
   STATUS_LABEL,
   STATUS_OPTIONS,
+  statusBucket,
+  statusOptionValue,
   WAITING_STATUSES,
 } from '@/app/planning/_components/backlog-constants';
 import { CodeChipList } from '@/app/planning/_components/code-chip';
@@ -253,7 +255,14 @@ export function MyBacklogView({
         : row;
     });
     if (statusFilter) {
-      out = out.filter((r) => statusOf(r.articleKey) === statusFilter);
+      // Bucket-aware match: the filter offers the 3 collapsed buckets, so
+      // "Choose sources" matches every pre-draft status, not just the
+      // representative `waiting-for-sources` value.
+      const wantBucket = statusBucket(statusFilter as ArticleBacklogStatus);
+      out = out.filter((r) => {
+        const s = statusOf(r.articleKey);
+        return s !== undefined && statusBucket(s) === wantBucket;
+      });
     }
     if (specialtyFilter) {
       out = out.filter((r) => r.specialtySlug === specialtyFilter);
@@ -453,7 +462,7 @@ export function MyBacklogView({
             <select
               aria-label="Status"
               style={statusOverlayStyle}
-              value={s}
+              value={statusOptionValue(s)}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();

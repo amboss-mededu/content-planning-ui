@@ -1,0 +1,542 @@
+'use client';
+
+/**
+ * "Draft article" trigger — opens a dialog that mirrors the n8n article-
+ * creation form, then POSTs it as multipart/form-data to
+ * /api/workflows/draft-article. Replaces the in-process StartWritingButton.
+ *
+ * Three visual states (same shape as StartWritingButton):
+ *   1. Idle / terminal — a primary "Draft article" button (disabled when the
+ *      row has 0 sources). A completed run also surfaces an "Open folder"
+ *      link to the Google Drive output folder plus a "Drafts" dropdown of the
+ *      per-stage drafts (outputLinks) returned by the n8n callback.
+ *   2. Running — a "Drafting" badge. n8n owns the job (no cancel endpoint),
+ *      so there's nothing to abort; a stale row is reaped after the timeout.
+ *
+ * Live state comes from a 5-second poll against articleDraftRuns (via
+ * router.refresh), paused for terminal states.
+ */
+
+import {
+  Badge,
+  Button,
+  Callout,
+  DropdownMenu,
+  Inline,
+  Input,
+  Modal,
+  Select,
+  Stack,
+  Text,
+  Textarea,
+} from '@amboss/design-system';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  ArticleDraftLink,
+  ArticleDraftRunRecord,
+  ArticleDraftRunStatus,
+  ArticleSourceRecord,
+} from '@/lib/pb/types';
+import { isSafeUrl } from '@/lib/url';
+import { AnimatedDotsBadge } from './animated-dots-badge';
+
+/**
+ * Dropdown of the draft outputs returned by the n8n callback: the whole Drive
+ * folder at the top, then each per-stage draft Google Doc (`outputLinks`).
+ * Exported so the article modal can render it next to its "Article status"
+ * header while the trigger button sits on the line below.
+ */
+export function DraftLinksMenu({
+  links,
+  folderUrl,
+}: {
+  links: ArticleDraftLink[];
+  /** The whole Drive folder — prepended as the first menu item when present. */
+  folderUrl?: string | null;
+}) {
+  const safeFolder = folderUrl && isSafeUrl(folderUrl) ? folderUrl : null;
+  if (links.length === 0 && !safeFolder) return null;
+  const menuItems = [
+    ...(safeFolder
+      ? [
+          {
+            label: '📁 Open Drive folder',
+            onSelect: () => {
+              window.open(safeFolder, '_blank', 'noopener,noreferrer');
+            },
+          },
+        ]
+      : []),
+    ...links.map((d) => ({
+      label: d.name,
+      onSelect: () => {
+        window.open(d.link, '_blank', 'noopener,noreferrer');
+      },
+    })),
+  ];
+  return (
+    // Stop the backlog row's onRowClick (which opens the modal) from firing
+    // when the editor opens the drafts menu.
+    // biome-ignore lint/a11y/noStaticElementInteractions: layout wrapper, only stops propagation
+    <span
+      onClick={(e) => (e as React.MouseEvent).stopPropagation()}
+      onKeyDown={(e) => (e as React.KeyboardEvent).stopPropagation()}
+    >
+      <DropdownMenu
+        label="Drafts"
+        iconName="external-link"
+        size="s"
+        triggerAriaLabel="Open generated drafts"
+        menuItems={menuItems}
+      />
+    </span>
+  );
+}
+
+const STATUS_BADGE: Record<
+  ArticleDraftRunStatus,
+  { color: 'gray' | 'blue' | 'green'; label: string }
+> = {
+  running: { color: 'blue', label: 'Drafting' },
+  completed: { color: 'green', label: 'Drafted' },
+  failed: { color: 'gray', label: 'Failed' },
+  cancelled: { color: 'gray', label: 'Cancelled' },
+};
+
+const LENGTH_OPTIONS = [
+  'very short',
+  'short',
+  'medium',
+  'long',
+  'very long',
+  'LLM Decides',
+] as const;
+
+const HANDLE_STORAGE_KEY = 'draft-article-handle';
+
+/**
+ * Build the priority-ordered, numbered ribosomId list the n8n form expects,
+ * one per line:
+ *   1. 37656
+ *   2. 19121
+ * Sourced from the article's approved sources, ordered by editor priority.
+ *
+ * The id is read from `cortexSourceId` — in this pipeline the value editors
+ * enter in the Phase-3 "Source ID" column doubles as the ribosomId the source
+ * PDFs are named after.
+ */
+function buildFileMetadata(sources: ArticleSourceRecord[]): string {
+  return sources
+    .filter((s) => s.reviewStatus === 'approved' && s.cortexSourceId)
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.priority ?? Number.POSITIVE_INFINITY) -
+        (b.priority ?? Number.POSITIVE_INFINITY),
+    )
+    .map((s, i) => `${i + 1}. ${s.cortexSourceId}`)
+    .join('\n');
+}
+
+/**
+ * Extract the ribosomIds from the numbered fileMetadata text. Tolerates both
+ * the newline form ("1. 37656\n2. 19121") and an inline/space form, and a
+ * bare comma/newline list if the editor wiped the numbering.
+ */
+function parseRibosomIds(text: string): string[] {
+  const ids: string[] = [];
+  const re = /\d+\.\s*(\S+)/g;
+  let m: RegExpExecArray | null = re.exec(text);
+  while (m !== null) {
+    ids.push(m[1]);
+    m = re.exec(text);
+  }
+  if (ids.length === 0) {
+    return text
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return ids;
+}
+
+/**
+ * Ensure the uploaded PDFs correspond 1:1 to the listed ribosomIds — same
+ * count, and each ribosomId has a file named `<ribosomId>.pdf`. Returns an
+ * error string, or null when they match.
+ */
+function validateFilesMatchRibosomIds(
+  ribosomIds: string[],
+  files: File[],
+): string | null {
+  const basenames = files.map((f) => f.name.replace(/\.pdf$/i, ''));
+  if (ribosomIds.length !== files.length) {
+    return `You listed ${ribosomIds.length} ribosomID(s) but attached ${files.length} file(s) — they must match 1:1.`;
+  }
+  const fileSet = new Set(basenames.map((b) => b.toLowerCase()));
+  const idSet = new Set(ribosomIds.map((id) => id.toLowerCase()));
+  const missing = ribosomIds.filter((id) => !fileSet.has(id.toLowerCase()));
+  const extra = basenames.filter((b) => !idSet.has(b.toLowerCase()));
+  if (missing.length > 0 || extra.length > 0) {
+    const parts: string[] = [];
+    if (missing.length > 0) parts.push(`missing file(s) for: ${missing.join(', ')}`);
+    if (extra.length > 0)
+      parts.push(`unexpected file(s): ${extra.map((e) => `${e}.pdf`).join(', ')}`);
+    return `Files must be named <ribosomId>.pdf — ${parts.join('; ')}.`;
+  }
+  return null;
+}
+
+type Props = {
+  slug: string;
+  articleRecordId: string;
+  articleKey: string;
+  articleTitle: string;
+  sources: ArticleSourceRecord[];
+  /** Disable the trigger if no sources are attached. */
+  hasSources: boolean;
+  viewerEmail?: string;
+  initialRun?: ArticleDraftRunRecord | null;
+  /** Trigger button size — 's' in the dense backlog table, 'm' in the modal. */
+  size?: 's' | 'm';
+  /** Hide the status badge — the caller renders it elsewhere (e.g. next to a
+   *  section header). The action buttons (Re-draft / Drafts / Cancel) still
+   *  render. */
+  hideBadge?: boolean;
+  /** Hide the "Drafts" per-stage links dropdown — the caller renders it
+   *  elsewhere (via the exported `DraftLinksMenu`). */
+  hideDrafts?: boolean;
+  /** Extra gate on the draft trigger beyond `hasSources` — e.g. every approved
+   *  source must carry a Source ID. When false the trigger is disabled and
+   *  `draftDisabledHint` is shown. Defaults to enabled. */
+  draftReady?: boolean;
+  /** Hint shown next to the (disabled) trigger explaining why drafting is
+   *  blocked when `draftReady` is false. */
+  draftDisabledHint?: string;
+};
+
+export function DraftArticleButton({
+  slug,
+  articleRecordId,
+  articleKey,
+  articleTitle,
+  sources,
+  hasSources,
+  viewerEmail,
+  initialRun = null,
+  size = 'm',
+  hideBadge = false,
+  hideDrafts = false,
+  draftReady = true,
+  draftDisabledHint,
+}: Props) {
+  const router = useRouter();
+  const [run, setRun] = useState<ArticleDraftRunRecord | null>(initialRun);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const inFlight = run?.status === 'running';
+
+  useEffect(() => {
+    if (!inFlight) return;
+    const tick = () => {
+      router.refresh();
+      pollRef.current = setTimeout(tick, 5000);
+    };
+    pollRef.current = setTimeout(tick, 5000);
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [inFlight, router]);
+
+  useEffect(() => {
+    setRun(initialRun);
+  }, [initialRun]);
+
+  const onStarted = useCallback(
+    (draftRunId: string) => {
+      // Optimistic: stamp a local "running" row so the badge appears before
+      // the first poll round trip. Carry the real run id so Cancel works
+      // immediately (even in the modal, which loads with initialRun=null).
+      setRun({
+        id: draftRunId || 'pending',
+        status: 'running',
+        specialtySlug: slug,
+        articleKey,
+        articleRecordId,
+      } as unknown as ArticleDraftRunRecord);
+      setDialogOpen(false);
+      router.refresh();
+    },
+    [slug, articleKey, articleRecordId, router],
+  );
+
+  const cancel = useCallback(async () => {
+    const runId = run?.id;
+    if (!runId || runId === 'pending' || cancelling) return;
+    setCancelling(true);
+    try {
+      await fetch('/api/workflows/cancel-draft-article', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId }),
+      });
+      setRun((prev) =>
+        prev ? ({ ...prev, status: 'cancelled' } as ArticleDraftRunRecord) : prev,
+      );
+      router.refresh();
+    } finally {
+      setCancelling(false);
+    }
+  }, [run?.id, cancelling, router]);
+
+  if (inFlight) {
+    return (
+      <Inline space="xs" vAlignItems="center">
+        {hideBadge ? null : (
+          <AnimatedDotsBadge label={STATUS_BADGE.running.label} color="blue" />
+        )}
+        {run && run.id !== 'pending' ? (
+          <Button
+            variant="tertiary"
+            size="s"
+            disabled={cancelling}
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              void cancel();
+            }}
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        ) : null}
+      </Inline>
+    );
+  }
+
+  const draftLinks =
+    run?.status === 'completed' && Array.isArray(run.outputLinks) ? run.outputLinks : [];
+
+  return (
+    <>
+      <Inline space="xs" vAlignItems="center">
+        {run && !hideBadge ? (
+          <Badge
+            text={STATUS_BADGE[run.status].label}
+            color={STATUS_BADGE[run.status].color}
+          />
+        ) : null}
+        <Button
+          variant="primary"
+          size={size}
+          disabled={!hasSources || !draftReady}
+          onClick={(e) => {
+            (e as React.MouseEvent).stopPropagation();
+            setDialogOpen(true);
+          }}
+        >
+          {run ? 'Re-draft' : 'Draft article'}
+        </Button>
+        {hideDrafts ? null : (
+          <DraftLinksMenu links={draftLinks} folderUrl={run?.outputUrl ?? null} />
+        )}
+        {!hasSources && !run ? (
+          <Text size="xs" color="secondary">
+            No sources
+          </Text>
+        ) : hasSources && !draftReady && draftDisabledHint ? (
+          <Text size="xs" color="secondary">
+            {draftDisabledHint}
+          </Text>
+        ) : null}
+      </Inline>
+      {dialogOpen ? (
+        <DraftArticleDialog
+          slug={slug}
+          articleRecordId={articleRecordId}
+          articleKey={articleKey}
+          articleTitle={articleTitle}
+          defaultFileMetadata={buildFileMetadata(sources)}
+          viewerEmail={viewerEmail}
+          onClose={() => setDialogOpen(false)}
+          onStarted={onStarted}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function DraftArticleDialog({
+  slug,
+  articleRecordId,
+  articleKey,
+  articleTitle,
+  defaultFileMetadata,
+  viewerEmail,
+  onClose,
+  onStarted,
+}: {
+  slug: string;
+  articleRecordId: string;
+  articleKey: string;
+  articleTitle: string;
+  defaultFileMetadata: string;
+  viewerEmail?: string;
+  onClose: () => void;
+  onStarted: (draftRunId: string) => void;
+}) {
+  const [title, setTitle] = useState(articleTitle);
+  const [language, setLanguage] = useState('en');
+  const [articleLength, setArticleLength] = useState('LLM Decides');
+  const [fileMetadata, setFileMetadata] = useState(defaultFileMetadata);
+  const [handle, setHandle] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(HANDLE_STORAGE_KEY) ?? '';
+  });
+  const [gDriveFolderUrl, setGDriveFolderUrl] = useState('');
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    const files = fileRef.current?.files;
+    if (!title.trim()) return setError('Article title is required.');
+    if (!language.trim()) return setError('Language is required.');
+    if (!fileMetadata.trim()) return setError('RibosomID list is required.');
+    if (!handle.trim()) return setError('User handle is required.');
+    if (!files || files.length === 0) {
+      return setError('Attach at least one source PDF (named <ribosomId>.pdf).');
+    }
+    const mismatch = validateFilesMatchRibosomIds(
+      parseRibosomIds(fileMetadata),
+      Array.from(files),
+    );
+    if (mismatch) return setError(mismatch);
+
+    setSubmitting(true);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(HANDLE_STORAGE_KEY, handle.trim());
+      }
+      const form = new FormData();
+      form.set('specialtySlug', slug);
+      form.set('articleRecordId', articleRecordId);
+      form.set('articleKey', articleKey);
+      form.set('articleTitle', title.trim());
+      form.set('language', language.trim());
+      form.set('articleLength', articleLength);
+      form.set('fileMetadata', fileMetadata.trim());
+      form.set('handle', handle.trim());
+      form.set('gDriveFolderUrl', gDriveFolderUrl.trim());
+      for (const file of Array.from(files)) form.append('files', file, file.name);
+
+      const res = await fetch('/api/workflows/draft-article', {
+        method: 'POST',
+        body: form,
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        draftRunId?: string;
+        error?: string;
+      };
+      // 409 = a draft is already running for this article; reuse its id so
+      // the badge + Cancel target the live run.
+      if (!res.ok && res.status !== 409) {
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      onStarted(j.draftRunId ?? '');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start draft.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      header="Draft article"
+      subHeader="Sends the sources + parameters to the n8n article-creation workflow. The draft lands in Google Drive."
+      size="m"
+      isDismissible
+      onAction={onClose}
+      actionButton={{
+        text: submitting ? 'Starting…' : 'Draft article',
+        onClick: submit,
+        disabled: submitting,
+      }}
+      secondaryButton={{ text: 'Cancel', onClick: onClose }}
+    >
+      <Modal.Stack>
+        <Stack space="s">
+          <Input
+            label="Article title"
+            name="draft-article-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <Input
+            label="Language"
+            name="draft-article-language"
+            placeholder="e.g. en"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          />
+          <Select
+            name="draft-article-length"
+            label="Article length"
+            value={articleLength}
+            options={LENGTH_OPTIONS.map((o) => ({ value: o, label: o }))}
+            onChange={(e) => setArticleLength(e.target.value)}
+          />
+          <Textarea
+            label="RibosomIDs ordered by priority"
+            name="draft-article-file-metadata"
+            hint="Auto-filled from the approved sources (priority order), one per line. Edit if needed — each ID must have a matching <ribosomId>.pdf below."
+            value={fileMetadata}
+            resize="vertical"
+            rows={6}
+            onChange={(e) => setFileMetadata(e.target.value)}
+          />
+          <Stack space="xxs">
+            <Text size="s">Source files</Text>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              accept="application/pdf"
+              onChange={(e) =>
+                setFileNames(Array.from(e.target.files ?? []).map((f) => f.name))
+              }
+            />
+            <Text size="xs" color="secondary">
+              Name each PDF <code>&lt;ribosomId&gt;.pdf</code> to match the list above.
+              {fileNames.length > 0 ? ` (${fileNames.length} selected)` : ''}
+            </Text>
+          </Stack>
+          <Input
+            label="User handle"
+            name="draft-article-handle"
+            placeholder="e.g. FKN"
+            value={handle}
+            onChange={(e) => setHandle(e.target.value)}
+          />
+          <Input
+            label="Output folder (optional)"
+            name="draft-article-gdrive"
+            placeholder="Google Drive folder URL — use to resume a failed run"
+            value={gDriveFolderUrl}
+            onChange={(e) => setGDriveFolderUrl(e.target.value)}
+          />
+          {viewerEmail ? (
+            <Text size="xs" color="secondary">
+              Triggered by {viewerEmail}
+            </Text>
+          ) : null}
+          {error ? <Callout type="error" text={error} /> : null}
+        </Stack>
+      </Modal.Stack>
+    </Modal>
+  );
+}

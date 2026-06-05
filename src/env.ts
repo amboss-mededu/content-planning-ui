@@ -78,16 +78,25 @@ export const env = createEnv({
     LIT_SEARCH_N8N_AUTH_SECRET: optionalString,
     // Shared secret. Sent to n8n in the trigger payload's meta.callbackToken
     // and required as `Authorization: Bearer <secret>` on inbound callbacks.
-    // Generate with `openssl rand -hex 32`.
-    LIT_SEARCH_N8N_CALLBACK_SECRET: optionalString,
-    // Optional override for the callback URL the dispatcher sends to n8n.
-    // When unset, the dispatcher uses `req.nextUrl.origin` — fine in
-    // production where the browser and the public app share a host. For
-    // local dev, set this to your tunnel URL (e.g.
-    // `https://<random>.trycloudflare.com`) so the browser can keep
-    // hitting http://localhost:3000 (avoiding mixed-content issues with
-    // the HTTP PocketBase) while n8n calls back through the tunnel.
-    LIT_SEARCH_N8N_CALLBACK_BASE_URL: z.string().url().optional(),
+    // Shared by every n8n workflow's callback route. Generate with
+    // `openssl rand -hex 32`.
+    N8N_CALLBACK_SECRET: optionalString,
+    // Optional override for the origin n8n calls back on. Unset in production
+    // (the trigger routes derive it from req.nextUrl.origin); for local dev
+    // point it at a tunnel URL (e.g. cloudflared) since n8n Cloud can't reach
+    // localhost. Shared by every n8n workflow.
+    N8N_CALLBACK_BASE_URL: z.string().url().optional(),
+    // n8n webhook that owns article drafting (the "Draft Article" action).
+    // The app POSTs a multipart/form-data job (article metadata + source PDFs)
+    // and listens on /api/workflows/draft-article/callback for the resulting
+    // Google Drive doc URL — see src/lib/workflows/draft-article/dispatch.ts.
+    DRAFT_ARTICLE_N8N_WEBHOOK_URL: z.string().url().optional(),
+    // Header Auth secret for the outbound draft-article trigger. Sent as the
+    // `X-Draft-Article-Auth` header value when POSTing to the n8n webhook, and
+    // configured as the "Value" of that webhook node's Header Auth credential
+    // (its "Name" is the constant `X-Draft-Article-Auth`). Distinct from the
+    // shared CALLBACK_SECRET. Generate with `openssl rand -hex 32`.
+    DRAFT_ARTICLE_N8N_AUTH_SECRET: optionalString,
   },
   client: {
     NEXT_PUBLIC_POCKETBASE_URL: z.string().url().optional(),
@@ -111,11 +120,13 @@ export const env = createEnv({
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
+    NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
+    N8N_CALLBACK_SECRET: process.env.N8N_CALLBACK_SECRET,
+    N8N_CALLBACK_BASE_URL: process.env.N8N_CALLBACK_BASE_URL,
     LIT_SEARCH_N8N_WEBHOOK_URL: process.env.LIT_SEARCH_N8N_WEBHOOK_URL,
     LIT_SEARCH_N8N_AUTH_SECRET: process.env.LIT_SEARCH_N8N_AUTH_SECRET,
-    LIT_SEARCH_N8N_CALLBACK_SECRET: process.env.LIT_SEARCH_N8N_CALLBACK_SECRET,
-    LIT_SEARCH_N8N_CALLBACK_BASE_URL: process.env.LIT_SEARCH_N8N_CALLBACK_BASE_URL,
-    NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
+    DRAFT_ARTICLE_N8N_WEBHOOK_URL: process.env.DRAFT_ARTICLE_N8N_WEBHOOK_URL,
+    DRAFT_ARTICLE_N8N_AUTH_SECRET: process.env.DRAFT_ARTICLE_N8N_AUTH_SECRET,
   },
   emptyStringAsUndefined: true,
 });

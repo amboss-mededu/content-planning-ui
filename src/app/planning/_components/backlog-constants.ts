@@ -8,53 +8,84 @@ import type { ArticleBacklogStatus } from '@/lib/pb/types';
 
 export type BadgeColor = 'gray' | 'yellow' | 'blue' | 'purple' | 'brand' | 'green';
 
-// Unassigned dropped from the UI per editor request — the default state for
-// a freshly-approved article is "Waiting for sources". Any legacy row still
-// tagged `unassigned` in PB renders with the same color/label as
-// `waiting-for-sources` so it doesn't read as broken.
+// The badge collapses the 9-value engine into three editor-facing states —
+// "Choose sources" (everything before a draft exists), "Drafted" (a draft has
+// been generated, through ready-to-publish), and "Published". The underlying
+// statuses are preserved (gates/callbacks/cortex-register still read them); only
+// the badge color/label and the manual dropdown are bucketed. `unassigned` is a
+// legacy value that renders identically to `waiting-for-sources`.
 export const STATUS_COLOR: Record<ArticleBacklogStatus, BadgeColor> = {
   unassigned: 'yellow',
   'waiting-for-sources': 'yellow',
   'sources-searched': 'yellow',
-  'sources-approved': 'blue',
-  'ready-for-llm-draft': 'blue',
+  'sources-approved': 'yellow',
+  'ready-for-llm-draft': 'yellow',
   'ready-for-editing': 'purple',
   'editing-in-progress': 'purple',
-  'ready-to-publish': 'brand',
+  'ready-to-publish': 'purple',
   published: 'green',
 };
 
-// Filter dropdown labels match the 7-phase chip stepper so editors see a
-// single vocabulary across the modal, the backlog table, and the filter.
-// `editing-in-progress` collapses into `ready-for-editing` (both phase 5,
-// both "Review article") to avoid a duplicate filter entry — editors can
-// still transition through `editing-in-progress` via the row's inline
-// status dropdown.
+// The manual status dropdown (modal badge + both table inline cells + filters)
+// offers exactly the three buckets. Each writes the bucket's representative
+// value: "Choose sources" → waiting-for-sources (re-enables lit search when a
+// row has no sources), "Drafted" → ready-for-editing, "Published" → published.
+// The intermediate values (sources-searched, sources-approved,
+// ready-for-llm-draft, editing-in-progress, ready-to-publish) are still reached
+// automatically by the pipeline callbacks; they just aren't hand-settable.
 export const STATUS_OPTIONS: Array<{ value: ArticleBacklogStatus; label: string }> = [
-  { value: 'waiting-for-sources', label: 'Search sources' },
-  { value: 'sources-searched', label: 'Approve sources' },
-  { value: 'sources-approved', label: 'Prioritize sources' },
-  { value: 'ready-for-llm-draft', label: 'Draft article' },
-  { value: 'ready-for-editing', label: 'Review article' },
-  { value: 'ready-to-publish', label: 'Article ready' },
+  { value: 'waiting-for-sources', label: 'Choose sources' },
+  { value: 'ready-for-editing', label: 'Drafted' },
   { value: 'published', label: 'Published' },
 ];
 
-// Mirrors `PHASE_LABEL[phaseFromStatus(status)]` — every badge in the app
-// reads through this map, so aligning the values here means the modal
-// header, the backlog table row, the my-backlog row, and the "Currently:"
-// subheader all speak the same chip-stepper vocabulary.
+// Every badge in the app reads through this map, so the modal header, the
+// backlog table row, the my-backlog row, and the "Currently:" subheader all
+// speak the same three-state vocabulary.
 export const STATUS_LABEL: Record<ArticleBacklogStatus, string> = {
-  unassigned: 'Search sources',
-  'waiting-for-sources': 'Search sources',
-  'sources-searched': 'Approve sources',
-  'sources-approved': 'Prioritize sources',
-  'ready-for-llm-draft': 'Draft article',
-  'ready-for-editing': 'Review article',
-  'editing-in-progress': 'Review article',
-  'ready-to-publish': 'Article ready',
+  unassigned: 'Choose sources',
+  'waiting-for-sources': 'Choose sources',
+  'sources-searched': 'Choose sources',
+  'sources-approved': 'Choose sources',
+  'ready-for-llm-draft': 'Choose sources',
+  'ready-for-editing': 'Drafted',
+  'editing-in-progress': 'Drafted',
+  'ready-to-publish': 'Drafted',
   published: 'Published',
 };
+
+// Three editor-facing buckets the badge/dropdown collapse onto. Used to keep the
+// status filters bucket-aware (so "Choose sources" matches every pre-draft
+// status, not just the representative value) and to highlight the right option
+// in the manual dropdown.
+export type StatusBucket = 'choose-sources' | 'drafted' | 'published';
+
+export function statusBucket(s: ArticleBacklogStatus): StatusBucket {
+  switch (s) {
+    case 'ready-for-editing':
+    case 'editing-in-progress':
+    case 'ready-to-publish':
+      return 'drafted';
+    case 'published':
+      return 'published';
+    default:
+      return 'choose-sources';
+  }
+}
+
+/** The STATUS_OPTIONS value that represents a status's bucket — used as the
+ *  `value` of the manual <select> so it highlights the correct collapsed
+ *  option even when the row sits at an intermediate (non-settable) status. */
+export function statusOptionValue(s: ArticleBacklogStatus): ArticleBacklogStatus {
+  switch (statusBucket(s)) {
+    case 'drafted':
+      return 'ready-for-editing';
+    case 'published':
+      return 'published';
+    default:
+      return 'waiting-for-sources';
+  }
+}
 
 // Translation from current status → human-readable next step. Surfaced
 // in the "Next action" column so editors can see what to do without

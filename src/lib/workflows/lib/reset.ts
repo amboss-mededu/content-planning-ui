@@ -11,6 +11,7 @@
  */
 
 import { deleteArticleBacklogForSpecialtyAsAdmin } from '@/lib/data/article-backlog';
+import { deleteArticleDraftRunsForSpecialtyAsAdmin } from '@/lib/data/article-draft-runs';
 import { deleteArticleLitSearchRunsForSpecialtyAsAdmin } from '@/lib/data/article-lit-search-runs';
 import { deleteArticleReviewsForSpecialtyAsAdmin } from '@/lib/data/article-reviews';
 import { deleteArticleSourcesForSpecialtyAsAdmin } from '@/lib/data/article-sources';
@@ -107,6 +108,7 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       // history, and any drafts written from them.
       await deleteArticleSourcesForSpecialtyAsAdmin(specialtySlug);
       await deleteArticleLitSearchRunsForSpecialtyAsAdmin(specialtySlug);
+      await deleteArticleDraftRunsForSpecialtyAsAdmin(specialtySlug);
       await deleteWritingRunsForSpecialtyAsAdmin(specialtySlug);
       break;
   }
