@@ -1,7 +1,10 @@
 import { Suspense } from 'react';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import { listArticleReviews } from '@/lib/data/article-reviews';
-import { listArticleSourceCount } from '@/lib/data/article-sources';
+import {
+  listArticleSourceCount,
+  listArticleSourcesByArticleKey,
+} from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodeSources } from '@/lib/data/code-sources';
 import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
@@ -9,6 +12,7 @@ import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import { getCurrentPipelineRun, getLatestStageContexts } from '@/lib/data/pipeline';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import { getPipelineStageStates, getSpecialty } from '@/lib/data/specialties';
+import { canStartDraft } from '../../_components/pipeline-stage-gates';
 import { SkeletonLine } from '../../_components/skeleton';
 import { PipelineDashboard } from './_components/pipeline-dashboard';
 
@@ -73,6 +77,7 @@ async function PipelineData({ slug }: { slug: string }) {
     articleReviewRecs,
     articleBacklogRecs,
     articleSourceCount,
+    sourcesByKey,
     stageStates,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
@@ -87,6 +92,7 @@ async function PipelineData({ slug }: { slug: string }) {
     listArticleReviews(slug),
     listArticleBacklog(slug),
     listArticleSourceCount(slug),
+    listArticleSourcesByArticleKey(slug),
     getPipelineStageStates(slug),
   ]);
 
@@ -108,9 +114,15 @@ async function PipelineData({ slug }: { slug: string }) {
   let searched = 0;
   let laterStages = 0;
   let approvedNew = 0;
-  // Eligibility list for the bulk-draft card. We collect the underlying
-  // consolidatedArticles PB ids so the card can POST them straight to
-  // the bulk endpoint.
+  // Eligibility list for the bulk-draft card. An article is draftable once
+  // its sources are settled — at least one approved source and every approved
+  // source carrying a Cortex ID (`canStartDraft`). This mirrors the modal's
+  // per-article Draft button and is a strict subset of the write-article
+  // endpoint's own gate, so every counted article actually enqueues. The
+  // backlog status is no longer consulted (the collapsed badge can't sit at
+  // `ready-for-llm-draft` anymore). We collect the underlying
+  // consolidatedArticles PB ids so the card can POST them straight to the
+  // bulk endpoint.
   const draftEligibleIds: string[] = [];
   for (const r of consolidatedArticleRecs) {
     const id = r.id;
@@ -130,7 +142,7 @@ async function PipelineData({ slug }: { slug: string }) {
     } else {
       laterStages++;
     }
-    if (status === 'ready-for-llm-draft') draftEligibleIds.push(id);
+    if (canStartDraft(sourcesByKey[key] ?? [])) draftEligibleIds.push(id);
   }
   const litSearchStats = {
     approvedTotal: approvedNew,

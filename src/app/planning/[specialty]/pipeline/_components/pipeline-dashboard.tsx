@@ -56,8 +56,9 @@ export function PipelineDashboard({
     searched: number;
     laterStages: number;
   };
-  /** newArticleSuggestions PB ids whose backlog status is
-   *  `ready-for-llm-draft` — eligible to enqueue for article writing. */
+  /** newArticleSuggestions PB ids whose sources are settled — at least one
+   *  approved source and every approved source carrying a Cortex ID — i.e.
+   *  eligible to enqueue for article writing. */
   draftEligibleIds: string[];
   stageHasOutput: Record<string, boolean>;
   stageStates: PipelineStageStates;
@@ -234,8 +235,8 @@ export function PipelineDashboard({
               <H2>Draft articles</H2>
               <Text size="s" color="secondary">
                 {draftEligibleIds.length === 0
-                  ? 'Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
-                  : `Enqueue the 6-pass LLM article draft for every article in Ready for LLM draft. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
+                  ? 'Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
+                  : `Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
               </Text>
               <BulkDraftArticlesButton
                 specialtySlug={specialtySlug}
