@@ -12,6 +12,7 @@ import {
   resetArticleBacklogStatusAsAdmin,
   setArticleBacklogAssignee,
   setArticleBacklogAssigneeAsAdmin,
+  setArticleBacklogDraftFolderUrl,
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
 import { deleteArticleDraftRunsByArticleKeyAsAdmin } from '@/lib/data/article-draft-runs';
@@ -574,6 +575,29 @@ export async function setBacklogAssignee(
     articleKey,
     articleRecordId,
     assigneeEmail,
+    user?.email ?? null,
+  );
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+export async function setBacklogDraftFolderUrl(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  draftFolderUrl: string,
+): Promise<void> {
+  const trimmed = draftFolderUrl.trim();
+  // Reject unsafe schemes (e.g. javascript:) — same guard as submitSourceUrl;
+  // empty clears the pointer.
+  if (trimmed && !isSafeUrl(trimmed)) {
+    throw new Error('URL must start with http:// or https://');
+  }
+  const user = await getCurrentUser();
+  await setArticleBacklogDraftFolderUrl(
+    slug,
+    articleKey,
+    articleRecordId,
+    trimmed,
     user?.email ?? null,
   );
   revalidatePath(`/planning/${slug}`, 'layout');

@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
-import type { ArticleDraftRunRecord } from '@/lib/pb/types';
+import type { ArticleDraftLink, ArticleDraftRunRecord } from '@/lib/pb/types';
 import {
   claimArticleDraftRunWithClient,
   type DraftRunClaim,
@@ -24,7 +24,10 @@ export { claimArticleDraftRunWithClient, type DraftRunClaim };
 export type DraftRunPatch = {
   status: 'completed' | 'failed';
   errorMessage?: string;
+  /** Google Drive folder URL holding the run's outputs. */
   outputUrl?: string;
+  /** Per-stage drafts (`{ name, link }`) written to that folder. */
+  outputLinks?: ArticleDraftLink[];
 };
 
 /**
@@ -138,6 +141,7 @@ export async function finishArticleDraftRunAsAdmin(
     finishedAt: Date.now(),
     errorMessage: patch.errorMessage ?? '',
     ...(patch.outputUrl !== undefined ? { outputUrl: patch.outputUrl } : {}),
+    ...(patch.outputLinks !== undefined ? { outputLinks: patch.outputLinks } : {}),
   });
 }
 

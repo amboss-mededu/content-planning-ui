@@ -145,6 +145,48 @@ export async function setArticleBacklogAssigneeAsAdmin(
   );
 }
 
+/** User-side writer for the inline-editable "Google Drive URL" cell. */
+export async function setArticleBacklogDraftFolderUrl(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  draftFolderUrl: string,
+  changedByEmail: string | null,
+): Promise<void> {
+  const pb = await userClient();
+  await upsertBacklog(
+    pb,
+    slug,
+    articleKey,
+    articleRecordId,
+    { draftFolderUrl },
+    changedByEmail,
+  );
+}
+
+/**
+ * Admin-side writer used by the n8n draft callback — both the early
+ * "folder ready" ping (while the draft is still running) and on completion,
+ * so a re-run that produced a fresh folder overwrites the pointer.
+ */
+export async function setArticleBacklogDraftFolderUrlAsAdmin(
+  slug: string,
+  articleKey: string,
+  articleRecordId: string,
+  draftFolderUrl: string,
+  changedByEmail: string | null,
+): Promise<void> {
+  const pb = await createAdminClient();
+  await upsertBacklog(
+    pb,
+    slug,
+    articleKey,
+    articleRecordId,
+    { draftFolderUrl },
+    changedByEmail,
+  );
+}
+
 /**
  * Returns the deleted articleKey, or null if no row existed.
  */

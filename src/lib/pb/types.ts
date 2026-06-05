@@ -193,6 +193,12 @@ export interface ArticleBacklogRecord extends PbRecord {
   /** ms since epoch */
   lastChangedAt?: number;
   notes?: string;
+  /**
+   * Editable per-article pointer to the latest draft's Google Drive folder.
+   * Auto-filled by the n8n draft callback (early ping + on completion, so a
+   * re-run overwrites it) and manually editable in the backlog + article modal.
+   */
+  draftFolderUrl?: string;
 }
 
 // --- Collection: articleSources --------------------------------------------
@@ -282,6 +288,14 @@ export interface ArticleLitSearchRunRecord extends PbRecord {
 
 export type ArticleDraftRunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+/** One generated draft (a stage output) written to the Drive output folder. */
+export interface ArticleDraftLink {
+  /** File name as it lands in Drive, e.g. "isoniazid poisoning copy edit". */
+  name: string;
+  /** Shareable Google Docs / Drive URL for that file. */
+  link: string;
+}
+
 export interface ArticleDraftRunRecord extends PbRecord {
   specialtySlug: string;
   articleKey: string;
@@ -296,8 +310,14 @@ export interface ArticleDraftRunRecord extends PbRecord {
   handle?: string;
   language?: string;
   articleLength?: string;
-  /** Google Drive doc/folder URL returned by the n8n callback on success. */
+  /** Google Drive folder URL returned by the n8n callback on success. */
   outputUrl?: string;
+  /**
+   * Per-stage drafts written to the output folder (`primary edit`, …,
+   * `copy edit`, `QC`), each as `{ name, link }`. Set by the success callback
+   * alongside `outputUrl`. Empty/absent for legacy runs.
+   */
+  outputLinks?: ArticleDraftLink[];
 }
 
 // --- Collection: reviewComments --------------------------------------------
