@@ -19,6 +19,7 @@ import {
 } from '@/lib/data/articles';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
 import { getSpecialtyRecordAsAdmin } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleSuggestionRecord, CodeCategoryRecord } from '@/lib/pb/types';
@@ -483,7 +484,7 @@ export async function consolidatePrimaryWorkflow(
       stagingSections: totalSections,
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     log('pipeline').error('consolidatePrimaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_primary', msg);
     if (!input.skipRunStatusUpdate) {

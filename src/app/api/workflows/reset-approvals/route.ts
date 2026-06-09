@@ -15,6 +15,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { getSpecialty } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
 import { resetApprovalsForSpecialty } from '@/lib/workflows/consolidation/reset-approvals';
@@ -43,9 +44,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, ...stats });
   } catch (e) {
     log('reset-approvals').error('failed', e);
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
   }
 }

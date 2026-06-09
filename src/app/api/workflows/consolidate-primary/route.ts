@@ -26,6 +26,7 @@ import {
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
 import { consolidateArticlesSecondaryWorkflow } from '@/lib/workflows/consolidation/articles-secondary';
@@ -161,12 +162,9 @@ export async function POST(req: NextRequest) {
     await updatePipelineRun(runId, {
       status: 'failed',
       finishedAt: Date.now(),
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     }).catch(() => {});
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
   }
 
   let result: {
@@ -238,12 +236,9 @@ export async function POST(req: NextRequest) {
       await updatePipelineRun(runId, {
         status: 'failed',
         finishedAt: Date.now(),
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       }).catch(() => {});
-      return NextResponse.json(
-        { error: e instanceof Error ? e.message : String(e) },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: errorMessage(e) }, { status: 500 });
     }
   } else {
     // Defer with `after()` so Next keeps the work alive past the response. A
@@ -268,7 +263,7 @@ export async function POST(req: NextRequest) {
         await updatePipelineRun(runId, {
           status: 'failed',
           finishedAt: Date.now(),
-          error: e instanceof Error ? e.message : String(e),
+          error: errorMessage(e),
         }).catch(() => {});
       }),
     );

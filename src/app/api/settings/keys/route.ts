@@ -18,6 +18,7 @@ import {
   type ProviderId,
   setKeyForCurrentUser,
 } from '@/lib/data/user-api-keys';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 
 const PostBody = z.object({
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     await setKeyForCurrentUser({ provider: body.provider, key: body.key });
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorMessage(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -71,7 +72,7 @@ export async function DELETE(req: NextRequest) {
     await clearKeyForCurrentUser(body.provider);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorMessage(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -14,6 +14,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   type ArticleManagerPhase,
@@ -358,7 +359,7 @@ export function UpdateReviewView({
     try {
       await onDecideSection(sectionKey, rowId, status, notes);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : String(err));
+      setReviewError(errorMessage(err));
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
       delete revertedReviews[sectionKey];
@@ -384,7 +385,7 @@ export function UpdateReviewView({
     try {
       await onDecideSection(sectionKey, rowId, null);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : String(err));
+      setReviewError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }

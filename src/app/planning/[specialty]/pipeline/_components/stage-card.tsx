@@ -18,6 +18,7 @@ import type {
   PipelineRunRow,
   PipelineStageRow,
 } from '@/lib/data/pipeline';
+import { errorMessage } from '@/lib/error-message';
 import { isStageRunningFresh, type PipelineCardState } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import {
@@ -675,8 +676,7 @@ export function StageCard({
         if (!cancelled) setLazyMapHistory(body as MapCodesHistory);
       })
       .catch((err) => {
-        if (!cancelled)
-          setMapHistoryError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setMapHistoryError(errorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setMapHistoryLoading(false);

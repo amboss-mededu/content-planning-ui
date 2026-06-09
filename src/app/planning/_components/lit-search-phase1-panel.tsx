@@ -3,6 +3,7 @@
 import { Button, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type { ArticleLitSearchRunRecord } from '@/lib/pb/types';
 import { CancelLitSearchButton } from './cancel-lit-search-button';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
@@ -120,7 +121,7 @@ export function LitSearchPhase1Panel({
         return;
       }
     } catch (e) {
-      setClickError(e instanceof Error ? e.message : String(e));
+      setClickError(errorMessage(e));
       setOptimisticBusy(false);
     }
   }, [isRunning, slug, articleRecordId, onTriggered]);

@@ -11,6 +11,7 @@
  * immediately and the work continues in the same Node process.
  */
 
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import { mapAndValidateCode } from '../lib/amboss-mcp';
 import {
@@ -262,7 +263,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
       await revalidateSpecialtyCache(input.specialtySlug);
       return;
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await markStageFailed(input.runId, 'map_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
     await clearInFlightForRun(input.runId);

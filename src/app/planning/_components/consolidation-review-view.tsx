@@ -3,6 +3,7 @@
 import { Badge, Button, Inline, Notification, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type {
   ArticleReviewRecord,
   ReviewCommentRecord,
@@ -437,7 +438,7 @@ export function ConsolidationReviewView({
       }
       router.refresh();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      setActionError(errorMessage(e));
     } finally {
       setIsRunningAll(false);
     }
@@ -470,7 +471,7 @@ export function ConsolidationReviewView({
       }
       router.refresh();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      setActionError(errorMessage(e));
     } finally {
       setIsResetting(false);
     }

@@ -20,6 +20,7 @@
 import { Badge, Button, Callout, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type { ArticleBacklogStatus } from '@/lib/pb/types';
 import { readSpecForStage } from '../[specialty]/pipeline/_components/model-selection-storage';
 
@@ -87,7 +88,7 @@ export function BacklogBulkToolbar({
       }
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }

@@ -17,6 +17,7 @@ import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
 import { clearStaleRunsForSpecialty } from '@/lib/workflows/lib/reset';
@@ -42,9 +43,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, cancelled });
   } catch (err) {
     log('clear-stale-runs').error('failed', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

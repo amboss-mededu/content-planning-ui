@@ -22,6 +22,7 @@ import {
   reapStaleDraftRunsAsAdmin,
 } from '@/lib/data/article-draft-runs';
 import { getSpecialty } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { dispatchDraftArticle } from '@/lib/workflows/draft-article';
 
 export async function POST(req: NextRequest) {
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
       files,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await finishArticleDraftRunAsAdmin(claim.record.id, {
       status: 'failed',
       errorMessage: `Dispatch failed: ${msg}`,

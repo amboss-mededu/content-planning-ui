@@ -16,6 +16,7 @@ import {
   deleteConsolidatedArticlesForSpecialtyAsAdmin,
   listNewArticleSuggestionsAsAdmin,
 } from '@/lib/data/articles';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleSuggestionRecord, CodeRecord } from '@/lib/pb/types';
@@ -287,7 +288,7 @@ export async function consolidateArticlesSecondaryWorkflow(
     await revalidateSpecialtyCache(input.specialtySlug);
     return { merged: finalRows.length };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     log('pipeline').error('consolidateArticlesSecondaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_articles', msg);
     if (!input.skipRunStatusUpdate) {

@@ -17,6 +17,7 @@
 import { google } from '@ai-sdk/google';
 import { generateText, stepCountIs } from 'ai';
 import { z } from 'zod';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
@@ -188,7 +189,7 @@ Identify the base hierarchies in the document and return exclusively an output i
     return modules;
   } catch (e) {
     const durationMs = Date.now() - started;
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await logEvent({
       runId: input.runId,
       stage: input.stage,
@@ -300,7 +301,7 @@ Extract all medical items from the document and return exclusively an output in 
     return codes;
   } catch (e) {
     const durationMs = Date.now() - started;
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await logEvent({
       runId: input.runId,
       stage: input.stage,
@@ -410,7 +411,7 @@ Extract all patient care and medical knowledge milestones from the document and 
     return milestones;
   } catch (e) {
     const durationMs = Date.now() - started;
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await logEvent({
       runId: input.runId,
       stage: input.stage,

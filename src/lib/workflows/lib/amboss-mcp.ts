@@ -22,6 +22,7 @@ import { generateText } from 'ai';
 import { z } from 'zod';
 import { env } from '@/env';
 import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-library';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
@@ -466,7 +467,7 @@ export async function mapAndValidateCode(input: {
       try {
         parsed = MappingOutputSchema.parse(parseAgentJson(result.text));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorMessage(e);
         await logEvent({
           runId: input.runId,
           stage: input.stage,

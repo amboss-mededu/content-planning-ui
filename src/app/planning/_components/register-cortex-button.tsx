@@ -16,6 +16,7 @@
 import { Badge, Button, Inline, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 
 type Props = {
   slug: string;
@@ -67,7 +68,7 @@ export function RegisterCortexButton({
       }
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

@@ -11,6 +11,7 @@ import {
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { refreshSpecialty } from '../../actions';
 
 type RerunStage = 'extract_codes' | 'extract_milestones';
@@ -84,7 +85,7 @@ export function RerunExtractionButton({
       router.refresh();
       onResetComplete();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

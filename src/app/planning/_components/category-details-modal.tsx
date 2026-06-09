@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
+import { errorMessage } from '@/lib/error-message';
 import { getConsolidationActionLabel } from '@/lib/workflows/consolidation/buckets';
 import { listBucketCodes } from '../[specialty]/actions';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
@@ -151,7 +152,7 @@ export function CategoryDetailsModal({
         if (!cancelled) setCodes(rows);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errorMessage(e));
       });
     return () => {
       cancelled = true;

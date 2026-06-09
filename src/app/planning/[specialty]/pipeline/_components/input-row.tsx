@@ -2,6 +2,7 @@
 
 import { Button, Callout, H6, Input, Select, Stack } from '@amboss/design-system';
 import { useRef } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 
 const ADD_SOURCE_SENTINEL = '__add_new_source__';
@@ -71,7 +72,7 @@ export function InputRow({
       const uploaded = await uploadPdf(file);
       onChange({ upload: uploaded, uploading: false });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       onChange({ uploading: false, uploadError: message });
     } finally {
       if (fileInput.current) fileInput.current.value = '';

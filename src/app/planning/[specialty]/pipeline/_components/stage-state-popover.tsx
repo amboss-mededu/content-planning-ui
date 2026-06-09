@@ -3,6 +3,7 @@
 import { Badge, Box, Icon, Popover, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { canSkipPipelineStage, type PipelineCardState } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import { setPipelineStageState } from '../../actions';
@@ -62,7 +63,7 @@ export function StageStatePopover({
         router.refresh();
       } catch (err) {
         onOptimisticStateChange?.(previous);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
       }
     });
   };

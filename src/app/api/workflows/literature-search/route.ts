@@ -39,6 +39,7 @@ import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { dispatchLiteratureSearch } from '@/lib/workflows/literature-search';
 
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
       runId,
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await Promise.all(
       claimed.map((article) =>
         finishArticleLitSearchRunAsAdmin(article.litSearchRunId, {

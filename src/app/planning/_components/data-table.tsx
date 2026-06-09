@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { errorMessage } from '@/lib/error-message';
 
 /**
  * Column definition.
@@ -1833,7 +1834,7 @@ function EditableCell<T>({
       await editable.onSave(row, next);
       setEditing(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }

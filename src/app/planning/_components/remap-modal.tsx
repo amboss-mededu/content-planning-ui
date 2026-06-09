@@ -4,6 +4,7 @@ import { Callout, Modal, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
+import { errorMessage } from '@/lib/error-message';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
 import {
@@ -112,7 +113,7 @@ export function RemapModal({
       router.refresh();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

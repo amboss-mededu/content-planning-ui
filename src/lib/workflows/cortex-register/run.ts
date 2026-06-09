@@ -7,6 +7,7 @@ import {
   markSourceCortexRegisteredAsAdmin,
 } from '@/lib/data/article-sources';
 import { getNewArticleSuggestionByIdAsAdmin } from '@/lib/data/articles';
+import { errorMessage } from '@/lib/error-message';
 import { registerCortexSource } from '@/lib/integrations/cortex';
 import { log } from '@/lib/log';
 
@@ -80,7 +81,7 @@ export async function runCortexRegistration(input: {
         sourceId: s.id,
         title: s.title,
         status: 'failed',
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       });
     }
   }

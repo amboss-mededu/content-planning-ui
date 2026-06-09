@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { readSpecForStage } from '../[specialty]/pipeline/_components/model-selection-storage';
 
 export type ConsolidationRerunOptions = {
@@ -124,7 +125,7 @@ export function useConsolidationRerun(slug: string) {
         }
         router.refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       } finally {
         inFlight.current.delete(category);
         bump();

@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { getCode, patchCode } from '@/lib/data/codes';
 import { getConsolidationLockState } from '@/lib/data/pipeline';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
 
@@ -95,7 +96,7 @@ export async function PATCH(
     if (e instanceof ClientResponseError && e.status === 404) {
       return NextResponse.json({ error: 'code not found' }, { status: 404 });
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     log('codes').error('PATCH failed:', e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }

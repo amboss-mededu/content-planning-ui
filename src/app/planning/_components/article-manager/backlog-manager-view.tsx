@@ -15,6 +15,7 @@ import {
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type {
   ArticleBacklogStatus,
@@ -302,9 +303,7 @@ export function BacklogManagerView({
                     } catch (e) {
                       log('reset-article').error('failed', e);
                       setResetting(false);
-                      window.alert(
-                        `Reset failed: ${e instanceof Error ? e.message : String(e)}`,
-                      );
+                      window.alert(`Reset failed: ${errorMessage(e)}`);
                     }
                   }}
                   style={{
@@ -666,7 +665,7 @@ function ReSearchSourcesButton({
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
