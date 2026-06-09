@@ -19,53 +19,42 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getCurrentUser } from '@/lib/auth';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import type { ApprovableStage } from '@/lib/workflows/lib/approval';
 import { extractCodesPhase2 } from '@/lib/workflows/preprocessing/extract-codes';
 import { extractMilestonesPhase2 } from '@/lib/workflows/preprocessing/extract-milestones';
 
-type Body = {
-  runId?: string;
-  specialtySlug?: string;
-  stage?: ApprovableStage;
-  approved?: boolean;
-  // `approvedBy` is intentionally NOT in the body shape — the server stamps
-  // the authenticated user's email on the audit trail, never trusts a value
-  // from the client.
-  note?: string;
-};
-
-const APPROVABLE_STAGES: ReadonlySet<ApprovableStage> = new Set([
+const APPROVABLE_STAGES = [
   'extract_codes',
   'extract_milestones',
-]);
+] as const satisfies readonly ApprovableStage[];
+
+// `approvedBy` is intentionally NOT in the body shape — the server stamps the
+// authenticated user's email on the audit trail, never trusts a value from the
+// client.
+const Body = z.object({
+  runId: z.string().min(1, 'runId required'),
+  specialtySlug: z.string().min(1, 'specialtySlug required'),
+  stage: z.enum(APPROVABLE_STAGES, {
+    message: `stage must be one of ${APPROVABLE_STAGES.join(', ')}`,
+  }),
+  approved: z.boolean({ message: 'approved (boolean) required' }),
+  note: z.string().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const body = (await req.json().catch(() => ({}))) as Body;
-  if (!body.runId) {
-    return NextResponse.json({ error: 'runId required' }, { status: 400 });
-  }
-  if (!body.specialtySlug) {
-    return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
-  }
-  if (!body.stage || !APPROVABLE_STAGES.has(body.stage)) {
-    return NextResponse.json(
-      {
-        error: `stage must be one of ${[...APPROVABLE_STAGES].join(', ')}`,
-      },
-      { status: 400 },
-    );
-  }
-  if (typeof body.approved !== 'boolean') {
-    return NextResponse.json({ error: 'approved (boolean) required' }, { status: 400 });
-  }
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
 
   const approvedBy = user.email ?? user.name ?? user._id;
-  console.log('[approve] resolving stage', {
+  log('approve').info('resolving stage', {
     runId: body.runId,
     stage: body.stage,
     approved: body.approved,

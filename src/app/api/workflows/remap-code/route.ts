@@ -7,6 +7,7 @@
 
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { getCodeAsAdmin } from '@/lib/data/codes';
 import {
@@ -16,27 +17,30 @@ import {
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { clearMappingForCode } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { mapCodesWorkflow } from '@/lib/workflows/mapping/map-codes';
 
-type Body = {
-  specialtySlug?: string;
-  code?: string;
-  contentBase?: string;
-  language?: string;
-  checkAgainstLibrary?: boolean;
-  additionalInstructions?: string;
-  primaryModel?: unknown;
-  backupModel?: unknown;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  code: z.string().optional(),
+  contentBase: z.string().optional(),
+  language: z.string().optional(),
+  checkAgainstLibrary: z.boolean().optional(),
+  additionalInstructions: z.string().optional(),
+  primaryModel: z.unknown().optional(),
+  backupModel: z.unknown().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug?.trim();
   const code = body.code?.trim();
   if (!slug || !code) {
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
   const primaryModel = primaryParse.spec;
   const backupModel = backupParse.spec;
 
-  console.log('[remap-code]', { slug, code });
+  log('remap-code').info({ slug, code });
 
   const lock = await getConsolidationLockState(slug);
   if (lock.locked) {
@@ -129,7 +133,7 @@ export async function POST(req: NextRequest) {
       backupModel,
       apiKeys,
     }).catch((e) => {
-      console.error('[remap-code] workflow unhandled rejection', e);
+      log('remap-code').error('workflow unhandled rejection', e);
     }),
   );
 

@@ -24,6 +24,7 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { extractCodes } from '@/app/planning/_components/code-utils';
 import { env } from '@/env';
 import { requireUserResponse } from '@/lib/auth';
@@ -38,22 +39,24 @@ import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { dispatchLiteratureSearch } from '@/lib/workflows/literature-search';
 
-type Body = {
-  specialtySlug?: string;
-  articleRecordIds?: string[];
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  articleRecordIds: z.array(z.string()).optional().catch(undefined),
   /** Re-search: bypass the waiting-for-sources eligibility gate so an
    *  article that already has sources can be searched again. Requires an
    *  explicit `articleRecordIds` set so it can't re-search the whole
    *  backlog. The callback replaces the prior sources with the fresh set. */
-  force?: boolean;
-};
+  force: z.boolean().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug;
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });

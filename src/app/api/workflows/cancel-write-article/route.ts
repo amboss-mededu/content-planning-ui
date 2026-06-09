@@ -11,19 +11,22 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import {
   cancelWritingRunAsAdmin,
   getWritingRunAsAdmin,
 } from '@/lib/data/article-writing';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
 
-type Body = { runId?: string };
+const Body = z.object({ runId: z.string().optional() });
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
 
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const runId = body.runId?.trim();
   if (!runId) {
     return NextResponse.json({ error: 'runId required' }, { status: 400 });

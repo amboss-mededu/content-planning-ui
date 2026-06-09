@@ -15,8 +15,14 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { getKeyForUserAsAdmin, markTestedForCurrentUser } from '@/lib/data/user-api-keys';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+
+const Body = z.object({
+  provider: z.unknown().optional(),
+});
 
 type Provider = 'google' | 'anthropic' | 'openai';
 
@@ -33,7 +39,8 @@ function isProvider(v: unknown): v is Provider {
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as { provider?: unknown };
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   if (!isProvider(body.provider)) {
     return NextResponse.json(
       { ok: false, message: 'provider must be google, anthropic, or openai' },

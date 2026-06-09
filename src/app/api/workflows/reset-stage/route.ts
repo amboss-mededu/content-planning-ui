@@ -14,43 +14,37 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import { resetStageCascade } from '@/lib/workflows/lib/reset';
 
-const VALID_STAGES: ReadonlySet<StageName> = new Set([
+const VALID_STAGES = [
   'extract_codes',
   'extract_milestones',
   'map_codes',
   'consolidate_primary',
   'consolidate_articles',
   'consolidate_sections',
-]);
+] as const satisfies readonly StageName[];
 
-type Body = {
-  runId?: string;
-  specialtySlug?: string;
-  stage?: StageName;
-};
+const Body = z.object({
+  runId: z.string().min(1, 'runId and specialtySlug required'),
+  specialtySlug: z.string().min(1, 'runId and specialtySlug required'),
+  stage: z.enum(VALID_STAGES, {
+    message: `stage must be one of ${VALID_STAGES.join(', ')}`,
+  }),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
-  if (!body.runId || !body.specialtySlug) {
-    return NextResponse.json(
-      { error: 'runId and specialtySlug required' },
-      { status: 400 },
-    );
-  }
-  if (!body.stage || !VALID_STAGES.has(body.stage)) {
-    return NextResponse.json(
-      { error: `stage must be one of ${[...VALID_STAGES].join(', ')}` },
-      { status: 400 },
-    );
-  }
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
 
-  console.log('[reset-stage]', body);
+  log('reset-stage').info(body);
   const reset = await resetStageCascade({
     runId: body.runId,
     specialtySlug: body.specialtySlug,
