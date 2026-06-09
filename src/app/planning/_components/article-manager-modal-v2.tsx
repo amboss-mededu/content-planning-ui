@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { log } from '@/lib/log';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
@@ -354,7 +355,9 @@ function ReviewManagerView({
     const rowId = current.id;
     const articleKey = current.articleKey ?? '';
     if (!articleKey) {
-      console.error('decide: row has no articleKey — cannot persist review');
+      log('article-manager').error(
+        'decide: row has no articleKey — cannot persist review',
+      );
       return;
     }
     const notesValue = notesByKey[articleKey] ?? '';
@@ -373,7 +376,7 @@ function ReviewManagerView({
     try {
       await onDecideArticle(articleKey, rowId, status, notesValue);
     } catch (err) {
-      console.error('decideArticle failed', err);
+      log('article-manager').error('decideArticle failed', err);
       // Roll back the modal-local snapshot — the hook has already
       // rolled back its patches.
       const revertedReviews = { ...reviews };
@@ -403,7 +406,7 @@ function ReviewManagerView({
     try {
       await onDecideArticle(articleKey, rowId, null);
     } catch (err) {
-      console.error('decideArticle (reset) failed', err);
+      log('article-manager').error('decideArticle (reset) failed', err);
     } finally {
       setSubmitting(false);
     }
@@ -871,7 +874,7 @@ function BacklogManagerView({
                       }
                       setResetting(false);
                     } catch (e) {
-                      console.error('[reset-article] failed', e);
+                      log('reset-article').error('failed', e);
                       setResetting(false);
                       window.alert(
                         `Reset failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -1216,7 +1219,7 @@ function SourcesTable({
     try {
       await submitSourcesOrder(slug, next);
     } catch (e) {
-      console.error('[sources-order] submit failed', e);
+      log('sources-order').error('submit failed', e);
     }
   }, [dragId, dropId, order, slug]);
 
@@ -1393,7 +1396,7 @@ function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: str
     try {
       await submitSourceCortexId(slug, source.id, trimmed);
     } catch (e) {
-      console.error('[source-id] submit failed', e);
+      log('source-id').error('submit failed', e);
       setValue(current);
     } finally {
       setSubmitting(false);
@@ -1471,7 +1474,7 @@ function SourceUrlCell({ source, slug }: { source: ArticleSourceRecord; slug: st
     try {
       await submitSourceUrl(slug, source.id, trimmed);
     } catch (e) {
-      console.error('[source-url] submit failed', e);
+      log('source-url').error('submit failed', e);
       setValue(current);
     } finally {
       setSubmitting(false);
@@ -1526,7 +1529,7 @@ function SourceDoiCell({ source, slug }: { source: ArticleSourceRecord; slug: st
     try {
       await submitSourceDoi(slug, source.id, trimmed);
     } catch (e) {
-      console.error('[source-doi] submit failed', e);
+      log('source-doi').error('submit failed', e);
       setValue(current);
     } finally {
       setSubmitting(false);
@@ -1587,7 +1590,7 @@ function SourceNotesCell({
     try {
       await submitSourceNotes(slug, source.id, trimmed);
     } catch (e) {
-      console.error('[source-notes] submit failed', e);
+      log('source-notes').error('submit failed', e);
       setValue(current);
     } finally {
       setSubmitting(false);
@@ -1651,7 +1654,7 @@ function SourceDecisionCell({
         await submitSourceReview(slug, source.id, next);
       } catch (e) {
         setStatus(source.reviewStatus ?? null);
-        console.error('[source-review] submit failed', e);
+        log('source-review').error('submit failed', e);
       } finally {
         setSubmitting(false);
       }

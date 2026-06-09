@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { log } from '@/lib/log';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleLitSearchRunRecord } from '@/lib/pb/types';
 import { maybeFinalizePipelineRun } from '@/lib/workflows/literature-search/finalize';
@@ -85,7 +86,7 @@ export async function reapStaleLitSearchRunsAsAdmin(slug?: string): Promise<void
       ),
     );
   } catch (e) {
-    console.error('[lit-search] reapStaleLitSearchRunsAsAdmin failed', {
+    log('lit-search').error('reapStaleLitSearchRunsAsAdmin failed', {
       slug,
       error: e instanceof Error ? e.message : String(e),
     });

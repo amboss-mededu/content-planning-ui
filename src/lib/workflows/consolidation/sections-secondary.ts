@@ -17,6 +17,7 @@ import {
   deleteConsolidatedSectionsForCategoriesAsAdmin,
   deleteConsolidatedSectionsForSpecialtyAsAdmin,
 } from '@/lib/data/sections';
+import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleSuggestionRecord, CodeRecord } from '@/lib/pb/types';
 import {
@@ -110,7 +111,7 @@ export type ConsolidateSectionsSecondaryStats = {
 export async function consolidateSectionsSecondaryWorkflow(
   input: ConsolidateSectionsSecondaryInput,
 ): Promise<ConsolidateSectionsSecondaryStats> {
-  console.log('[pipeline] consolidateSectionsSecondaryWorkflow start', {
+  log('pipeline').info('consolidateSectionsSecondaryWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
   });
@@ -303,7 +304,7 @@ export async function consolidateSectionsSecondaryWorkflow(
     return { merged: finalRows.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[pipeline] consolidateSectionsSecondaryWorkflow failed', msg);
+    log('pipeline').error('consolidateSectionsSecondaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_sections', msg);
     if (!input.skipRunStatusUpdate) {
       await updatePipelineRunStatus(input.runId, 'failed', msg);

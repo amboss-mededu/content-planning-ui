@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { log } from '@/lib/log';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
 
@@ -418,7 +419,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
       inserted++;
     } catch (e) {
       const pbErr = e as { status?: number; response?: { data?: unknown } };
-      console.error('[articleSources] insert rejected for row', {
+      log('articleSources').error('insert rejected for row', {
         index: i,
         articleKey,
         articleRecordId,

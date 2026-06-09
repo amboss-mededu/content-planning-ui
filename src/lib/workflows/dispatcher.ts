@@ -37,6 +37,7 @@ import {
 } from '@/lib/data/article-writing';
 import { getNewArticleSuggestionByIdAsAdmin } from '@/lib/data/articles';
 import { getKeyForUserAsAdmin } from '@/lib/data/user-api-keys';
+import { log } from '@/lib/log';
 import type { ArticleWritingRunRecord } from '@/lib/pb/types';
 import type { ModelSpec, ProviderApiKeys, ProviderId, ReasoningLevel } from './lib/llm';
 import { writeArticleWorkflow } from './writing/write-article';
@@ -162,7 +163,7 @@ async function dispatchOne(run: ArticleWritingRunRecord): Promise<void> {
       requestedByEmail: claimed.requestedByEmail ?? null,
     });
   } catch (e) {
-    console.error('[dispatcher] dispatch failed', run.id, e);
+    log('dispatcher').error('dispatch failed', run.id, e);
     await updateWritingRunAsAdmin(run.id, {
       status: 'failed',
       finishedAt: Date.now(),
@@ -189,7 +190,7 @@ async function tick(): Promise<void> {
       }
     }
   } catch (e) {
-    console.error('[dispatcher] tick failed', e);
+    log('dispatcher').error('tick failed', e);
   } finally {
     if (!state.stopped) {
       state.pollTimer = setTimeout(tick, POLL_MS);
@@ -205,12 +206,12 @@ export async function startWritingDispatcher(): Promise<void> {
   try {
     const reaped = await reapStuckWritingRunsAsAdmin();
     if (reaped > 0) {
-      console.log(`[dispatcher] reaped ${reaped} stuck run(s) from previous process`);
+      log('dispatcher').info(`reaped ${reaped} stuck run(s) from previous process`);
     }
   } catch (e) {
-    console.error('[dispatcher] reap stuck failed', e);
+    log('dispatcher').error('reap stuck failed', e);
   }
-  console.log(`[dispatcher] starting · max=${MAX_CONCURRENT} · poll=${POLL_MS}ms`);
+  log('dispatcher').info(`starting · max=${MAX_CONCURRENT} · poll=${POLL_MS}ms`);
   void tick();
 }
 

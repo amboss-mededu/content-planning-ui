@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { log } from '@/lib/log';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleDraftLink, ArticleDraftRunRecord } from '@/lib/pb/types';
 import {
@@ -64,7 +65,7 @@ export async function reapStaleDraftRunsAsAdmin(slug?: string): Promise<void> {
       ),
     );
   } catch (e) {
-    console.error('[draft-article] reapStaleDraftRunsAsAdmin failed', {
+    log('draft-article').error('reapStaleDraftRunsAsAdmin failed', {
       slug,
       error: e instanceof Error ? e.message : String(e),
     });

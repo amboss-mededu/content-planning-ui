@@ -2,6 +2,7 @@
 
 import type { RecordModel, RecordSubscription } from 'pocketbase';
 import { useEffect, useRef, useState } from 'react';
+import { log } from '@/lib/log';
 import { getBrowserClient } from './browser';
 
 /**
@@ -72,7 +73,7 @@ export function useLiveCollection<T extends RecordModel>(
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        console.warn('PocketBase realtime subscribe failed', {
+        log('pb-live').warn('PocketBase realtime subscribe failed', {
           collection,
           filter,
           error: e,

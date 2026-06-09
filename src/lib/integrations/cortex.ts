@@ -2,6 +2,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { env } from '@/env';
+import { log } from '@/lib/log';
 
 /**
  * Minimal client for Cortex CMS source registration.
@@ -61,7 +62,7 @@ export async function registerCortexSource(
 ): Promise<CortexRegistrationResult> {
   if (!env.CORTEX_API_URL) {
     const stubId = `${STUB_PREFIX}${randomUUID()}`;
-    console.warn(
+    log('cortex').warn(
       `[CORTEX STUB] registerCortexSource — CORTEX_API_URL unset, returning ${stubId} for "${meta.title}"`,
     );
     return { cortexSourceId: stubId, stub: true };

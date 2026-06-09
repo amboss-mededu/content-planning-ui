@@ -6,6 +6,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
+import { log } from '@/lib/log';
 
 export async function revalidateSpecialtyCache(slug: string): Promise<void> {
   const tags = [
@@ -15,12 +16,12 @@ export async function revalidateSpecialtyCache(slug: string): Promise<void> {
     'specialty-phases',
     'specialties',
   ];
-  console.log('[pipeline] revalidateSpecialtyCache', { slug, tags });
+  log('pipeline').info('revalidateSpecialtyCache', { slug, tags });
   try {
     for (const t of tags) {
       revalidateTag(t, 'max');
     }
   } catch (e) {
-    console.warn('[pipeline] revalidateSpecialtyCache threw', e);
+    log('pipeline').warn('revalidateSpecialtyCache threw', e);
   }
 }

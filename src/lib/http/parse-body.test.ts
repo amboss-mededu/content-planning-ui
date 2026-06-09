@@ -20,12 +20,18 @@ async function statusAndBody(res: NextResponse) {
 
 describe('parseBody', () => {
   it('returns ok with validated data on a valid body', async () => {
-    const result = await parseBody(req(async () => ({ slug: 'cardio', count: 3 })), Schema);
+    const result = await parseBody(
+      req(async () => ({ slug: 'cardio', count: 3 })),
+      Schema,
+    );
     expect(result).toEqual({ ok: true, data: { slug: 'cardio', count: 3 } });
   });
 
   it('fails with a 400 carrying the first issue message', async () => {
-    const result = await parseBody(req(async () => ({ slug: '' })), Schema);
+    const result = await parseBody(
+      req(async () => ({ slug: '' })),
+      Schema,
+    );
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected failure');
     expect(await statusAndBody(result.response)).toEqual({
@@ -49,12 +55,18 @@ describe('parseBody', () => {
 
 describe('parseBodyOr400', () => {
   it('returns the typed data on success', async () => {
-    const body = await parseBodyOr400(req(async () => ({ slug: 'cardio' })), Schema);
+    const body = await parseBodyOr400(
+      req(async () => ({ slug: 'cardio' })),
+      Schema,
+    );
     expect(body).toEqual({ slug: 'cardio' });
   });
 
   it('returns a NextResponse on failure', async () => {
-    const body = await parseBodyOr400(req(async () => ({})), Schema);
+    const body = await parseBodyOr400(
+      req(async () => ({})),
+      Schema,
+    );
     expect(body).toBeInstanceOf(NextResponse);
   });
 });

@@ -19,6 +19,7 @@ import {
 } from '@/lib/data/articles';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
 import { getSpecialtyRecordAsAdmin } from '@/lib/data/specialties';
+import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleSuggestionRecord, CodeCategoryRecord } from '@/lib/pb/types';
 import {
@@ -344,7 +345,7 @@ async function updateCategoryDecisions({
 export async function consolidatePrimaryWorkflow(
   input: ConsolidatePrimaryInput,
 ): Promise<ConsolidatePrimaryStats> {
-  console.log('[pipeline] consolidatePrimaryWorkflow start', {
+  log('pipeline').info('consolidatePrimaryWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     consolidationCategories: input.consolidationCategories ?? null,
@@ -483,7 +484,7 @@ export async function consolidatePrimaryWorkflow(
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[pipeline] consolidatePrimaryWorkflow failed', msg);
+    log('pipeline').error('consolidatePrimaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_primary', msg);
     if (!input.skipRunStatusUpdate) {
       await updatePipelineRunStatus(input.runId, 'failed', msg);
