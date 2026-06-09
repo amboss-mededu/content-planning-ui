@@ -13,6 +13,7 @@
 
 import { getStageAsAdmin } from '@/lib/data/pipeline';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
+import { log } from '@/lib/log';
 import {
   markStageAwaitingApproval,
   markStageCompleted,
@@ -39,7 +40,7 @@ export type ExtractMilestonesInput = {
 export async function extractMilestonesPhase1(
   input: ExtractMilestonesInput,
 ): Promise<void> {
-  console.log('[pipeline] extractMilestonesPhase1 start', {
+  log('pipeline').info('extractMilestonesPhase1 start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
@@ -116,7 +117,7 @@ export async function extractMilestonesPhase2(input: {
   approvedBy?: string;
   note?: string;
 }): Promise<void> {
-  console.log('[pipeline] extractMilestonesPhase2', {
+  log('pipeline').info('extractMilestonesPhase2', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     approved: input.approved,

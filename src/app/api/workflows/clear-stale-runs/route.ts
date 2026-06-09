@@ -15,29 +15,33 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { clearStaleRunsForSpecialty } from '@/lib/workflows/lib/reset';
 
-type Body = {
-  specialtySlug?: string;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   if (!body.specialtySlug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
   }
 
-  console.log('[clear-stale-runs]', body);
+  log('clear-stale-runs').info(body);
   try {
     const cancelled = await clearStaleRunsForSpecialty(body.specialtySlug);
     revalidateTag(`pipeline:${body.specialtySlug}`, 'max');
     revalidateTag('specialty-phases', 'max');
     return NextResponse.json({ ok: true, cancelled });
   } catch (err) {
-    console.error('[clear-stale-runs] failed', err);
+    log('clear-stale-runs').error('failed', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },

@@ -18,6 +18,7 @@
 
 import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
+import { log } from '@/lib/log';
 import {
   markStageCompleted,
   markStageFailed,
@@ -47,7 +48,7 @@ export type ExtractCodesInput = {
 };
 
 export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void> {
-  console.log('[pipeline] extractCodesPhase1 start', {
+  log('pipeline').info('extractCodesPhase1 start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
@@ -203,7 +204,7 @@ export async function extractCodesPhase2(input: {
   approvedBy?: string;
   note?: string;
 }): Promise<void> {
-  console.log('[pipeline] extractCodesPhase2', {
+  log('pipeline').info('extractCodesPhase2', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     approved: input.approved,

@@ -14,6 +14,7 @@
 
 import { env } from '@/env';
 import { finishArticleLitSearchRunAsAdmin } from '@/lib/data/article-lit-search-runs';
+import { log } from '@/lib/log';
 import {
   markStageFailed,
   markStageRunning,
@@ -131,7 +132,7 @@ export async function dispatchLiteratureSearch(
         errorMessage: `Dispatch failed: ${msg}`,
         sourcesCount: 0,
       });
-      console.error('[literature-search] dispatch failed', {
+      log('literature-search').error('dispatch failed', {
         runId: input.runId,
         articleId: article.id,
         articleLabel: label,

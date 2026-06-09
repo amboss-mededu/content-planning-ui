@@ -11,12 +11,23 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import {
   clearKeyForCurrentUser,
   type ProviderId,
   setKeyForCurrentUser,
 } from '@/lib/data/user-api-keys';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+
+const PostBody = z.object({
+  provider: z.unknown().optional(),
+  key: z.unknown().optional(),
+});
+
+const DeleteBody = z.object({
+  provider: z.unknown().optional(),
+});
 
 function isProvider(v: unknown): v is ProviderId {
   return v === 'google' || v === 'anthropic' || v === 'openai';
@@ -25,10 +36,8 @@ function isProvider(v: unknown): v is ProviderId {
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as {
-    provider?: unknown;
-    key?: unknown;
-  };
+  const body = await parseBodyOr400(req, PostBody);
+  if (body instanceof NextResponse) return body;
   if (!isProvider(body.provider)) {
     return NextResponse.json(
       { error: 'provider must be google, anthropic, or openai' },
@@ -50,7 +59,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as { provider?: unknown };
+  const body = await parseBodyOr400(req, DeleteBody);
+  if (body instanceof NextResponse) return body;
   if (!isProvider(body.provider)) {
     return NextResponse.json(
       { error: 'provider must be google, anthropic, or openai' },

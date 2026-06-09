@@ -8,6 +8,7 @@ import {
 } from '@/lib/data/article-sources';
 import { getNewArticleSuggestionByIdAsAdmin } from '@/lib/data/articles';
 import { registerCortexSource } from '@/lib/integrations/cortex';
+import { log } from '@/lib/log';
 
 export type CortexRegisterOutcome = {
   sourceId: string;
@@ -104,7 +105,7 @@ export async function runCortexRegistration(input: {
         'ready-for-llm-draft',
         input.requestedByEmail,
       ).catch((e) => {
-        console.error('[cortex-register] failed to flip backlog status', e);
+        log('cortex-register').error('failed to flip backlog status', e);
       });
     }
   }

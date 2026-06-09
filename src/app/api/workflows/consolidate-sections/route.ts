@@ -10,20 +10,24 @@
 
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { listArticleUpdateSuggestionsAsAdmin } from '@/lib/data/articles';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { consolidateSectionsSecondaryWorkflow } from '@/lib/workflows/consolidation/sections-secondary';
 
-type Body = {
-  specialtySlug?: string;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug;
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
@@ -55,7 +59,7 @@ export async function POST(req: NextRequest) {
       runId,
       specialtySlug: slug,
     }).catch((e) => {
-      console.error('[consolidate-sections] workflow unhandled rejection', e);
+      log('consolidate-sections').error('workflow unhandled rejection', e);
     }),
   );
 

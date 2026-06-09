@@ -30,6 +30,7 @@ import {
   setBacklogAssignee,
   setBacklogStatus,
 } from '@/app/planning/[specialty]/actions';
+import { log } from '@/lib/log';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
@@ -178,7 +179,7 @@ export function MyBacklogView({
   // the click fires.
   const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
   const onPipelineActionTriggered = useCallback(() => {
-    console.log('[lit-search-pulse] fired');
+    log('lit-search-pulse').info('fired');
     setPipelineActionPulse(Date.now());
     router.refresh();
   }, [router]);
@@ -189,7 +190,7 @@ export function MyBacklogView({
       pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
-      console.log('[lit-search-poll] tick', {
+      log('lit-search-poll').info('tick', {
         pulseAgeMs: pipelineActionPulse ? Date.now() - pipelineActionPulse : null,
         runningRows: initialLitSearchRuns.filter((r) => r.status === 'running').length,
       });
@@ -315,7 +316,7 @@ export function MyBacklogView({
         await clearBacklogRow(row.specialtySlug, row.articleKey);
         router.refresh();
       } catch (e) {
-        console.error('clearBacklogRow failed', e);
+        log('my-backlog').error('clearBacklogRow failed', e);
       }
       return;
     }
@@ -323,7 +324,7 @@ export function MyBacklogView({
       await setBacklogStatus(row.specialtySlug, row.articleKey, row.id, next, notes);
       router.refresh();
     } catch (e) {
-      console.error('setBacklogStatus failed', e);
+      log('my-backlog').error('setBacklogStatus failed', e);
     }
   }
 
@@ -336,7 +337,7 @@ export function MyBacklogView({
       await setBacklogAssignee(row.specialtySlug, row.articleKey, row.id, emailOrNull);
       router.refresh();
     } catch (e) {
-      console.error('setBacklogAssignee failed', e);
+      log('my-backlog').error('setBacklogAssignee failed', e);
     }
   }
 
@@ -352,7 +353,7 @@ export function MyBacklogView({
       await deleteManualArticle(specialtySlug, articleKey);
       router.refresh();
     } catch (e) {
-      console.error('deleteManualArticle failed', e);
+      log('my-backlog').error('deleteManualArticle failed', e);
     }
   }
 

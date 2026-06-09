@@ -22,6 +22,7 @@ import { generateText } from 'ai';
 import { z } from 'zod';
 import { env } from '@/env';
 import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-library';
+import { log } from '@/lib/log';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
@@ -318,7 +319,7 @@ export async function mapAndValidateCode(input: {
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<MappingResult> {
-  console.log('[pipeline] mapAndValidateCode', {
+  log('pipeline').info('mapAndValidateCode', {
     code: input.code,
     checkAgainstLibrary: input.checkAgainstLibrary,
     primary: input.primaryModel.model,

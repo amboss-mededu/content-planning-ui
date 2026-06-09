@@ -11,15 +11,21 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { getCode, patchCode } from '@/lib/data/codes';
 import { getConsolidationLockState } from '@/lib/data/pipeline';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 
-type Body = {
-  description?: string | null;
-  category?: string | null;
-  consolidationCategory?: string | null;
-};
+// Fields are validated leniently — `cleanOpt` already coerces non-strings,
+// nulls, and blanks to no-ops, so the schema only guards that the body is an
+// object and forwards the raw values through.
+const Body = z.object({
+  description: z.unknown().optional(),
+  category: z.unknown().optional(),
+  consolidationCategory: z.unknown().optional(),
+});
 
 function cleanOpt(v: unknown): string | undefined {
   // Treat `null` and empty strings as no-ops — the UI doesn't expose a
@@ -64,7 +70,8 @@ export async function PATCH(
     );
   }
 
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const description = cleanOpt(body.description);
   const category = cleanOpt(body.category);
   const consolidationCategory = cleanOpt(body.consolidationCategory);
@@ -80,7 +87,7 @@ export async function PATCH(
   if (Object.keys(fields).length === 0) {
     return NextResponse.json({ error: 'no editable fields supplied' }, { status: 400 });
   }
-  console.log('[codes] PATCH', { slug, code: codeId, fields });
+  log('codes').info('PATCH', { slug, code: codeId, fields });
 
   try {
     await patchCode(slug, codeId, fields);
@@ -89,7 +96,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'code not found' }, { status: 404 });
     }
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[codes] PATCH failed:', e);
+    log('codes').error('PATCH failed:', e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 

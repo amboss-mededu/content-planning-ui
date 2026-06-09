@@ -19,6 +19,7 @@
 
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { listUnmappedCodesAsAdmin } from '@/lib/data/codes';
 import {
@@ -27,23 +28,25 @@ import {
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import type { MappingFilter } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { mapCodesWorkflow } from '@/lib/workflows/mapping/map-codes';
 
-type Body = {
-  specialtySlug?: string;
-  contentBase?: string;
-  language?: string;
-  additionalInstructions?: string;
-  checkAgainstLibrary?: boolean;
-  categories?: unknown;
-  codes?: unknown;
-  primaryModel?: unknown;
-  backupModel?: unknown;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  contentBase: z.string().optional(),
+  language: z.string().optional(),
+  additionalInstructions: z.string().optional(),
+  checkAgainstLibrary: z.boolean().optional(),
+  categories: z.unknown().optional(),
+  codes: z.unknown().optional(),
+  primaryModel: z.unknown().optional(),
+  backupModel: z.unknown().optional(),
+});
 
 function stringArray(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -75,7 +78,8 @@ async function countUnmappedWithFilter(
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug;
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
@@ -163,7 +167,7 @@ export async function POST(req: NextRequest) {
       backupModel,
       apiKeys,
     }).catch((e) => {
-      console.error('[map-codes] workflow unhandled rejection', e);
+      log('map-codes').error('workflow unhandled rejection', e);
     }),
   );
 

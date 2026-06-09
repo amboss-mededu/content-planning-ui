@@ -17,6 +17,7 @@
 import { google } from '@ai-sdk/google';
 import { generateText, stepCountIs } from 'ai';
 import { z } from 'zod';
+import { log } from '@/lib/log';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
@@ -113,7 +114,7 @@ export async function identifyModulesForUrl(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ category: string }[]> {
-  console.log('[pipeline] identifyModulesForUrl', {
+  log('pipeline').info('identifyModulesForUrl', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
@@ -217,7 +218,7 @@ export async function extractCodesForCategory(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ category: string; description: string }[]> {
-  console.log('[pipeline] extractCodesForCategory', {
+  log('pipeline').info('extractCodesForCategory', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
@@ -334,7 +335,7 @@ export async function extractMilestonesForInputs(input: {
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<string> {
-  console.log('[pipeline] extractMilestonesForInputs', {
+  log('pipeline').info('extractMilestonesForInputs', {
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
     model: input.model.model,

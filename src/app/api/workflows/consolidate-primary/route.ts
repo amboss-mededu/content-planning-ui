@@ -17,6 +17,7 @@
 
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
 import {
@@ -25,6 +26,8 @@ import {
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { consolidateArticlesSecondaryWorkflow } from '@/lib/workflows/consolidation/articles-secondary';
 import { consolidatePrimaryWorkflow } from '@/lib/workflows/consolidation/primary';
 import { resetConsolidationScope } from '@/lib/workflows/consolidation/reset-scope';
@@ -33,21 +36,21 @@ import type { ModelSpec } from '@/lib/workflows/lib/llm';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 
-type Body = {
-  specialtySlug?: string;
-  consolidationCategories?: unknown;
-  categories?: unknown;
-  model?: unknown;
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  consolidationCategories: z.unknown().optional(),
+  categories: z.unknown().optional(),
+  model: z.unknown().optional(),
   /** When true, the route waits for primary to finish then runs the two
    *  secondary stages in sequence on the same runId before responding.
    *  Used by the per-category "Start consolidation" button on the review
    *  page so one click produces end-to-end output. The pipeline-page
    *  start buttons leave this off and fire each stage individually. */
-  chainSecondaries?: boolean;
+  chainSecondaries: z.boolean().optional(),
   /** Optional editor-supplied note. Prepended to the LLM user message
    *  as an `EDITOR INSTRUCTIONS` block for this run only. */
-  editorNote?: unknown;
-};
+  editorNote: z.unknown().optional(),
+});
 
 const MAX_EDITOR_NOTE_LENGTH = 4000;
 
@@ -79,7 +82,8 @@ function stringArray(raw: unknown): string[] | undefined {
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug;
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
@@ -153,7 +157,7 @@ export async function POST(req: NextRequest) {
       await initPipelineStage({ runId, stage: 'consolidate_sections' });
     }
   } catch (e) {
-    console.error('[consolidate-primary] init failed', e);
+    log('consolidate-primary').error('init failed', e);
     await updatePipelineRun(runId, {
       status: 'failed',
       finishedAt: Date.now(),
@@ -222,7 +226,7 @@ export async function POST(req: NextRequest) {
         consolidatedArticles: articlesStats.merged,
         consolidatedSections: sectionsStats.merged,
       };
-      console.log('[consolidate-primary] chained workflow result', {
+      log('consolidate-primary').info('chained workflow result', {
         runId,
         specialtySlug: slug,
         consolidationCategories,
@@ -230,7 +234,7 @@ export async function POST(req: NextRequest) {
         ...result,
       });
     } catch (e) {
-      console.error('[consolidate-primary] chained workflow failed', e);
+      log('consolidate-primary').error('chained workflow failed', e);
       await updatePipelineRun(runId, {
         status: 'failed',
         finishedAt: Date.now(),
@@ -260,7 +264,7 @@ export async function POST(req: NextRequest) {
           editorNote,
         });
       })().catch(async (e) => {
-        console.error('[consolidate-primary] workflow unhandled rejection', e);
+        log('consolidate-primary').error('workflow unhandled rejection', e);
         await updatePipelineRun(runId, {
           status: 'failed',
           finishedAt: Date.now(),

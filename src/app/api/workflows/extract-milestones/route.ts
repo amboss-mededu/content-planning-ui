@@ -11,6 +11,7 @@
 
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import {
@@ -19,23 +20,26 @@ import {
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { approvalToken } from '@/lib/workflows/lib/approval';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { extractMilestonesPhase1 } from '@/lib/workflows/preprocessing/extract-milestones';
 import { parseContentInputs } from '../_lib/inputs';
 
-type Body = {
-  specialtySlug?: string;
-  inputs?: unknown;
-  milestonesInstructions?: string;
-  model?: unknown;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  inputs: z.unknown().optional(),
+  milestonesInstructions: z.string().optional(),
+  model: z.unknown().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug;
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
@@ -97,7 +101,7 @@ export async function POST(req: NextRequest) {
       model,
       apiKeys,
     }).catch((e) => {
-      console.error('[extract-milestones] Phase1 unhandled rejection', e);
+      log('extract-milestones').error('Phase1 unhandled rejection', e);
     }),
   );
 

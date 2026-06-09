@@ -7,6 +7,7 @@ import {
   deleteManualArticle,
   setBacklogStatus,
 } from '@/app/planning/[specialty]/actions';
+import { log } from '@/lib/log';
 import type {
   ArticleBacklogRecord,
   ArticleBacklogStatus,
@@ -205,7 +206,7 @@ export function BacklogView({
   // window.
   const [pipelineActionPulse, setPipelineActionPulse] = useState(0);
   const onPipelineActionTriggered = useCallback(() => {
-    console.log('[lit-search-pulse] fired');
+    log('lit-search-pulse').info('fired');
     setPipelineActionPulse(Date.now());
     // Run one refresh immediately so the badge swap happens within ~1s
     // instead of waiting up to 2.5s for the first interval tick.
@@ -218,7 +219,7 @@ export function BacklogView({
       pipelineActionPulse > 0 && Date.now() - pipelineActionPulse < 30_000;
     if (!hasRunningRow && !isInClickWindow()) return;
     const tick = () => {
-      console.log('[lit-search-poll] tick', {
+      log('lit-search-poll').info('tick', {
         pulseAgeMs: pipelineActionPulse ? Date.now() - pipelineActionPulse : null,
         runningRows: initialLitSearchRuns.filter((r) => r.status === 'running').length,
       });

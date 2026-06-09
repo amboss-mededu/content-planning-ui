@@ -23,6 +23,7 @@ import {
   updateWritingRunAsAdmin,
   upsertDraftPassAsAdmin,
 } from '@/lib/data/article-writing';
+import { log } from '@/lib/log';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
 import { logEvent } from '../lib/events';
 import { ensureGeminiUploadsForArticle } from '../lib/gemini-files';
@@ -60,7 +61,7 @@ async function isStillRunnable(runId: string): Promise<boolean> {
 }
 
 export async function writeArticleWorkflow(input: WriteArticleInput): Promise<void> {
-  console.log('[writing] writeArticleWorkflow start', {
+  log('writing').info('writeArticleWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     articleRecordId: input.articleRecordId,
@@ -237,7 +238,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
         'ready-for-editing',
         input.requestedByEmail,
       ).catch((e) => {
-        console.error('[writing] failed to flip backlog status', e);
+        log('writing').error('failed to flip backlog status', e);
       });
     }
 
@@ -249,7 +250,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[writing] writeArticleWorkflow failed', msg);
+    log('writing').error('writeArticleWorkflow failed', msg);
     await updateWritingRunAsAdmin(input.runId, {
       status: 'failed',
       finishedAt: Date.now(),

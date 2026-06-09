@@ -24,15 +24,17 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { runCortexRegistration } from '@/lib/workflows/cortex-register/run';
 
-type Body = {
-  specialtySlug?: string;
-  articleRecordId?: string;
-  articleRecordIds?: string[];
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  articleRecordId: z.string().optional(),
+  articleRecordIds: z.array(z.string()).optional().catch(undefined),
+});
 
 const MAX_CONCURRENT = 3;
 
@@ -58,7 +60,8 @@ export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
 
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug?.trim();
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });

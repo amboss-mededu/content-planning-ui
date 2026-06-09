@@ -2,6 +2,7 @@
 
 import { Button, Stack, Text } from '@amboss/design-system';
 import { useState } from 'react';
+import { log } from '@/lib/log';
 import type { ReviewCommentRecord, ReviewRecordKind } from '@/lib/pb/types';
 import { deleteOwnReviewComment, postReviewComment } from '../[specialty]/actions';
 
@@ -61,7 +62,7 @@ export function CommentsSection({
       setComments((prev) => [...prev, created]);
       setDraft('');
     } catch (err) {
-      console.error('postReviewComment failed', err);
+      log('comments').error('postReviewComment failed', err);
     } finally {
       setSubmitting(false);
     }
@@ -73,7 +74,7 @@ export function CommentsSection({
     try {
       await deleteOwnReviewComment(slug, commentId);
     } catch (err) {
-      console.error('deleteOwnReviewComment failed', err);
+      log('comments').error('deleteOwnReviewComment failed', err);
       setComments(before);
     }
   }

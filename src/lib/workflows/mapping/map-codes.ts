@@ -11,6 +11,7 @@
  * immediately and the work continues in the same Node process.
  */
 
+import { log } from '@/lib/log';
 import { mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -129,7 +130,7 @@ async function mapAndWriteOne(input: {
 }
 
 export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
-  console.log('[pipeline] mapCodesWorkflow start', {
+  log('pipeline').info('mapCodesWorkflow start', {
     runId: input.runId,
     specialtySlug: input.specialtySlug,
     checkAgainstLibrary: input.checkAgainstLibrary,
@@ -247,7 +248,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
       // the stage row and any mappedAt fields; do not flip the stage to
       // `failed`. Just drop in-flight markers and surface the cancellation
       // in the run log.
-      console.log('[pipeline] mapCodesWorkflow cancelled mid-batch', {
+      log('pipeline').info('mapCodesWorkflow cancelled mid-batch', {
         runId: input.runId,
         observedStatus: e.observedStatus,
       });

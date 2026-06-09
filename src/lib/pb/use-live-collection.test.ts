@@ -143,11 +143,15 @@ describe('useLiveCollection', () => {
     );
 
     await waitFor(() => expect(warn).toHaveBeenCalled());
-    expect(warn).toHaveBeenCalledWith('PocketBase realtime subscribe failed', {
-      collection: 'articleReviews',
-      filter: 'specialtySlug = "cardiology"',
-      error,
-    });
+    expect(warn).toHaveBeenCalledWith(
+      '[pb-live]',
+      'PocketBase realtime subscribe failed',
+      {
+        collection: 'articleReviews',
+        filter: 'specialtySlug = "cardiology"',
+        error,
+      },
+    );
   });
 });
 

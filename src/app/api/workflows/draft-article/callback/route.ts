@@ -30,29 +30,41 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { env } from '@/env';
+import { z } from 'zod';
 import {
   setArticleBacklogDraftFolderUrlAsAdmin,
   setArticleBacklogStatusAsAdmin,
 } from '@/lib/data/article-backlog';
 import { finishArticleDraftRunAsAdmin } from '@/lib/data/article-draft-runs';
+import { requireCallbackAuth } from '@/lib/http/callback-auth';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleDraftLink, ArticleDraftRunRecord } from '@/lib/pb/types';
 
-type Meta = {
-  draftRunId: string;
-  articleRecordId: string;
-  articleKey: string;
-  specialtySlug: string;
-};
+const META_MSG = 'meta is missing required fields';
+const metaField = z.string({ message: META_MSG }).min(1, META_MSG);
 
-type CallbackBody = {
-  status?: 'running' | 'completed' | 'failed';
-  meta?: Partial<Meta>;
-  outputUrl?: string;
-  outputLinks?: unknown;
-  error?: string;
-};
+// Only `status` and `meta` are validated strictly (as the route always did);
+// the remaining fields come from an external sender, so they stay permissive
+// and never reject the callback on their own.
+const Body = z.object({
+  status: z.enum(['running', 'completed', 'failed'], {
+    message: 'status must be "running", "completed" or "failed"',
+  }),
+  meta: z.object(
+    {
+      draftRunId: metaField,
+      articleRecordId: metaField,
+      articleKey: metaField,
+      specialtySlug: metaField,
+    },
+    { message: META_MSG },
+  ),
+  outputUrl: z.string().optional().catch(undefined),
+  outputLinks: z.unknown().optional(),
+  error: z.string().optional().catch(undefined),
+});
 
 /**
  * Coerce the callback's `outputLinks` into a clean `{ name, link }[]`. n8n is
@@ -75,42 +87,17 @@ function parseOutputLinks(value: unknown): ArticleDraftLink[] | undefined {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = env.N8N_CALLBACK_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: 'callback secret not configured' },
-      { status: 503 },
-    );
-  }
-  const auth = req.headers.get('authorization') ?? '';
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const denied = requireCallbackAuth(req);
+  if (denied) return denied;
 
-  const body = (await req.json().catch(() => ({}))) as CallbackBody;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const status = body.status;
-  if (status !== 'running' && status !== 'completed' && status !== 'failed') {
-    return NextResponse.json(
-      { error: 'status must be "running", "completed" or "failed"' },
-      { status: 400 },
-    );
-  }
   const meta = body.meta;
-  if (
-    !meta?.draftRunId ||
-    !meta.articleRecordId ||
-    !meta.articleKey ||
-    !meta.specialtySlug
-  ) {
-    return NextResponse.json(
-      { error: 'meta is missing required fields' },
-      { status: 400 },
-    );
-  }
 
   const outputLinks = parseOutputLinks(body.outputLinks);
 
-  console.log('[draft-article/callback] received', {
+  log('draft-article/callback').info('received', {
     status,
     draftRunId: meta.draftRunId,
     articleKey: meta.articleKey,
@@ -126,7 +113,7 @@ export async function POST(req: NextRequest) {
       .collection<ArticleDraftRunRecord>('articleDraftRuns')
       .getOne(meta.draftRunId);
   } catch (e) {
-    console.error('[draft-article/callback] run row lookup failed', {
+    log('draft-article/callback').error('run row lookup failed', {
       draftRunId: meta.draftRunId,
       error: e instanceof Error ? e.message : String(e),
     });
@@ -136,7 +123,7 @@ export async function POST(req: NextRequest) {
     );
   }
   if (runRow.status !== 'running') {
-    console.log('[draft-article/callback] skipped (already terminal)', {
+    log('draft-article/callback').info('skipped (already terminal)', {
       draftRunId: meta.draftRunId,
       currentStatus: runRow.status,
     });

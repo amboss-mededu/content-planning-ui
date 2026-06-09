@@ -25,21 +25,16 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
-import { env } from '@/env';
+import { z } from 'zod';
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
 import { finishArticleLitSearchRunAsAdmin } from '@/lib/data/article-lit-search-runs';
 import { bulkInsertArticleSourcesAsAdmin } from '@/lib/data/article-sources';
+import { requireCallbackAuth } from '@/lib/http/callback-auth';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
+import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleLitSearchRunRecord, ArticleSourceRecord } from '@/lib/pb/types';
 import { maybeFinalizePipelineRun } from '@/lib/workflows/literature-search/finalize';
-
-type Meta = {
-  litSearchRunId: string;
-  articleRecordId: string;
-  articleKey: string;
-  specialtySlug: string;
-  runId: string;
-};
 
 type SourceRow = Omit<
   ArticleSourceRecord,
@@ -53,51 +48,42 @@ type SourceRow = Omit<
   | 'articleKey'
 >;
 
-type CallbackBody = {
-  status?: 'completed' | 'failed';
-  meta?: Partial<Meta>;
-  sources?: SourceRow[];
-  error?: string;
-  queryCount?: number;
-  candidateCount?: number;
-};
+const META_MSG = 'meta is missing required fields';
+const metaField = z.string({ message: META_MSG }).min(1, META_MSG);
+
+// Only `status` and `meta` are validated strictly (as the route always did);
+// `sources` and the counts come from an external sender, so they stay
+// permissive — the source rows are validated against PocketBase on insert.
+const Body = z.object({
+  status: z.enum(['completed', 'failed'], {
+    message: 'status must be "completed" or "failed"',
+  }),
+  meta: z.object(
+    {
+      litSearchRunId: metaField,
+      articleRecordId: metaField,
+      articleKey: metaField,
+      specialtySlug: metaField,
+      runId: metaField,
+    },
+    { message: META_MSG },
+  ),
+  sources: z.array(z.unknown()).optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  queryCount: z.number().optional().catch(undefined),
+  candidateCount: z.number().optional().catch(undefined),
+});
 
 export async function POST(req: NextRequest) {
-  const secret = env.N8N_CALLBACK_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: 'callback secret not configured' },
-      { status: 503 },
-    );
-  }
-  const auth = req.headers.get('authorization') ?? '';
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const denied = requireCallbackAuth(req);
+  if (denied) return denied;
 
-  const body = (await req.json().catch(() => ({}))) as CallbackBody;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const status = body.status;
-  if (status !== 'completed' && status !== 'failed') {
-    return NextResponse.json(
-      { error: 'status must be "completed" or "failed"' },
-      { status: 400 },
-    );
-  }
   const meta = body.meta;
-  if (
-    !meta?.litSearchRunId ||
-    !meta.articleRecordId ||
-    !meta.articleKey ||
-    !meta.specialtySlug ||
-    !meta.runId
-  ) {
-    return NextResponse.json(
-      { error: 'meta is missing required fields' },
-      { status: 400 },
-    );
-  }
 
-  console.log('[lit-search/callback] received', {
+  log('lit-search/callback').info('received', {
     status,
     runId: meta.runId,
     litSearchRunId: meta.litSearchRunId,
@@ -113,7 +99,7 @@ export async function POST(req: NextRequest) {
       .collection<ArticleLitSearchRunRecord>('articleLitSearchRuns')
       .getOne(meta.litSearchRunId);
   } catch (e) {
-    console.error('[lit-search/callback] run row lookup failed', {
+    log('lit-search/callback').error('run row lookup failed', {
       litSearchRunId: meta.litSearchRunId,
       error: e instanceof Error ? e.message : String(e),
     });
@@ -123,7 +109,7 @@ export async function POST(req: NextRequest) {
     );
   }
   if (runRow.status !== 'running') {
-    console.log('[lit-search/callback] skipped (already terminal)', {
+    log('lit-search/callback').info('skipped (already terminal)', {
       litSearchRunId: meta.litSearchRunId,
       currentStatus: runRow.status,
     });
@@ -131,7 +117,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (status === 'completed') {
-    const sources = Array.isArray(body.sources) ? body.sources : [];
+    // Trust boundary: rows are validated against PocketBase on insert below,
+    // so the loose callback array is asserted to the insert shape here.
+    const sources = (body.sources ?? []) as SourceRow[];
     let sourcesCount: number;
     try {
       sourcesCount = await bulkInsertArticleSourcesAsAdmin(
@@ -150,7 +138,7 @@ export async function POST(req: NextRequest) {
           ? pbErr.response?.data
           : undefined;
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[lit-search/callback] articleSources insert rejected', {
+      log('lit-search/callback').error('articleSources insert rejected', {
         litSearchRunId: meta.litSearchRunId,
         firstSource: sources[0],
         pbStatus: pbErr?.status,

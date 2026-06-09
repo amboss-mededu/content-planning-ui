@@ -26,23 +26,25 @@
 
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { listArticleSourcesForArticleAsAdmin } from '@/lib/data/article-sources';
 import { createWritingRunAsAdmin } from '@/lib/data/article-writing';
 import { getConsolidatedArticleByIdAsAdmin } from '@/lib/data/articles';
 import { getSpecialty } from '@/lib/data/specialties';
+import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 
-type Body = {
-  specialtySlug?: string;
-  articleRecordId?: string;
-  articleRecordIds?: string[];
-  language?: string;
-  articleLength?: string;
-  useTextBubbles?: boolean;
-  model?: unknown;
-};
+const Body = z.object({
+  specialtySlug: z.string().optional(),
+  articleRecordId: z.string().optional(),
+  articleRecordIds: z.array(z.string()).optional().catch(undefined),
+  language: z.string().optional(),
+  articleLength: z.string().optional(),
+  useTextBubbles: z.boolean().optional(),
+  model: z.unknown().optional(),
+});
 
 type EnqueueOutcome =
   | { articleRecordId: string; status: 'enqueued'; runId: string }
@@ -56,7 +58,8 @@ export async function POST(req: NextRequest) {
   const guard = await requireUserResponse();
   if (guard) return guard;
 
-  const body = (await req.json().catch(() => ({}))) as Body;
+  const body = await parseBodyOr400(req, Body);
+  if (body instanceof NextResponse) return body;
   const slug = body.specialtySlug?.trim();
   if (!slug) {
     return NextResponse.json({ error: 'specialtySlug required' }, { status: 400 });
