@@ -26,6 +26,7 @@ import { CodeChipList } from '../code-chip';
 import type { CategoryLookup } from '../code-utils';
 import { CommentsSection } from '../comments-section';
 import { phaseFromStatus } from '../pipeline-stage-gates';
+import { APPROVED_TINT, REJECTED_TINT } from '../review-tints';
 import type { SectionRow } from '../sections-view';
 import {
   type BadgeColor,
@@ -42,9 +43,6 @@ import type {
   ReviewStatus,
   UpdateReviewOpener,
 } from './types';
-
-const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
-const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 
 const sectionCellStyle: CSSProperties = {
   padding: '8px 10px',

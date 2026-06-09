@@ -13,6 +13,7 @@ import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { type Column, DataTable } from './data-table';
+import { APPROVED_TINT, REJECTED_TINT } from './review-tints';
 
 /**
  * Unified row shape for the New Articles tab. Consolidated candidates are
@@ -89,8 +90,6 @@ function PreviousTitlesCell({
   );
 }
 
-const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
-const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 function buildColumns(
