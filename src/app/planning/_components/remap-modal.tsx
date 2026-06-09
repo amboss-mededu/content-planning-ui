@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
+import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
 import {
   backupModelKey,
@@ -97,14 +98,9 @@ export function RemapModal({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (
-          res.status === 409 &&
-          body?.code === 'MISSING_API_KEY' &&
-          (body.provider === 'google' ||
-            body.provider === 'anthropic' ||
-            body.provider === 'openai')
-        ) {
-          setMissingKey(body.provider);
+        const missing = missingApiKeyProvider(res.status, body);
+        if (missing) {
+          setMissingKey(missing);
           return;
         }
         setError(body?.error ?? `HTTP ${res.status}`);

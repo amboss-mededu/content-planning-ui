@@ -4,6 +4,7 @@ import { Button, Callout, Inline, Stack } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
+import { missingApiKeyProvider } from './missing-api-key';
 import { MissingKeyModal } from './missing-key-modal';
 
 /**
@@ -48,12 +49,9 @@ export function RunLitSearchButton({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (
-          res.status === 409 &&
-          body?.code === 'MISSING_API_KEY' &&
-          body.provider === 'google'
-        ) {
-          setMissingKey('google');
+        const missing = missingApiKeyProvider(res.status, body);
+        if (missing) {
+          setMissingKey(missing);
           return;
         }
         setError(body?.error ?? `HTTP ${res.status}`);
