@@ -18,7 +18,7 @@
  */
 
 import { createMCPClient } from '@ai-sdk/mcp';
-import { generateText } from 'ai';
+import { generateText, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { env } from '@/env';
 import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-library';
@@ -228,7 +228,7 @@ async function runAgentAttempt(params: {
   apiKeys: ProviderApiKeys;
   system: string;
   userMessage: string;
-  tools: Record<string, unknown>;
+  tools: ToolSet;
 }): Promise<{
   text: string;
   usage: ReturnType<typeof pickUsage>;
@@ -241,8 +241,7 @@ async function runAgentAttempt(params: {
     model: resolved.sdkModel,
     system,
     prompt: userMessage,
-    // biome-ignore lint/suspicious/noExplicitAny: MCP toolset discovered at runtime; the AI SDK accepts the full set
-    tools: tools as any,
+    tools,
     stopWhen: ({ steps }: { steps: Array<unknown> }) => steps.length >= 20,
     temperature: 1,
     providerOptions: resolved.providerOptions,
@@ -387,9 +386,9 @@ export async function mapAndValidateCode(input: {
   // Expose only the three tools the n8n agent used. Keeps the model focused
   // and avoids the agent discovering prompts/resources that aren't expected.
   const toolNames = ['search_article_sections', 'get_article', 'get_sections'];
-  const tools: Record<string, unknown> = {};
+  const tools: ToolSet = {};
   for (const name of toolNames) {
-    if (name in allTools) tools[name] = (allTools as Record<string, unknown>)[name];
+    if (name in allTools) tools[name] = allTools[name];
   }
 
   const articleSet = input.checkAgainstLibrary
