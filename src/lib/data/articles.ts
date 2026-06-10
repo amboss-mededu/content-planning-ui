@@ -323,7 +323,10 @@ export async function createManualConsolidatedArticleAsAdmin(
   articleType?: string,
 ): Promise<{ id: string; articleKey: string }> {
   const pb = await createAdminClient();
-  const base: Record<string, unknown> = { articleTitle: title };
+  // Seed an empty codes set explicitly. Leave `overallCoverage` unset — PB
+  // number fields default to 0, and a written 0 would render as real coverage
+  // instead of "no data". The projection normalizes legacy 0s to undefined.
+  const base: Record<string, unknown> = { articleTitle: title, codes: [], numCodes: 0 };
   if (articleType) base.articleType = articleType;
   const row = withArticleKey(slug, base);
   const created = await pb
