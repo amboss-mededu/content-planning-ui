@@ -14,6 +14,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type { ReviewCommentRecord } from '@/lib/pb/types';
 import {
   type ArticleManagerPhase,
@@ -25,6 +26,7 @@ import { CodeChipList } from '../code-chip';
 import type { CategoryLookup } from '../code-utils';
 import { CommentsSection } from '../comments-section';
 import { phaseFromStatus } from '../pipeline-stage-gates';
+import { APPROVED_TINT, REJECTED_TINT } from '../review-tints';
 import type { SectionRow } from '../sections-view';
 import {
   type BadgeColor,
@@ -41,9 +43,6 @@ import type {
   ReviewStatus,
   UpdateReviewOpener,
 } from './types';
-
-const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
-const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 
 const sectionCellStyle: CSSProperties = {
   padding: '8px 10px',
@@ -358,7 +357,7 @@ export function UpdateReviewView({
     try {
       await onDecideSection(sectionKey, rowId, status, notes);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : String(err));
+      setReviewError(errorMessage(err));
       const revertedReviews = { ...reviews };
       const revertedReviewers = { ...reviewers };
       delete revertedReviews[sectionKey];
@@ -384,7 +383,7 @@ export function UpdateReviewView({
     try {
       await onDecideSection(sectionKey, rowId, null);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : String(err));
+      setReviewError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }

@@ -36,6 +36,7 @@ import {
   setArticleBacklogStatusAsAdmin,
 } from '@/lib/data/article-backlog';
 import { finishArticleDraftRunAsAdmin } from '@/lib/data/article-draft-runs';
+import { errorMessage } from '@/lib/error-message';
 import { requireCallbackAuth } from '@/lib/http/callback-auth';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     log('draft-article/callback').error('run row lookup failed', {
       draftRunId: meta.draftRunId,
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     });
     return NextResponse.json(
       { error: `articleDraftRuns row not found: ${meta.draftRunId}` },

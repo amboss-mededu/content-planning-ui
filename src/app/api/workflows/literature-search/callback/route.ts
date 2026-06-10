@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
 import { finishArticleLitSearchRunAsAdmin } from '@/lib/data/article-lit-search-runs';
 import { bulkInsertArticleSourcesAsAdmin } from '@/lib/data/article-sources';
+import { errorMessage } from '@/lib/error-message';
 import { requireCallbackAuth } from '@/lib/http/callback-auth';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     log('lit-search/callback').error('run row lookup failed', {
       litSearchRunId: meta.litSearchRunId,
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     });
     return NextResponse.json(
       { error: `articleLitSearchRuns row not found: ${meta.litSearchRunId}` },
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
         pbErr && typeof pbErr === 'object' && 'response' in pbErr
           ? pbErr.response?.data
           : undefined;
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       log('lit-search/callback').error('articleSources insert rejected', {
         litSearchRunId: meta.litSearchRunId,
         firstSource: sources[0],

@@ -14,6 +14,7 @@
 
 import { env } from '@/env';
 import { finishArticleLitSearchRunAsAdmin } from '@/lib/data/article-lit-search-runs';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import {
   markStageFailed,
@@ -126,7 +127,7 @@ export async function dispatchLiteratureSearch(
       });
     } catch (e) {
       failed++;
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       await finishArticleLitSearchRunAsAdmin(article.litSearchRunId, {
         status: 'failed',
         errorMessage: `Dispatch failed: ${msg}`,

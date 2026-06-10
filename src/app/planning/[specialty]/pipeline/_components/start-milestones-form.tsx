@@ -9,6 +9,7 @@ import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { AddSourceModal } from './add-source-modal';
 import { DefaultPromptModal } from './default-prompt-modal';
 import { InputRow, type InputRowState, newInputRow } from './input-row';
+import { missingApiKeyProvider } from './missing-api-key';
 import { MissingKeyModal } from './missing-key-modal';
 import { readSpecForStage } from './model-selection-storage';
 import { PromptSection } from './prompt-section';
@@ -90,14 +91,9 @@ export function StartMilestonesForm({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (
-          res.status === 409 &&
-          body?.code === 'MISSING_API_KEY' &&
-          (body.provider === 'google' ||
-            body.provider === 'anthropic' ||
-            body.provider === 'openai')
-        ) {
-          setMissingKey(body.provider);
+        const missing = missingApiKeyProvider(res.status, body);
+        if (missing) {
+          setMissingKey(missing);
           return;
         }
         setError(body?.error ?? `HTTP ${res.status}`);

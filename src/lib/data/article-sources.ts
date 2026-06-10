@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
@@ -426,7 +427,7 @@ export async function bulkInsertArticleSourcesAsAdmin(
         payload,
         pbStatus: pbErr?.status,
         pbDetail: pbErr?.response?.data,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       });
       throw e;
     }

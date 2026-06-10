@@ -16,6 +16,7 @@ import { Link, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { setBacklogDraftFolderUrl } from '@/app/planning/[specialty]/actions';
+import { errorMessage } from '@/lib/error-message';
 import { isSafeUrl } from '@/lib/url';
 
 const inputStyle: CSSProperties = {
@@ -81,7 +82,7 @@ export function DriveUrlField({
       setEditing(false);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }

@@ -18,6 +18,7 @@
 
 import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import {
   markStageCompleted,
@@ -184,7 +185,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     });
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await markStageFailed(input.runId, 'extract_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
     await revalidateSpecialtyCache(input.specialtySlug);
@@ -226,7 +227,7 @@ export async function extractCodesPhase2(input: {
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await markStageFailed(input.runId, 'extract_codes', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
     await revalidateSpecialtyCache(input.specialtySlug);

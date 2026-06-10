@@ -4,6 +4,7 @@ import { Callout, Stack, Text } from '@amboss/design-system';
 import { useEffect, useState } from 'react';
 import type { AmbossLibraryStats } from '@/lib/data/amboss-library';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
+import { errorMessage } from '@/lib/error-message';
 import { StartMapCodesForm } from './start-map-codes-form';
 
 type FormData = {
@@ -34,7 +35,7 @@ export function LazyStartMapCodesForm({
         if (!cancelled) setData(body as FormData);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(errorMessage(err));
       });
     return () => {
       cancelled = true;

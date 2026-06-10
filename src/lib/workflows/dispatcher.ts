@@ -1,4 +1,5 @@
 import 'server-only';
+import { errorMessage } from '@/lib/error-message';
 
 /**
  * Article-writing dispatcher.
@@ -167,7 +168,7 @@ async function dispatchOne(run: ArticleWritingRunRecord): Promise<void> {
     await updateWritingRunAsAdmin(run.id, {
       status: 'failed',
       finishedAt: Date.now(),
-      errorMessage: e instanceof Error ? e.message : String(e),
+      errorMessage: errorMessage(e),
     }).catch(() => {});
   } finally {
     state.inFlight.delete(run.id);

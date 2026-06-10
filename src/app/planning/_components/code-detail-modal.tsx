@@ -4,8 +4,10 @@ import { Badge, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
+import { errorMessage } from '@/lib/error-message';
 import type { Code } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
+import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
 import {
   backupModelKey,
@@ -161,7 +163,7 @@ export function CodeDetailModal({
         setDetailState('loaded');
       } catch (e) {
         if (cancelled) return;
-        setDetailError(e instanceof Error ? e.message : String(e));
+        setDetailError(errorMessage(e));
         setDetailState('error');
       }
     })();
@@ -202,7 +204,7 @@ export function CodeDetailModal({
         setMetadataState('loaded');
       } catch (e) {
         if (cancelled) return;
-        setMetadataError(e instanceof Error ? e.message : String(e));
+        setMetadataError(errorMessage(e));
         setMetadataState('error');
       }
     })();
@@ -282,14 +284,9 @@ export function CodeDetailModal({
       });
       if (!res.ok) {
         const resBody = await res.json().catch(() => ({}));
-        if (
-          res.status === 409 &&
-          resBody?.code === 'MISSING_API_KEY' &&
-          (resBody.provider === 'google' ||
-            resBody.provider === 'anthropic' ||
-            resBody.provider === 'openai')
-        ) {
-          setMissingKey(resBody.provider);
+        const missing = missingApiKeyProvider(res.status, resBody);
+        if (missing) {
+          setMissingKey(missing);
           return;
         }
         setError(resBody?.error ?? `HTTP ${res.status}`);
@@ -298,7 +295,7 @@ export function CodeDetailModal({
       router.refresh();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

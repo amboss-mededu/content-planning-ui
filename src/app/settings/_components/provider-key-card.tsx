@@ -14,6 +14,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 
 export type ProviderId = 'google' | 'anthropic' | 'openai';
 
@@ -99,7 +100,7 @@ export function ProviderKeyCard({
         await onChange();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -122,7 +123,7 @@ export function ProviderKeyCard({
         await onChange();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -142,7 +143,7 @@ export function ProviderKeyCard({
       else setError(body.message ?? 'Test failed.');
       await onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }

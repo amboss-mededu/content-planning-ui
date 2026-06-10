@@ -27,6 +27,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { getSpecialty } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { runCortexRegistration } from '@/lib/workflows/cortex-register/run';
 
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest) {
       return {
         articleRecordId,
         ok: false as const,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       };
     }
   });

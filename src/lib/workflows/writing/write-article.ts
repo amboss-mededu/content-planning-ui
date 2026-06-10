@@ -23,6 +23,7 @@ import {
   updateWritingRunAsAdmin,
   upsertDraftPassAsAdmin,
 } from '@/lib/data/article-writing';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { ArticleSourceRecord } from '@/lib/pb/types';
 import { logEvent } from '../lib/events';
@@ -113,7 +114,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
         runId: input.runId,
         stage: 'write_article',
         level: 'error',
-        message: `Gemini Files upload failed (continuing without): ${e instanceof Error ? e.message : String(e)}`,
+        message: `Gemini Files upload failed (continuing without): ${errorMessage(e)}`,
       }).catch(() => {});
     }
   }
@@ -203,7 +204,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
 
         previousOutput = result.output;
       } catch (passErr) {
-        const msg = passErr instanceof Error ? passErr.message : String(passErr);
+        const msg = errorMessage(passErr);
         await upsertDraftPassAsAdmin({
           runId: input.runId,
           specialtySlug: input.specialtySlug,
@@ -249,7 +250,7 @@ export async function writeArticleWorkflow(input: WriteArticleInput): Promise<vo
       message: `All ${WRITING_PASSES.length} passes complete.`,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     log('writing').error('writeArticleWorkflow failed', msg);
     await updateWritingRunAsAdmin(input.runId, {
       status: 'failed',

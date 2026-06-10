@@ -13,6 +13,7 @@
 
 import { getStageAsAdmin } from '@/lib/data/pipeline';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import {
   markStageAwaitingApproval,
@@ -97,7 +98,7 @@ export async function extractMilestonesPhase1(
     });
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await markStageFailed(input.runId, 'extract_milestones', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
     await revalidateSpecialtyCache(input.specialtySlug);
@@ -151,7 +152,7 @@ export async function extractMilestonesPhase2(input: {
     await updatePipelineRunStatus(input.runId, 'completed');
     await revalidateSpecialtyCache(input.specialtySlug);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     await markStageFailed(input.runId, 'extract_milestones', msg);
     await updatePipelineRunStatus(input.runId, 'failed', msg);
     await revalidateSpecialtyCache(input.specialtySlug);

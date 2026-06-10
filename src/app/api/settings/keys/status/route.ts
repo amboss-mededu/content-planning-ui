@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { getStatusForCurrentUser } from '@/lib/data/user-api-keys';
+import { errorMessage } from '@/lib/error-message';
 
 export async function GET() {
   const guard = await requireUserResponse();
@@ -21,7 +22,7 @@ export async function GET() {
     const status = await getStatusForCurrentUser();
     return NextResponse.json(status);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorMessage(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

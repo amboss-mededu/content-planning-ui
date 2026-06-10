@@ -21,6 +21,7 @@ import {
   type MappingScopeValue,
 } from '../../../_components/mapping-scope-picker';
 import { DefaultPromptModal } from './default-prompt-modal';
+import { missingApiKeyProvider } from './missing-api-key';
 import { MissingKeyModal } from './missing-key-modal';
 import {
   backupModelKey,
@@ -126,14 +127,9 @@ export function StartMapCodesForm({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (
-          res.status === 409 &&
-          body?.code === 'MISSING_API_KEY' &&
-          (body.provider === 'google' ||
-            body.provider === 'anthropic' ||
-            body.provider === 'openai')
-        ) {
-          setMissingKey(body.provider);
+        const missing = missingApiKeyProvider(res.status, body);
+        if (missing) {
+          setMissingKey(missing);
           return;
         }
         setError(body?.error ?? `HTTP ${res.status}`);

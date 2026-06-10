@@ -125,6 +125,7 @@ import {
   listArticleSourcesForArticleAsAdmin,
   markSourceUploadedAsAdmin,
 } from '@/lib/data/article-sources';
+import { errorMessage } from '@/lib/error-message';
 
 export type EnsureUploadOutcome = {
   sourceId: string;
@@ -212,7 +213,7 @@ export async function ensureGeminiUploadsForArticle(input: {
         sourceId: s.id,
         title: s.title,
         status: 'failed',
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       });
     }
   }

@@ -3,6 +3,7 @@
 import { Button, Callout, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { readSpecForStage } from './model-selection-storage';
 
 /**
@@ -66,7 +67,7 @@ export function StartConsolidationForm({
       setSuccess(`Run started: ${body.runId}`);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

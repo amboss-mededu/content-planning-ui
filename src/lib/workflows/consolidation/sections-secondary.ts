@@ -17,6 +17,7 @@ import {
   deleteConsolidatedSectionsForCategoriesAsAdmin,
   deleteConsolidatedSectionsForSpecialtyAsAdmin,
 } from '@/lib/data/sections';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import { createAdminClient } from '@/lib/pb/server';
 import type { ArticleSuggestionRecord, CodeRecord } from '@/lib/pb/types';
@@ -303,7 +304,7 @@ export async function consolidateSectionsSecondaryWorkflow(
     await revalidateSpecialtyCache(input.specialtySlug);
     return { merged: finalRows.length };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     log('pipeline').error('consolidateSectionsSecondaryWorkflow failed', msg);
     await markStageFailed(input.runId, 'consolidate_sections', msg);
     if (!input.skipRunStatusUpdate) {

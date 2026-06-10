@@ -18,6 +18,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { getKeyForUserAsAdmin, markTestedForCurrentUser } from '@/lib/data/user-api-keys';
+import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 
 const Body = z.object({
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest) {
     await markTestedForCurrentUser({ provider, status: 'ok' });
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorMessage(e);
     await markTestedForCurrentUser({ provider, status: 'failed' });
     return NextResponse.json({ ok: false, message }, { status: 200 });
   }

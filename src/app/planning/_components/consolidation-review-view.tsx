@@ -3,6 +3,7 @@
 import { Badge, Button, Inline, Notification, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import type {
   ArticleReviewRecord,
   ReviewCommentRecord,
@@ -25,6 +26,7 @@ import type { CategoryLookup, TitleOriginLookup } from './code-utils';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { RerunConfirmModal } from './rerun-confirm-modal';
+import { APPROVED_TINT, REJECTED_TINT } from './review-tints';
 import type { SectionRow } from './sections-view';
 import {
   type ConsolidationRerunOptions,
@@ -47,10 +49,6 @@ const UNCATEGORIZED = '(uncategorized)';
 // to see the per-code metadata table.
 const GROUPED_CODES_THRESHOLD = 15;
 
-// Tints reused from the New Articles / Article Updates tables so a row's
-// approval state reads identically across screens.
-const APPROVED_TINT = 'rgba(16, 185, 129, 0.12)';
-const REJECTED_TINT = 'rgba(220, 38, 38, 0.12)';
 const ZEBRA_TINT = 'rgba(0, 0, 0, 0.025)';
 
 function settlementErrorMessage(settlement: PipelineRunSettlement): string | null {
@@ -437,7 +435,7 @@ export function ConsolidationReviewView({
       }
       router.refresh();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      setActionError(errorMessage(e));
     } finally {
       setIsRunningAll(false);
     }
@@ -470,7 +468,7 @@ export function ConsolidationReviewView({
       }
       router.refresh();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      setActionError(errorMessage(e));
     } finally {
       setIsResetting(false);
     }
