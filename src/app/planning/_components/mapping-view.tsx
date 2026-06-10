@@ -1,6 +1,6 @@
 'use client';
 
-import { SegmentedControl, Stack } from '@amboss/design-system';
+import { Inline, SegmentedControl, Stack } from '@amboss/design-system';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import type {
@@ -15,6 +15,7 @@ import {
   ConsolidationBucketsView,
   SourceCategoriesTable,
 } from './consolidation-buckets-view';
+import { ImportCodesModal } from './import-codes-modal';
 import { useRefreshWhileRunning } from './use-refresh-while-running';
 
 /**
@@ -88,11 +89,16 @@ export function MappingView({
           and live-collection polling survive a detour to the other views. The
           category tables are cheap and stateless, so they mount on demand. */}
       <div hidden={mode !== 'codes'}>
-        <CodesViewClient
-          slug={slug}
-          initialCodes={initialCodes}
-          initialHasMore={initialHasMore}
-        />
+        <Stack space="m">
+          <Inline space="s" vAlignItems="center">
+            <ImportCodesModal slug={slug} />
+          </Inline>
+          <CodesViewClient
+            slug={slug}
+            initialCodes={initialCodes}
+            initialHasMore={initialHasMore}
+          />
+        </Stack>
       </div>
       {mode === 'consolidation' ? (
         <ConsolidationBucketsView rows={rows} slug={slug} />

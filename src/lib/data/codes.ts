@@ -9,6 +9,7 @@ import {
   deriveCodeCategories,
 } from '@/lib/data/code-categories';
 import { deriveCodeTableCounts } from '@/lib/data/code-table-counts';
+import type { ParsedCodeRow } from '@/lib/import/code-import';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   CodeRecord,
@@ -198,6 +199,16 @@ export async function listUnmappedCodeCount(slug: string): Promise<number> {
     skipTotal: false,
   });
   return list.totalItems;
+}
+
+/** Lean read of just the `code` strings for a specialty (import diffing). */
+export async function listCodeStrings(slug: string): Promise<string[]> {
+  await connection();
+  const pb = await userClient();
+  const rows = await pb
+    .collection<CodeRecord>('codes')
+    .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'code' });
+  return rows.map((r) => r.code);
 }
 
 export async function listCodeCount(slug: string): Promise<number> {
@@ -474,6 +485,64 @@ export async function bulkInsertCodesAsAdmin(
       ...r,
     });
   }
+}
+
+/**
+ * Merge/upsert mapping rows from an uploaded file (PR 3 — file import).
+ *
+ * Matches are keyed on the composite `specialtySlug + code`. For an existing
+ * code we overwrite ONLY the metadata columns the file carries
+ * (`source`, `description`, `category`, `consolidationCategory`) and only when
+ * the file's cell is non-blank — mapping results (`mappedAt`, coverage,
+ * suggestion arrays, derived counts) are never touched, so a re-import of the
+ * source ontology preserves any mapping work already done. New codes are
+ * inserted via `bulkInsertCodesAsAdmin` defaults (unmapped). In-file duplicate
+ * codes are last-one-wins (the caller surfaces them in the preview).
+ */
+export async function upsertCodesAsAdmin(
+  slug: string,
+  rows: ParsedCodeRow[],
+): Promise<{ created: number; updated: number }> {
+  const pb = await createAdminClient();
+  const existing = await pb
+    .collection<CodeRecord>('codes')
+    .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,code' });
+  const idByCode = new Map(existing.map((r) => [r.code, r.id]));
+
+  // Last-one-wins for duplicate codes within the file.
+  const deduped = new Map<string, ParsedCodeRow>();
+  for (const row of rows) deduped.set(row.code, row);
+
+  let created = 0;
+  let updated = 0;
+  for (const row of deduped.values()) {
+    const metadata: Record<string, string> = {};
+    if (row.source !== undefined) metadata.source = row.source;
+    if (row.description !== undefined) metadata.description = row.description;
+    if (row.category !== undefined) metadata.category = row.category;
+    if (row.consolidationCategory !== undefined)
+      metadata.consolidationCategory = row.consolidationCategory;
+
+    const id = idByCode.get(row.code);
+    if (id) {
+      if (Object.keys(metadata).length > 0) {
+        await pb.collection('codes').update(id, metadata);
+      }
+      updated++;
+    } else {
+      await pb.collection('codes').create({
+        specialtySlug: slug,
+        coverageArticleCount: 0,
+        coverageSectionCount: 0,
+        existingArticleUpdateCount: 0,
+        newArticleSuggestionCount: 0,
+        code: row.code,
+        ...metadata,
+      });
+      created++;
+    }
+  }
+  return { created, updated };
 }
 
 export async function deleteCodesForSpecialtyAsAdmin(slug: string): Promise<void> {

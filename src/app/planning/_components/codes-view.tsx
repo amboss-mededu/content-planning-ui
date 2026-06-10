@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
+import { Badge, Button, Inline, Stack, Text, Tooltip } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { COVERAGE_LEVELS, type Code } from '@/lib/types';
@@ -365,6 +365,26 @@ export function CodesView({
   }, [onOpenDetail, inFlightSet]);
 
   const canRemap = supportReady && canEdit && unmappedCount > 0;
+  // Hide the button once every code is mapped — there's nothing left for it to
+  // do. While consolidation is active it stays visible but disabled (with a
+  // tooltip explaining why); the bulk action remaps unmapped codes, which the
+  // consolidation gate locks. Individual unmapped codes can still be mapped
+  // from a row's detail modal — see the note below.
+  const allMapped = supportReady && unmappedCount === 0;
+  const lockedFromRemap = supportReady && !canEdit && unmappedCount > 0;
+  const remapButton = (
+    <Button
+      variant="secondary"
+      size="m"
+      onClick={async () => {
+        await onRequestRemapData?.();
+        setRemapOpen(true);
+      }}
+      disabled={!canRemap || remapLoading}
+    >
+      {remapLoading ? 'Loading…' : 'Map by category…'}
+    </Button>
+  );
   return (
     <Stack space="m">
       {supportReady && !canEdit ? (
@@ -375,17 +395,13 @@ export function CodesView({
         </Text>
       ) : null}
       <Inline space="s" vAlignItems="center">
-        <Button
-          variant="secondary"
-          size="m"
-          onClick={async () => {
-            await onRequestRemapData?.();
-            setRemapOpen(true);
-          }}
-          disabled={!canRemap || remapLoading}
-        >
-          {remapLoading ? 'Loading…' : 'Map by category…'}
-        </Button>
+        {allMapped ? null : lockedFromRemap ? (
+          <Tooltip content="Consolidation has already been run — reset the consolidation stage to re-enable bulk mapping.">
+            <span style={{ display: 'inline-flex' }}>{remapButton}</span>
+          </Tooltip>
+        ) : (
+          remapButton
+        )}
         <Text color="secondary">
           {!supportReady
             ? 'Loading mapping controls…'
