@@ -94,6 +94,10 @@ export function EditableCell<T>({
   const [hover, setHover] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+
+  const kind = editable.kind ?? 'text';
+  const isSelect = kind === 'select' || kind === 'boolean';
 
   // When the underlying row changes (e.g. after a refresh picked up a new
   // server value), stop editing and re-sync the draft.
@@ -105,15 +109,16 @@ export function EditableCell<T>({
   // keeping the expected "click a cell → caret is inside the input" UX.
   useEffect(() => {
     if (!editing) return;
-    const el = textareaRef.current ?? inputRef.current;
+    const el = textareaRef.current ?? inputRef.current ?? selectRef.current;
     if (el) {
       el.focus();
-      el.select();
+      if ('select' in el && typeof el.select === 'function') el.select();
     }
   }, [editing]);
 
-  const commit = async () => {
-    const next = value.trim();
+  // `next` lets the select commit the freshly-chosen value synchronously
+  // rather than waiting a render for `value` state to settle.
+  const commit = async (next: string = value.trim()) => {
     const prev = editable.getValue(row);
     if (next === prev) {
       setEditing(false);
@@ -139,8 +144,50 @@ export function EditableCell<T>({
 
   if (editing) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {editable.multiline ? (
+      // Stop clicks inside the editor from bubbling to the row's onRowClick
+      // (which would otherwise open the detail modal mid-edit). This wrapper is
+      // a click sink, not an interactive control — the inputs inside carry the
+      // real semantics.
+      // biome-ignore lint/a11y/noStaticElementInteractions: click-propagation sink around real form controls
+      // biome-ignore lint/a11y/useKeyWithClickEvents: stops mouse-click bubbling only; keyboard never bubbles a row click
+      <div
+        style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {isSelect ? (
+          <select
+            ref={selectRef}
+            value={value}
+            disabled={saving}
+            onChange={(e) => {
+              setValue(e.target.value);
+              commit(e.target.value);
+            }}
+            onBlur={() => {
+              if (!saving) cancel();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                cancel();
+              }
+            }}
+            style={{
+              width: '100%',
+              padding: '4px 6px',
+              border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.25))',
+              borderRadius: 4,
+              font: 'inherit',
+              background: 'white',
+            }}
+          >
+            {(editable.options ?? []).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        ) : editable.multiline ? (
           <textarea
             ref={textareaRef}
             value={value}
@@ -172,7 +219,7 @@ export function EditableCell<T>({
         ) : (
           <input
             ref={inputRef}
-            type="text"
+            type={kind === 'number' ? 'number' : 'text'}
             value={value}
             disabled={saving}
             onChange={(e) => setValue(e.target.value)}
@@ -211,7 +258,10 @@ export function EditableCell<T>({
   return (
     <button
       type="button"
-      onClick={() => setEditing(true)}
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditing(true);
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onFocus={() => setHover(true)}

@@ -2,10 +2,18 @@
 
 import { Badge, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
+import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { COVERAGE_LEVELS, type Code } from '@/lib/types';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
-import { type Column, DataTable } from './data-table';
+import { type Column, DataTable, type EditableConfig } from './data-table';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
+
+/** Edit one code via the parent's PATCH handler (table merges the returned
+ *  row). Returns void to satisfy the data-table's `EditableConfig.onSave`. */
+export type PatchRowHandler = (
+  code: string,
+  fields: PatchCodeFields,
+) => Promise<CodeTableRow>;
 
 function countCoveredSections(items: unknown): number {
   if (!Array.isArray(items)) return 0;
@@ -40,6 +48,18 @@ const IN_AMBOSS_FILTER_OPTIONS = [
   { value: 'no', label: 'No' },
 ];
 
+// Inline-edit option lists. Both lead with an empty "—" no-op choice so the
+// select can display "unset" without forcing a value on open.
+const IN_AMBOSS_EDIT_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+];
+const COVERAGE_EDIT_OPTIONS = [
+  { value: '', label: '—' },
+  ...COVERAGE_LEVELS.map((v) => ({ value: v, label: v })),
+];
+
 export function CodesView({
   codes,
   specialtySlug,
@@ -49,6 +69,7 @@ export function CodesView({
   inFlightCodes,
   totalCount,
   loadState,
+  onPatchRow,
 }: {
   codes: Code[];
   specialtySlug: string;
@@ -58,6 +79,9 @@ export function CodesView({
   inFlightCodes: string[];
   totalCount?: number;
   loadState?: 'loading' | 'retrying' | 'complete';
+  /** Present only when inline edits are wired (the client view supplies it).
+   *  Cells are editable when `canEdit` is also true. */
+  onPatchRow?: PatchRowHandler;
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
 
@@ -71,22 +95,42 @@ export function CodesView({
     [],
   );
 
+  const editingEnabled = canEdit && !!onPatchRow;
+
+  // Source is edited via a select fed by the distinct source values already
+  // present in the table (new sources come in through the file import flow).
+  const sourceOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of codes) if (c.source) set.add(c.source);
+    return Array.from(set)
+      .sort((a, b) => a.localeCompare(b))
+      .map((v) => ({ value: v, label: v }));
+  }, [codes]);
+
   const columns = useMemo<Column<Code>[]>(() => {
-    // The metadata cells all open the row's detail modal. Clicking any of
-    // them (Source, Code, Description, Category, Consolidation category) is
-    // the universal "open this row" affordance — works for unmapped rows
-    // too, since the coverage chips don't render until a code is mapped.
-    const openMeta = (r: Code) => onOpenDetail(r, 'coverage-articles');
+    // Saving an inline edit delegates to the parent's PATCH handler, which
+    // merges the returned row into table state. `onSave` resolves to void to
+    // satisfy the data-table's EditableConfig contract.
+    const save = (r: Code, fields: PatchCodeFields): Promise<void> =>
+      onPatchRow ? onPatchRow(r.code, fields).then(() => undefined) : Promise.resolve();
+
+    // Build an editable config only when editing is enabled — otherwise the
+    // column renders as plain display and the row-level click opens the modal.
+    const edit = (cfg: EditableConfig<Code>): EditableConfig<Code> | undefined =>
+      editingEnabled ? cfg : undefined;
+
     return [
       {
         key: 'source',
         label: 'Source',
         description: 'Ontology this code came from (ICD10, HCUP, ABIM, Orpha)',
-        render: (r) => (
-          <ClickableCell onClick={() => openMeta(r)} title="Open code details">
-            {r.source ?? '—'}
-          </ClickableCell>
-        ),
+        render: (r) => <span>{r.source ?? '—'}</span>,
+        editable: edit({
+          kind: 'select',
+          options: sourceOptions,
+          getValue: (r) => r.source ?? '',
+          onSave: (r, next) => save(r, { source: next }),
+        }),
         width: 80,
         align: 'center',
         accessor: (r) => r.source ?? null,
@@ -98,15 +142,10 @@ export function CodesView({
         key: 'code',
         label: 'Code',
         description:
-          'Identifier of the code in its source ontology — click to open details',
-        // Plain text — no <code> wrapper, which used to introduce UA-default
-        // monospace styling that made this column read differently from its
-        // metadata neighbors even after fontFamily overrides.
-        render: (r) => (
-          <ClickableCell onClick={() => openMeta(r)} title="Open code details">
-            {r.code}
-          </ClickableCell>
-        ),
+          'Identifier of the code in its source ontology — click the row to open details',
+        // Read-only: `code` is half the composite key referenced by other
+        // collections; renaming would orphan them. Fix a wrong code via import.
+        render: (r) => <span>{r.code}</span>,
         width: 180,
         align: 'center',
         accessor: (r) => r.code ?? null,
@@ -122,11 +161,13 @@ export function CodesView({
         // widths and the nowrap headers overflow into neighbors. Drag-resize
         // still overrides on a per-column basis.
         width: 320,
-        render: (r) => (
-          <ClickableCell onClick={() => openMeta(r)} title="Open code details">
-            <span style={{ textAlign: 'left' }}>{r.description ?? ''}</span>
-          </ClickableCell>
-        ),
+        render: (r) => <span style={{ textAlign: 'left' }}>{r.description ?? ''}</span>,
+        editable: edit({
+          kind: 'text',
+          multiline: true,
+          getValue: (r) => r.description ?? '',
+          onSave: (r, next) => save(r, { description: next }),
+        }),
         accessor: (r) => r.description ?? null,
         type: 'string',
         // Free-form text — a checkbox list of unique descriptions would be
@@ -141,11 +182,12 @@ export function CodesView({
         label: 'Category',
         description: 'Category from the source ontology this code belongs to',
         width: 200,
-        render: (r) => (
-          <ClickableCell onClick={() => openMeta(r)} title="Open code details">
-            {r.category ?? '—'}
-          </ClickableCell>
-        ),
+        render: (r) => <span>{r.category ?? '—'}</span>,
+        editable: edit({
+          kind: 'text',
+          getValue: (r) => r.category ?? '',
+          onSave: (r, next) => save(r, { category: next }),
+        }),
         accessor: (r) => r.category ?? null,
         type: 'string',
         filterable: true,
@@ -156,11 +198,12 @@ export function CodesView({
         label: 'Consolidation category',
         description: 'Bucket this code was assigned to during consolidation/dedup',
         width: 220,
-        render: (r) => (
-          <ClickableCell onClick={() => openMeta(r)} title="Open code details">
-            {r.consolidationCategory ?? '—'}
-          </ClickableCell>
-        ),
+        render: (r) => <span>{r.consolidationCategory ?? '—'}</span>,
+        editable: edit({
+          kind: 'text',
+          getValue: (r) => r.consolidationCategory ?? '',
+          onSave: (r, next) => save(r, { consolidationCategory: next }),
+        }),
         accessor: (r) => r.consolidationCategory ?? null,
         type: 'string',
         filterable: true,
@@ -177,22 +220,19 @@ export function CodesView({
           // `isInAMBOSS` is a non-nullable PB bool; only treat it as a
           // verdict once the mapping workflow has stamped `mappedAt`.
           const mapped = (r.mappedAt ?? 0) > 0;
-          if (mapped && r.isInAMBOSS === true) {
-            return (
-              <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
-                <Badge text="Yes" color="green" />
-              </ClickableCell>
-            );
-          }
-          if (mapped && r.isInAMBOSS === false) {
-            return (
-              <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
-                <Badge text="No" color="red" />
-              </ClickableCell>
-            );
-          }
+          if (mapped && r.isInAMBOSS === true) return <Badge text="Yes" color="green" />;
+          if (mapped && r.isInAMBOSS === false) return <Badge text="No" color="red" />;
           return <EmptyChip />;
         },
+        editable: edit({
+          kind: 'boolean',
+          options: IN_AMBOSS_EDIT_OPTIONS,
+          getValue: (r) => ((r.mappedAt ?? 0) > 0 ? (r.isInAMBOSS ? 'yes' : 'no') : ''),
+          // The empty "—" option is a no-op (there's no way to un-map via this
+          // cell); Yes/No write the verdict and stamp mappedAt server-side.
+          onSave: (r, next) =>
+            next === '' ? Promise.resolve() : save(r, { isInAMBOSS: next === 'yes' }),
+        }),
         // mapped+true → 1, mapped+false → 0, unmapped → null so unmapped
         // rows stay at the bottom regardless of sort direction.
         accessor: (r) => {
@@ -221,12 +261,15 @@ export function CodesView({
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (!r.coverageLevel) return <EmptyChip />;
-          return (
-            <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
-              <CoverageBadge level={r.coverageLevel} />
-            </ClickableCell>
-          );
+          return <CoverageBadge level={r.coverageLevel} />;
         },
+        editable: edit({
+          kind: 'select',
+          options: COVERAGE_EDIT_OPTIONS,
+          getValue: (r) => r.coverageLevel ?? '',
+          onSave: (r, next) =>
+            next === '' ? Promise.resolve() : save(r, { coverageLevel: next }),
+        }),
         width: 140,
         align: 'center',
         // Sort as a number (rank) so asc/desc follow the coverage ladder rather
@@ -255,12 +298,22 @@ export function CodesView({
           if (!mapped || r.depthOfCoverage === undefined || r.depthOfCoverage === null) {
             return <EmptyChip />;
           }
-          return (
-            <ClickableCell onClick={() => onOpenDetail(r, 'coverage-articles')}>
-              <DepthBadge depth={r.depthOfCoverage} level={r.coverageLevel} />
-            </ClickableCell>
-          );
+          return <DepthBadge depth={r.depthOfCoverage} level={r.coverageLevel} />;
         },
+        editable: edit({
+          kind: 'number',
+          getValue: (r) =>
+            (r.mappedAt ?? 0) > 0 && typeof r.depthOfCoverage === 'number'
+              ? String(r.depthOfCoverage)
+              : '',
+          onSave: (r, next) => {
+            const num = Number(next);
+            if (next === '' || Number.isNaN(num) || num < 0) {
+              return Promise.reject(new Error('Enter a number ≥ 0'));
+            }
+            return save(r, { depthOfCoverage: num });
+          },
+        }),
         width: 90,
         align: 'center',
         accessor: (r) => ((r.mappedAt ?? 0) > 0 ? (r.depthOfCoverage ?? null) : null),
@@ -349,7 +402,7 @@ export function CodesView({
         group: 'suggestions',
       },
     ];
-  }, [onOpenDetail, inFlightSet]);
+  }, [onOpenDetail, inFlightSet, editingEnabled, onPatchRow, sourceOptions]);
 
   return (
     <Stack space="m">
@@ -366,6 +419,9 @@ export function CodesView({
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
         leadingNote={getLoadStatusText(loadState, totalCount, codes.length)}
+        // The whole row opens the detail modal; editable cells and the
+        // deep-link chips stop propagation so they don't trip this.
+        onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
         countAddendum={(filtered) => {
           const mapped = filtered.reduce(
             (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
@@ -383,6 +439,7 @@ export function CodesView({
         lockStatus={lockStatus}
         supportReady={supportReady}
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
+        onPatchRow={onPatchRow}
         onClose={() => setSelected(null)}
       />
     </Stack>
@@ -417,50 +474,6 @@ const CHIP_TONES: Record<
   },
 };
 
-/**
- * Wraps cell content so the whole rendered area is clickable. Used both for
- * coverage cells (In AMBOSS / Coverage / Depth) deep-linking into the modal,
- * and for metadata cells (Source / Code / Description / Category / Consol.)
- * which provide the universal "open this row" affordance — including for
- * unmapped rows that have no chips.
- */
-function ClickableCell({
-  onClick,
-  title = 'Open code details',
-  children,
-}: {
-  onClick: () => void;
-  title?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{
-        background: 'none',
-        border: 'none',
-        padding: 0,
-        cursor: 'pointer',
-        font: 'inherit',
-        color: 'inherit',
-        textAlign: 'inherit',
-        display: 'inline-flex',
-        alignItems: 'center',
-        // Center the badge / chip inside the button by default. If the
-        // button is content-sized this is a no-op; if it's been forced
-        // to fill the cell width (UA defaults on <button>, fixed table
-        // layout, etc.) the inner badge stops sitting flush-left and
-        // sits in the visual center.
-        justifyContent: 'center',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 function ChipButton({
   label,
   tone,
@@ -474,7 +487,12 @@ function ChipButton({
   return (
     <button
       type="button"
-      onClick={onClick}
+      // Deep-links to a specific modal tab; stop the click from bubbling to
+      // the row handler, which would otherwise override the target tab.
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       title="Open breakdown"
       style={{
         display: 'inline-flex',

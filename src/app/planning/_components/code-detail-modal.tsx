@@ -1,10 +1,16 @@
 'use client';
 
-import { Badge, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
+import { Badge, Button, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
+import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
+import type {
+  CoveredSection as CoveredSectionRow,
+  NewArticle as NewArticleRow,
+  SectionUpdate as SectionUpdateRow,
+} from '@/lib/pb/types';
 import type { Code } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
@@ -15,6 +21,12 @@ import {
   readSpec,
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
+import {
+  ArticleUpdatesEditor,
+  CoverageArticlesEditor,
+  NewArticlesEditor,
+  TextFieldsEditor,
+} from './code-detail-edit-panels';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
 
 // The on-disk shape of these JSON columns is richer than the Zod type
@@ -93,6 +105,7 @@ export function CodeDetailModal({
   lockStatus,
   supportReady = true,
   inFlight,
+  onPatchRow,
   onClose,
 }: {
   row: Code | null;
@@ -102,6 +115,9 @@ export function CodeDetailModal({
   lockStatus: string | null;
   supportReady?: boolean;
   inFlight: boolean;
+  /** When present (and `canEdit`), the array/notes tabs gain an Edit toggle.
+   *  Saving PATCHes a full-array replacement and refreshes the detail. */
+  onPatchRow?: (code: string, fields: PatchCodeFields) => Promise<CodeTableRow>;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -119,6 +135,10 @@ export function CodeDetailModal({
     'idle',
   );
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Which tab (if any) is in edit mode, and a counter bumped after a save to
+  // re-run the detail fetch so the panel reflects the persisted arrays.
+  const [editingTab, setEditingTab] = useState<number | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
 
   // The modal stays mounted across opens (row toggles between null and a
   // value), so re-align the tab whenever the caller's target/row changes.
@@ -137,10 +157,14 @@ export function CodeDetailModal({
     setFullRow(null);
     setDetailState(rowKey ? 'loading' : 'idle');
     setDetailError(null);
+    setEditingTab(null);
   }, [target, rowKey]);
 
   useEffect(() => {
     if (!rowKey) return;
+    // `reloadSeq` is a trigger-only dep — bumped after a save to re-fetch the
+    // freshly-persisted detail. Read it so the exhaustive-deps lint is happy.
+    void reloadSeq;
     let cancelled = false;
     setDetailState('loading');
     setDetailError(null);
@@ -170,7 +194,7 @@ export function CodeDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [rowKey, specialtySlug]);
+  }, [rowKey, specialtySlug, reloadSeq]);
 
   // Lazy-load metadata only when the user opens that tab. We deliberately
   // exclude `metadataState` from the deps: setting it to 'loading' inside the
@@ -310,6 +334,21 @@ export function CodeDetailModal({
   const specialty = detailRow.specialty ?? '';
   const category = detailRow.category ?? '';
 
+  // PATCH a full-array (or notes) replacement, then re-fetch the detail so the
+  // panel shows the persisted values. `onPatchRow` also merges the lean row
+  // into the table behind the modal (count columns / mappedAt update).
+  const patchAndReload = async (fields: PatchCodeFields) => {
+    if (!onPatchRow || !rowKey) return;
+    await onPatchRow(rowKey, fields);
+    setReloadSeq((s) => s + 1);
+  };
+
+  // Edit affordances are offered on the array/notes tabs once the lock is open,
+  // the parent supplied a PATCH handler, and the detail has loaded.
+  const canEditPanel =
+    canEdit && !!onPatchRow && detailState === 'loaded' && activeTab <= 4;
+  const isEditingPanel = editingTab === activeTab;
+
   return (
     <Modal
       header={detailRow.description ?? detailRow.code}
@@ -387,7 +426,10 @@ export function CodeDetailModal({
             aria-label="Code detail sections"
             tabPanelId="code-detail-panel"
             activeTab={activeTab}
-            onTabSelect={setActiveTab}
+            onTabSelect={(i) => {
+              setActiveTab(i);
+              setEditingTab(null);
+            }}
             tabs={[
               { label: 'Coverage' },
               { label: 'Coverage Notes & Gaps' },
@@ -398,10 +440,60 @@ export function CodeDetailModal({
             ]}
           >
             <div>
+              {canEditPanel && !isEditingPanel ? (
+                <Inline alignItems="right" fullWidth>
+                  <Button
+                    variant="secondary"
+                    size="s"
+                    onClick={() => setEditingTab(activeTab)}
+                  >
+                    Edit
+                  </Button>
+                </Inline>
+              ) : null}
               {detailLoading && activeTab !== 5 ? (
                 <Text size="s" color="tertiary">
                   Loading code details…
                 </Text>
+              ) : isEditingPanel && activeTab === 0 ? (
+                <CoverageArticlesEditor
+                  initial={covered as unknown as CoveredSectionRow[]}
+                  save={(next) => patchAndReload({ articlesWhereCoverageIs: next })}
+                  onClose={() => setEditingTab(null)}
+                />
+              ) : isEditingPanel && activeTab === 1 ? (
+                <TextFieldsEditor
+                  fields={[
+                    { key: 'notes', label: 'Notes', value: detailRow.notes ?? '' },
+                    { key: 'gaps', label: 'Gaps', value: detailRow.gaps ?? '' },
+                  ]}
+                  save={(next) => patchAndReload({ notes: next.notes, gaps: next.gaps })}
+                  onClose={() => setEditingTab(null)}
+                />
+              ) : isEditingPanel && activeTab === 2 ? (
+                <TextFieldsEditor
+                  fields={[
+                    {
+                      key: 'improvements',
+                      label: 'Improvements',
+                      value: detailRow.improvements ?? '',
+                    },
+                  ]}
+                  save={(next) => patchAndReload({ improvements: next.improvements })}
+                  onClose={() => setEditingTab(null)}
+                />
+              ) : isEditingPanel && activeTab === 3 ? (
+                <ArticleUpdatesEditor
+                  initial={updates as unknown as SectionUpdateRow[]}
+                  save={(next) => patchAndReload({ existingArticleUpdates: next })}
+                  onClose={() => setEditingTab(null)}
+                />
+              ) : isEditingPanel && activeTab === 4 ? (
+                <NewArticlesEditor
+                  initial={newArticles as unknown as NewArticleRow[]}
+                  save={(next) => patchAndReload({ newArticlesNeeded: next })}
+                  onClose={() => setEditingTab(null)}
+                />
               ) : activeTab === 0 ? (
                 <CoverageArticlesPanel covered={covered} />
               ) : activeTab === 1 ? (

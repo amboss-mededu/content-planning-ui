@@ -2,39 +2,24 @@
  * Per-code edit endpoint.
  *
  * PATCH /api/codes/[specialty]/[code]
- *   body: { description?, category?, consolidationCategory? }
+ *   body: strict — scalar metadata/coverage fields plus the three JSON
+ *   suggestion arrays (full replacements). See `lib/validation/code-patch.ts`.
  *
  * Gated on consolidation state — returns 409 if `consolidate_primary` is in
  * any state other than `pending`/`skipped`. The gate is also enforced in the
- * UI, but re-checked here so a stale tab can't bypass it.
+ * UI, but re-checked here so a stale tab can't bypass it. Returns the updated
+ * row so the client can merge it into local table state.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
-import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
-import { getCode, patchCode } from '@/lib/data/codes';
+import { getCode, type PatchCodeFields, patchCode } from '@/lib/data/codes';
 import { getConsolidationLockState } from '@/lib/data/pipeline';
 import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
-
-// Fields are validated leniently — `cleanOpt` already coerces non-strings,
-// nulls, and blanks to no-ops, so the schema only guards that the body is an
-// object and forwards the raw values through.
-const Body = z.object({
-  description: z.unknown().optional(),
-  category: z.unknown().optional(),
-  consolidationCategory: z.unknown().optional(),
-});
-
-function cleanOpt(v: unknown): string | undefined {
-  // Treat `null` and empty strings as no-ops — the UI doesn't expose a
-  // clear action, so we forward only meaningful, trimmed values.
-  if (typeof v !== 'string') return undefined;
-  const trimmed = v.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
-}
+import { CodePatchBody, type CodePatchInput } from '@/lib/validation/code-patch';
 
 export async function GET(
   _req: NextRequest,
@@ -71,27 +56,18 @@ export async function PATCH(
     );
   }
 
-  const body = await parseBodyOr400(req, Body);
+  const body = await parseBodyOr400(req, CodePatchBody);
   if (body instanceof NextResponse) return body;
-  const description = cleanOpt(body.description);
-  const category = cleanOpt(body.category);
-  const consolidationCategory = cleanOpt(body.consolidationCategory);
-  const fields: {
-    description?: string;
-    category?: string;
-    consolidationCategory?: string;
-  } = {};
-  if (description !== undefined) fields.description = description;
-  if (category !== undefined) fields.category = category;
-  if (consolidationCategory !== undefined)
-    fields.consolidationCategory = consolidationCategory;
+
+  const fields = toPatchFields(body);
   if (Object.keys(fields).length === 0) {
     return NextResponse.json({ error: 'no editable fields supplied' }, { status: 400 });
   }
-  log('codes').info('PATCH', { slug, code: codeId, fields });
+  log('codes').info('PATCH', { slug, code: codeId, fields: Object.keys(fields) });
 
   try {
-    await patchCode(slug, codeId, fields);
+    const updated = await patchCode(slug, codeId, fields);
+    return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
       return NextResponse.json({ error: 'code not found' }, { status: 404 });
@@ -100,6 +76,32 @@ export async function PATCH(
     log('codes').error('PATCH failed:', e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+}
 
-  return NextResponse.json({ ok: true });
+/**
+ * Project the validated body onto `PatchCodeFields`. Scalar strings are trimmed
+ * (an empty string is forwarded so an editor can clear a field). Arrays, the
+ * enum, the number, and the boolean pass through as-is. Keys absent from the
+ * body stay absent from the update.
+ */
+function toPatchFields(body: CodePatchInput): PatchCodeFields {
+  const out: PatchCodeFields = {};
+  if (body.source !== undefined) out.source = body.source.trim();
+  if (body.description !== undefined) out.description = body.description.trim();
+  if (body.category !== undefined) out.category = body.category.trim();
+  if (body.consolidationCategory !== undefined)
+    out.consolidationCategory = body.consolidationCategory.trim();
+  if (body.isInAMBOSS !== undefined) out.isInAMBOSS = body.isInAMBOSS;
+  if (body.coverageLevel !== undefined) out.coverageLevel = body.coverageLevel;
+  if (body.depthOfCoverage !== undefined) out.depthOfCoverage = body.depthOfCoverage;
+  if (body.notes !== undefined) out.notes = body.notes.trim();
+  if (body.gaps !== undefined) out.gaps = body.gaps.trim();
+  if (body.improvements !== undefined) out.improvements = body.improvements.trim();
+  if (body.articlesWhereCoverageIs !== undefined)
+    out.articlesWhereCoverageIs = body.articlesWhereCoverageIs;
+  if (body.existingArticleUpdates !== undefined)
+    out.existingArticleUpdates = body.existingArticleUpdates;
+  if (body.newArticlesNeeded !== undefined)
+    out.newArticlesNeeded = body.newArticlesNeeded;
+  return out;
 }

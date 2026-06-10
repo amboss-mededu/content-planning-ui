@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CodeTableRow } from '@/lib/data/codes';
+import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import type { MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
@@ -214,6 +214,30 @@ export function CodesViewClient({
     };
   }, [slug, loadState, newestUpdated, fullReconcile]);
 
+  // Apply an inline cell edit. PATCH returns the updated lean row; merge it in
+  // place so the table reflects the change (and any server-recomputed counts /
+  // mappedAt stamp) immediately, without waiting for the 5s poll.
+  const patchRow = useCallback(
+    async (code: string, fields: PatchCodeFields): Promise<CodeTableRow> => {
+      const res = await fetch(
+        `/api/codes/${encodeURIComponent(slug)}/${encodeURIComponent(code)}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(fields),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
+      const updated = (await res.json()) as CodeTableRow;
+      setCodes((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      return updated;
+    },
+    [slug],
+  );
+
   const supportReady = summary !== null;
   const canEdit = supportReady ? !summary.lock.locked : false;
   const lockStatus = summary?.lock.status ?? null;
@@ -230,6 +254,7 @@ export function CodesViewClient({
       inFlightCodes={inFlightCodes}
       totalCount={totalCount}
       loadState={loadState}
+      onPatchRow={patchRow}
     />
   );
 }
