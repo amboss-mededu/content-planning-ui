@@ -205,9 +205,10 @@ export async function listUnmappedCodeCount(slug: string): Promise<number> {
 export async function listCodeStrings(slug: string): Promise<string[]> {
   await connection();
   const pb = await userClient();
-  const rows = await pb
-    .collection<CodeRecord>('codes')
-    .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'code' });
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    fields: 'code',
+  });
   return rows.map((r) => r.code);
 }
 
@@ -504,9 +505,10 @@ export async function upsertCodesAsAdmin(
   rows: ParsedCodeRow[],
 ): Promise<{ created: number; updated: number }> {
   const pb = await createAdminClient();
-  const existing = await pb
-    .collection<CodeRecord>('codes')
-    .getFullList({ filter: `specialtySlug = "${slug}"`, fields: 'id,code' });
+  const existing = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+    fields: 'id,code',
+  });
   const idByCode = new Map(existing.map((r) => [r.code, r.id]));
 
   // Last-one-wins for duplicate codes within the file.
