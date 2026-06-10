@@ -1,11 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  CodeCategorySummary,
-  CodeTableRow,
-  UnmappedCodePickerRow,
-} from '@/lib/data/codes';
+import type { CodeTableRow } from '@/lib/data/codes';
 import type { MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 import type { Code } from '@/lib/types';
@@ -41,11 +37,6 @@ export function CodesViewClient({
   );
   const [summary, setSummary] = useState<SupportSummary | null>(null);
 
-  const [remapData, setRemapData] = useState<{
-    categories: CodeCategorySummary[];
-    unmappedCodes: UnmappedCodePickerRow[];
-  } | null>(null);
-  const [remapLoading, setRemapLoading] = useState(false);
   const currentSlugRef = useRef(slug);
   const nextPageRef = useRef(2);
 
@@ -57,8 +48,6 @@ export function CodesViewClient({
       setHasMore(initialHasMore);
       setLoadState(initialHasMore ? 'loading' : 'complete');
       setSummary(null);
-      setRemapData(null);
-      setRemapLoading(false);
       return;
     }
 
@@ -95,25 +84,6 @@ export function CodesViewClient({
       cancelled = true;
     };
   }, [slug]);
-
-  const loadRemapData = useCallback(async () => {
-    if (remapData || remapLoading) return;
-    setRemapLoading(true);
-    try {
-      const res = await fetch(
-        `/api/pipeline/${encodeURIComponent(slug)}/map-codes-form-data`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setRemapData({
-          categories: data.categories,
-          unmappedCodes: data.unmappedCodes,
-        });
-      }
-    } finally {
-      setRemapLoading(false);
-    }
-  }, [slug, remapData, remapLoading]);
 
   const inFlightRows = useLiveCollection<MappingInFlightRecord>(
     'mappingsInFlight',
@@ -195,7 +165,6 @@ export function CodesViewClient({
     }
 
     setCodes((prev) => prev.filter((r) => freshIds.has(r.id)));
-    setRemapData(null);
   }, [slug]);
 
   useEffect(() => {
@@ -220,7 +189,6 @@ export function CodesViewClient({
           if (cancelled) return;
           if (data.items.length > 0) {
             setCodes((prev) => mergePageInto(prev, data.items));
-            setRemapData(null);
           }
           more = data.hasMore;
           page++;
@@ -251,9 +219,6 @@ export function CodesViewClient({
   const lockStatus = summary?.lock.status ?? null;
   const allRowsLoaded = loadState === 'complete' && !hasMore;
   const totalCount = summary?.totalCount ?? (allRowsLoaded ? codes.length : undefined);
-  const unmappedCount = allRowsLoaded
-    ? codes.filter((r) => !r.mappedAt || r.mappedAt === 0).length
-    : (summary?.unmappedCount ?? 0);
 
   return (
     <CodesView
@@ -263,13 +228,8 @@ export function CodesViewClient({
       lockStatus={lockStatus}
       supportReady={supportReady}
       inFlightCodes={inFlightCodes}
-      categories={remapData?.categories ?? []}
-      unmappedCodes={remapData?.unmappedCodes ?? []}
-      unmappedCount={unmappedCount}
       totalCount={totalCount}
       loadState={loadState}
-      remapLoading={remapLoading}
-      onRequestRemapData={loadRemapData}
     />
   );
 }
