@@ -1,6 +1,7 @@
 'use client';
 
 import { Button, Inline, Stack, Text } from '@amboss/design-system';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type { ArticleReviewRecord, ReviewCommentRecord } from '@/lib/pb/types';
 import { useApprovalState } from '@/lib/pb/use-approval-state';
@@ -13,6 +14,8 @@ import { CodeChipList } from './code-chip';
 import type { CategoryLookup, EmbeddedCode, TitleOriginLookup } from './code-utils';
 import { ConsolidationViewSwitcher } from './consolidation-view-switcher';
 import { type Column, DataTable } from './data-table';
+import { EditArticleModal } from './edit-article-modal';
+import { MergeArticlesModal } from './merge-articles-modal';
 import { APPROVED_TINT, REJECTED_TINT } from './review-tints';
 
 /**
@@ -240,15 +243,42 @@ export function ArticlesView({
   initialNotesByArticle: Record<string, string>;
   viewerEmail?: string;
 }) {
+  const router = useRouter();
+  // Row currently open in the edit (rename / codes) modal, and whether the
+  // merge modal is open.
+  const [editRow, setEditRow] = useState<ArticleRow | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+
   const allColumns = useMemo(
     () => buildColumns(categoryLookup, titleOriginLookup),
     [categoryLookup, titleOriginLookup],
   );
-  // Current candidate column shape: keep Category and hide lineage by default.
-  const columns = useMemo(
-    () => allColumns.filter((c) => c.key !== 'previousArticleTitles'),
-    [allColumns],
-  );
+  // Current candidate column shape: keep Category, hide lineage by default,
+  // and append a per-row Edit action. The Edit button stops propagation so
+  // it doesn't also trigger the row-click review modal.
+  const columns = useMemo(() => {
+    const base = allColumns.filter((c) => c.key !== 'previousArticleTitles');
+    const editColumn: Column<ArticleRow> = {
+      key: 'edit',
+      label: '',
+      width: 72,
+      align: 'center',
+      render: (row) =>
+        row.articleKey ? (
+          <Button
+            variant="tertiary"
+            size="s"
+            onClick={(e) => {
+              (e as React.MouseEvent).stopPropagation();
+              setEditRow(row);
+            }}
+          >
+            Edit
+          </Button>
+        ) : null,
+    };
+    return [...base, editColumn];
+  }, [allColumns]);
   // Same shared decision hook the other three planning screens use.
   // Reviews + reviewers are derived from the hook's effective row set,
   // so optimistic patches from any view (or PB realtime updates from
@@ -347,6 +377,13 @@ export function ArticlesView({
             Review all {activeRows.length.toLocaleString()}
           </Button>
         )}
+        <Button
+          variant="tertiary"
+          onClick={() => setMergeOpen(true)}
+          disabled={activeRows.length < 2}
+        >
+          Merge articles
+        </Button>
       </Inline>
       <Stack space="m">
         <DataTable
@@ -389,6 +426,40 @@ export function ArticlesView({
             onDecideArticle: approval.decideArticle,
           }}
           onClose={() => setReviewOpen(false)}
+        />
+      )}
+
+      {editRow?.articleKey && (
+        <EditArticleModal
+          slug={slug}
+          articleKey={editRow.articleKey}
+          articleTitle={editRow.articleTitle ?? ''}
+          consolidationCategory={editRow.category}
+          codes={editRow.codes}
+          onClose={() => setEditRow(null)}
+          onSaved={() => {
+            setEditRow(null);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {mergeOpen && (
+        <MergeArticlesModal
+          slug={slug}
+          candidates={activeRows
+            .filter((r): r is ArticleRow & { articleKey: string } => !!r.articleKey)
+            .map((r) => ({
+              articleKey: r.articleKey,
+              articleTitle: r.articleTitle ?? '',
+              numCodes: r.numCodes,
+              category: r.category,
+            }))}
+          onClose={() => setMergeOpen(false)}
+          onMerged={() => {
+            setMergeOpen(false);
+            router.refresh();
+          }}
         />
       )}
     </Stack>
