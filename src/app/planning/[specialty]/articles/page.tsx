@@ -32,6 +32,11 @@ export default async function ArticlesPage({
 
 function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
   const codes = extractCodes(r.codes);
+  // PB number fields default to 0, so legacy manual articles (created before
+  // the codes:[]/unset-coverage fix) store overallCoverage === 0 with no
+  // codes. Render those as "no data" (undefined → "—") rather than 0.
+  const overallCoverage =
+    r.overallCoverage === 0 && codes.length === 0 ? undefined : r.overallCoverage;
   return {
     id: r.id,
     articleKey:
@@ -47,7 +52,7 @@ function projectConsolidated(slug: string, r: ConsolidatedArticle): ArticleRow {
     category: r.category,
     codes,
     numCodes: r.numCodes ?? codes.length,
-    overallCoverage: r.overallCoverage,
+    overallCoverage,
     overallImportance: r.overallImportance,
     justification: r.justification,
     previousArticleTitleSuggestions: r.previousArticleTitleSuggestions,

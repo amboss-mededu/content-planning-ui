@@ -11,7 +11,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BucketCode, CategoryOrchestration } from '@/lib/data/categories';
 import { errorMessage } from '@/lib/error-message';
 import { getConsolidationActionLabel } from '@/lib/workflows/consolidation/buckets';
@@ -143,7 +143,10 @@ export function CategoryDetailsModal({
   const canRerun = status === 'consolidated' || status === 'ready';
   const hasOutput = bucket.hasConsolidatedOutput;
 
-  useEffect(() => {
+  // Fetch the bucket's codes, showing the loading spinner while in flight.
+  // Returns a cleanup that suppresses a stale resolution (modal closed /
+  // bucket switched mid-fetch).
+  const loadCodes = useCallback(() => {
     let cancelled = false;
     setCodes(null);
     setError(null);
@@ -158,6 +161,17 @@ export function CategoryDetailsModal({
       cancelled = true;
     };
   }, [slug, bucket.consolidationCategory]);
+
+  useEffect(() => loadCodes(), [loadCodes]);
+
+  // Refetch the codes list when a rerun finishes (isRerunning true → false).
+  // The parent's router.refresh() updates counts/status, but the codes list
+  // is fetched here and would otherwise stay stale until the modal reopens.
+  const wasRerunning = useRef(isRerunning);
+  useEffect(() => {
+    if (wasRerunning.current && !isRerunning) loadCodes();
+    wasRerunning.current = isRerunning;
+  }, [isRerunning, loadCodes]);
 
   const mappingHref = `/planning/${encodeURIComponent(slug)}/mapping?consolidationCategory=${encodeURIComponent(bucket.consolidationCategory)}`;
 
