@@ -10,12 +10,12 @@ import type {
 import type { CodeTableRow } from '@/lib/data/codes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
+import { CodesActionsToolbar } from './codes-actions-toolbar';
 import { CodesViewClient } from './codes-view-client';
 import {
   ConsolidationBucketsView,
   SourceCategoriesTable,
 } from './consolidation-buckets-view';
-import { ImportCodesModal } from './import-codes-modal';
 import { useRefreshWhileRunning } from './use-refresh-while-running';
 
 /**
@@ -70,35 +70,35 @@ export function MappingView({
 
   return (
     <Stack space="m">
-      <SegmentedControl
-        label="Mapping view"
-        isLabelHidden
-        value={mode}
-        onChange={(v) => setMode(v === 'consolidation' || v === 'source' ? v : 'codes')}
-        options={[
-          { name: 'mapping-view', value: 'codes', label: 'Codes' },
-          {
-            name: 'mapping-view',
-            value: 'consolidation',
-            label: 'Consolidation buckets',
-          },
-          { name: 'mapping-view', value: 'source', label: 'Source categories' },
-        ]}
-      />
+      <Inline alignItems="spaceBetween" vAlignItems="center" fullWidth>
+        <SegmentedControl
+          label="Mapping view"
+          isLabelHidden
+          value={mode}
+          onChange={(v) => setMode(v === 'consolidation' || v === 'source' ? v : 'codes')}
+          options={[
+            { name: 'mapping-view', value: 'codes', label: 'Codes' },
+            {
+              name: 'mapping-view',
+              value: 'consolidation',
+              label: 'Consolidation buckets',
+            },
+            { name: 'mapping-view', value: 'source', label: 'Source categories' },
+          ]}
+        />
+        {/* Bulk code actions live inline with the view selector, clustered on
+            the right. Only relevant to the Codes view. */}
+        {mode === 'codes' ? <CodesActionsToolbar slug={slug} /> : null}
+      </Inline>
       {/* Codes stays mounted across switches so its progressive pagination
           and live-collection polling survive a detour to the other views. The
           category tables are cheap and stateless, so they mount on demand. */}
       <div hidden={mode !== 'codes'}>
-        <Stack space="m">
-          <Inline space="s" vAlignItems="center">
-            <ImportCodesModal slug={slug} />
-          </Inline>
-          <CodesViewClient
-            slug={slug}
-            initialCodes={initialCodes}
-            initialHasMore={initialHasMore}
-          />
-        </Stack>
+        <CodesViewClient
+          slug={slug}
+          initialCodes={initialCodes}
+          initialHasMore={initialHasMore}
+        />
       </div>
       {mode === 'consolidation' ? (
         <ConsolidationBucketsView rows={rows} slug={slug} />

@@ -1,12 +1,10 @@
 'use client';
 
-import { Badge, Button, Inline, Stack, Text, Tooltip } from '@amboss/design-system';
+import { Badge, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
-import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { COVERAGE_LEVELS, type Code } from '@/lib/types';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable } from './data-table';
-import { RemapModal } from './remap-modal';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
 
 function countCoveredSections(items: unknown): number {
@@ -49,13 +47,8 @@ export function CodesView({
   lockStatus,
   supportReady = true,
   inFlightCodes,
-  categories,
-  unmappedCodes,
-  unmappedCount,
   totalCount,
   loadState,
-  remapLoading,
-  onRequestRemapData,
 }: {
   codes: Code[];
   specialtySlug: string;
@@ -63,15 +56,9 @@ export function CodesView({
   lockStatus: string | null;
   supportReady?: boolean;
   inFlightCodes: string[];
-  categories: CodeCategorySummary[];
-  unmappedCodes: UnmappedCodePickerRow[];
-  unmappedCount: number;
   totalCount?: number;
   loadState?: 'loading' | 'retrying' | 'complete';
-  remapLoading?: boolean;
-  onRequestRemapData?: () => Promise<void>;
 }) {
-  const [remapOpen, setRemapOpen] = useState(false);
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
 
   const [selected, setSelected] = useState<{
@@ -364,27 +351,6 @@ export function CodesView({
     ];
   }, [onOpenDetail, inFlightSet]);
 
-  const canRemap = supportReady && canEdit && unmappedCount > 0;
-  // Hide the button once every code is mapped — there's nothing left for it to
-  // do. While consolidation is active it stays visible but disabled (with a
-  // tooltip explaining why); the bulk action remaps unmapped codes, which the
-  // consolidation gate locks. Individual unmapped codes can still be mapped
-  // from a row's detail modal — see the note below.
-  const allMapped = supportReady && unmappedCount === 0;
-  const lockedFromRemap = supportReady && !canEdit && unmappedCount > 0;
-  const remapButton = (
-    <Button
-      variant="secondary"
-      size="m"
-      onClick={async () => {
-        await onRequestRemapData?.();
-        setRemapOpen(true);
-      }}
-      disabled={!canRemap || remapLoading}
-    >
-      {remapLoading ? 'Loading…' : 'Map by category…'}
-    </Button>
-  );
   return (
     <Stack space="m">
       {supportReady && !canEdit ? (
@@ -394,22 +360,6 @@ export function CodesView({
           on the pipeline page to re-enable. Unmapped codes can still be mapped from here.
         </Text>
       ) : null}
-      <Inline space="s" vAlignItems="center">
-        {allMapped ? null : lockedFromRemap ? (
-          <Tooltip content="Consolidation has already been run — reset the consolidation stage to re-enable bulk mapping.">
-            <span style={{ display: 'inline-flex' }}>{remapButton}</span>
-          </Tooltip>
-        ) : (
-          remapButton
-        )}
-        <Text color="secondary">
-          {!supportReady
-            ? 'Loading mapping controls…'
-            : unmappedCount === 0
-              ? 'All codes mapped.'
-              : `${unmappedCount.toLocaleString()} unmapped`}
-        </Text>
-      </Inline>
       <DataTable
         rows={codes}
         columns={columns}
@@ -434,15 +384,6 @@ export function CodesView({
         supportReady={supportReady}
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
         onClose={() => setSelected(null)}
-      />
-      <RemapModal
-        key={`remap-${categories.length}`}
-        open={remapOpen}
-        onClose={() => setRemapOpen(false)}
-        specialtySlug={specialtySlug}
-        categories={categories}
-        unmappedCodes={unmappedCodes}
-        unmappedCount={unmappedCount}
       />
     </Stack>
   );
