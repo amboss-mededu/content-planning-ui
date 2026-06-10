@@ -318,6 +318,55 @@ export async function listBucketCodes(
   return out.sort((a, b) => a.code.localeCompare(b.code));
 }
 
+export type PickerCode = {
+  code: string;
+  description?: string;
+  category?: string;
+  source?: string;
+};
+
+/**
+ * Lightweight code list for the article-edit "add codes" picker. When
+ * `consolidationCategory` is given, only codes in that bucket are returned
+ * (the `(unbucketed)` sentinel selects codes with no bucket); otherwise the
+ * whole specialty's code set is returned for the "show all codes" toggle.
+ * Deduped by code string.
+ */
+export async function listCodesForPicker(
+  slug: string,
+  consolidationCategory?: string,
+): Promise<PickerCode[]> {
+  await connection();
+  const pb = await userClient();
+  const codes = await pb
+    .collection<CodeRecord>('codes')
+    .getFullList({ filter: pb.filter('specialtySlug = {:slug}', { slug }) });
+
+  const bucket = consolidationCategory?.trim();
+  const wantUnbucketed = bucket === UNBUCKETED_LABEL;
+  const matched = bucket
+    ? codes.filter((c) =>
+        wantUnbucketed
+          ? !c.consolidationCategory?.trim()
+          : c.consolidationCategory?.trim() === bucket,
+      )
+    : codes;
+
+  const seen = new Set<string>();
+  const out: PickerCode[] = [];
+  for (const r of matched) {
+    if (seen.has(r.code)) continue;
+    seen.add(r.code);
+    out.push({
+      code: r.code,
+      description: r.description ?? undefined,
+      category: r.category ?? undefined,
+      source: r.source ?? undefined,
+    });
+  }
+  return out.sort((a, b) => a.code.localeCompare(b.code));
+}
+
 // --- Source-category rollup (backup view) ----------------------------------
 
 /**

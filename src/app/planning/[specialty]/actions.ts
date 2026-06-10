@@ -16,6 +16,11 @@ import {
   setArticleBacklogStatus,
 } from '@/lib/data/article-backlog';
 import { deleteArticleDraftRunsByArticleKeyAsAdmin } from '@/lib/data/article-draft-runs';
+import {
+  mergeConsolidatedArticlesAsAdmin,
+  renameConsolidatedArticleByKeyAsAdmin,
+  setConsolidatedArticleCodesAsAdmin,
+} from '@/lib/data/article-edits';
 import { computeArticleKey } from '@/lib/data/article-keys';
 import { deleteArticleLitSearchRunsByArticleKeyAsAdmin } from '@/lib/data/article-lit-search-runs';
 import {
@@ -45,6 +50,8 @@ import {
 import {
   type BucketCode,
   listBucketCodes as listBucketCodesData,
+  listCodesForPicker,
+  type PickerCode,
 } from '@/lib/data/categories';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import {
@@ -818,4 +825,104 @@ export async function deleteManualArticle(
     revalidatePath(`/planning/${effectiveSlug}`, 'layout');
   }
   revalidatePath('/my-backlog', 'layout');
+}
+
+/**
+ * Rename a consolidated article. The article key is content-derived from
+ * the title, so a rename migrates every joined row (reviews, backlog,
+ * comments, sources, runs) to the new key — see
+ * `renameConsolidatedArticleByKeyAsAdmin`. Returns the (possibly new) key,
+ * or a `conflict` flag when another article already owns the new title.
+ */
+export async function renameArticle(
+  slug: string,
+  articleKey: string,
+  newTitle: string,
+): Promise<{ articleKey: string; conflict?: boolean; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { articleKey, error: 'You must be signed in to edit articles.' };
+  const title = newTitle.trim();
+  if (!title) return { articleKey, error: 'Title is required.' };
+
+  try {
+    const result = await renameConsolidatedArticleByKeyAsAdmin(slug, articleKey, title);
+    if ('conflict' in result) {
+      return {
+        articleKey,
+        conflict: true,
+        error: 'Another article already uses that title. Merge them instead.',
+      };
+    }
+    revalidatePath(`/planning/${slug}`, 'layout');
+    revalidatePath('/my-backlog', 'layout');
+    return { articleKey: result.newKey };
+  } catch (err) {
+    return {
+      articleKey,
+      error: err instanceof Error ? err.message : 'Failed to rename article.',
+    };
+  }
+}
+
+/**
+ * Replace the embedded code set on a consolidated article. `numCodes` and
+ * `overallCoverage` are recomputed server-side from the new set.
+ */
+export async function updateArticleCodes(
+  slug: string,
+  articleKey: string,
+  codes: unknown[],
+): Promise<{ error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'You must be signed in to edit articles.' };
+  try {
+    await setConsolidatedArticleCodesAsAdmin(slug, articleKey, codes);
+    revalidatePath(`/planning/${slug}`, 'layout');
+    revalidatePath('/my-backlog', 'layout');
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to update codes.' };
+  }
+}
+
+/**
+ * Merge `sourceKeys` into `targetKey`. Source reviews are deleted, source
+ * comments/sources/runs re-pointed to the target, backlog assignee
+ * preserved — see `mergeConsolidatedArticlesAsAdmin`.
+ */
+export async function mergeArticles(
+  slug: string,
+  targetKey: string,
+  sourceKeys: string[],
+): Promise<{ mergedCodes?: number; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'You must be signed in to merge articles.' };
+  if (!targetKey) return { error: 'Pick a merge target.' };
+  const sources = sourceKeys.filter((k) => k && k !== targetKey);
+  if (sources.length === 0) {
+    return { error: 'Pick at least one other article to merge in.' };
+  }
+  try {
+    const { mergedCodes } = await mergeConsolidatedArticlesAsAdmin(
+      slug,
+      targetKey,
+      sources,
+    );
+    revalidatePath(`/planning/${slug}`, 'layout');
+    revalidatePath('/my-backlog', 'layout');
+    return { mergedCodes };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to merge articles.' };
+  }
+}
+
+/**
+ * Codes available to add to an article in the edit modal. Defaults to the
+ * article's consolidation bucket; pass no category for the "show all" view.
+ */
+export async function listCodesForArticlePicker(
+  slug: string,
+  consolidationCategory?: string,
+): Promise<PickerCode[]> {
+  return listCodesForPicker(slug, consolidationCategory);
 }
