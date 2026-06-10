@@ -3,6 +3,7 @@
 import { Callout, Card, CardBox, H5, Stack, Text } from '@amboss/design-system';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartMilestonesModal } from '../[specialty]/pipeline/_components/start-milestones-modal';
+import { MilestonesEditor } from './milestones-editor';
 import { useRefreshWhileRunning } from './use-refresh-while-running';
 
 /**
@@ -39,6 +40,11 @@ export function MilestonesView({
           completed={extractionState.completed}
           runId={extractionState.runId}
         />
+        <MilestonesEditor
+          slug={specialtySlug}
+          initialValue=""
+          extractionRunning={extractionState.running}
+        />
       </Stack>
     );
   }
@@ -54,6 +60,11 @@ export function MilestonesView({
         running={extractionState.running}
         completed={extractionState.completed}
         runId={extractionState.runId}
+      />
+      <MilestonesEditor
+        slug={specialtySlug}
+        initialValue={milestones}
+        extractionRunning={extractionState.running}
       />
       <Card title="Milestones" titleAs="h3" outlined>
         <CardBox>

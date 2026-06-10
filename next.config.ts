@@ -14,6 +14,13 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // The Milestones tab editor sends the full milestones blob through a
+  // Server Action. Next defaults the action body to 1 MB; raise it so the
+  // 2 MB cap enforced in `saveMilestones` is reachable (with headroom for
+  // multipart framing).
+  experimental: {
+    serverActions: { bodySizeLimit: '3mb' },
+  },
   // Dev-only: allow the cloudflared quick-tunnel host (random per restart)
   // to hit dev resources like /_next/hmr. Only relevant when the n8n
   // callback flow needs a public URL for local lit-search testing —

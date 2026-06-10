@@ -61,6 +61,7 @@ import {
 import {
   setPipelineStageState as setPipelineStageStateData,
   setTabOverride as setTabOverrideData,
+  updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
 import type {
   ArticleBacklogStatus,
@@ -687,6 +688,36 @@ export async function setConsolidationCategoryReview(
     notes,
   );
   revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+// Plain-text milestones blob can be larger than a typical form field but is
+// still bounded — the ACGME JSON output for a specialty runs tens of KB. Cap
+// at 2 MB to reject accidental large pastes/uploads before they hit PB.
+const MAX_MILESTONES_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Save the milestones text blob for a specialty from the Milestones tab
+ * editor (paste or .txt upload). Mirrors `updateMilestonesAsAdmin` but
+ * intentionally does NOT bump the seed timestamp — that signals seed
+ * lineage, not a manual edit. The extraction workflow remains the only
+ * other writer; the editor is disabled UI-side while a run is active.
+ */
+export async function saveMilestones(
+  slug: string,
+  text: string,
+): Promise<{ error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'You must be signed in to edit milestones.' };
+
+  const trimmed = text.trim();
+  if (!trimmed) return { error: 'Milestones text cannot be empty.' };
+  if (Buffer.byteLength(trimmed, 'utf8') > MAX_MILESTONES_BYTES) {
+    return { error: 'Milestones text is too large (max 2 MB).' };
+  }
+
+  await updateMilestonesAsAdmin({ slug, milestones: trimmed });
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return {};
 }
 
 const KNOWN_TAB_SEGMENTS = new Set([
