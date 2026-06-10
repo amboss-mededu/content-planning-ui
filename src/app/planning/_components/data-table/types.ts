@@ -12,13 +12,20 @@ import type { CSSProperties, ReactNode } from 'react';
  * - `filterable`: only meaningful for `type: 'number'` — adds the ▽ icon
  *               in the header that opens an operator+value popover.
  * - `editable`: opt-in inline edit. When present, the cell shows a pencil
- *               on hover; click swaps to a text input (Enter to save,
+ *               on hover; click swaps to an editor (Enter to save,
  *               Escape/blur to cancel). Save errors render inline below.
+ *               `kind` picks the editor: text (default), number, or a native
+ *               select (`select`/`boolean`) that commits on change. Values
+ *               are always carried as strings — the column's `onSave` parses.
  */
 export interface EditableConfig<T> {
   getValue: (row: T) => string;
   onSave: (row: T, next: string) => Promise<void>;
   multiline?: boolean;
+  kind?: 'text' | 'number' | 'select' | 'boolean';
+  /** Option list for `kind: 'select' | 'boolean'`. The empty-string value is
+   *  rendered as a "clear" choice when present. */
+  options?: Array<{ value: string; label: string }>;
 }
 
 export type ColumnGroup =

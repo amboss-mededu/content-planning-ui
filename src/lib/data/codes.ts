@@ -256,20 +256,86 @@ export async function listCodeCategories(slug: string): Promise<CodeCategorySumm
 
 // --- Writes (request-scoped: user edits) -----------------------------------
 
+export type PatchCodeFields = {
+  source?: string;
+  description?: string;
+  category?: string;
+  consolidationCategory?: string;
+  isInAMBOSS?: boolean;
+  coverageLevel?: string;
+  depthOfCoverage?: number;
+  notes?: string;
+  gaps?: string;
+  improvements?: string;
+  articlesWhereCoverageIs?: CoveredSection[];
+  existingArticleUpdates?: SectionUpdate[];
+  newArticlesNeeded?: NewArticle[];
+};
+
+// Editing any of these on an unmapped row implies a (manual) mapping verdict —
+// stamp `mappedAt` so the row starts counting as mapped. Pure metadata edits
+// (source/description/category/consolidationCategory) are deliberately excluded.
+const MAPPING_SIGNAL_FIELDS: Array<keyof PatchCodeFields> = [
+  'isInAMBOSS',
+  'coverageLevel',
+  'depthOfCoverage',
+  'notes',
+  'gaps',
+  'improvements',
+  'articlesWhereCoverageIs',
+  'existingArticleUpdates',
+  'newArticlesNeeded',
+];
+
+/**
+ * Apply an editor's per-code edit. Composite-key lookup; the caller (the
+ * route) has already validated `fields` against the strict schema and enforced
+ * the consolidation lock. Returns the updated `CodeTableRow` so the client can
+ * merge it into local table state without waiting for the poll.
+ *
+ * When any of the three JSON arrays is written, the derived count columns are
+ * recomputed server-side from the merged arrays — client counts are never
+ * trusted. When a mapping-signal field is set on a row that hasn't been mapped
+ * yet, `mappedAt` is stamped so the UI's "mapped" predicates surface the edit.
+ */
 export async function patchCode(
   slug: string,
   code: string,
-  fields: {
-    description?: string;
-    category?: string;
-    consolidationCategory?: string;
-  },
-): Promise<void> {
+  fields: PatchCodeFields,
+): Promise<CodeTableRow> {
   const pb = await userClient();
   const row = await pb
     .collection<CodeRecord>('codes')
-    .getFirstListItem(`specialtySlug = "${slug}" && code = "${code}"`);
-  await pb.collection('codes').update(row.id, fields);
+    .getFirstListItem(
+      pb.filter('specialtySlug = {:slug} && code = {:code}', { slug, code }),
+    );
+
+  const update: Record<string, unknown> = { ...fields };
+
+  const touchesArrays =
+    fields.articlesWhereCoverageIs !== undefined ||
+    fields.existingArticleUpdates !== undefined ||
+    fields.newArticlesNeeded !== undefined;
+  if (touchesArrays) {
+    Object.assign(
+      update,
+      deriveCodeTableCounts({
+        articlesWhereCoverageIs:
+          fields.articlesWhereCoverageIs ?? row.articlesWhereCoverageIs,
+        existingArticleUpdates:
+          fields.existingArticleUpdates ?? row.existingArticleUpdates,
+        newArticlesNeeded: fields.newArticlesNeeded ?? row.newArticlesNeeded,
+      }),
+    );
+  }
+
+  const stampsMapping =
+    !((row.mappedAt ?? 0) > 0) &&
+    MAPPING_SIGNAL_FIELDS.some((k) => fields[k] !== undefined);
+  if (stampsMapping) update.mappedAt = Date.now();
+
+  const updated = await pb.collection<CodeTableRowSource>('codes').update(row.id, update);
+  return toCodeTableRow(updated);
 }
 
 /**
