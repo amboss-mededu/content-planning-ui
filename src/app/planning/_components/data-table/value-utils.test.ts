@@ -92,11 +92,7 @@ describe('computeGroupRuns', () => {
   });
 
   it('does not merge same group across a gap', () => {
-    const runs = computeGroupRuns([
-      col('a', 'metadata'),
-      col('b'),
-      col('c', 'metadata'),
-    ]);
+    const runs = computeGroupRuns([col('a', 'metadata'), col('b'), col('c', 'metadata')]);
     expect(runs.map((r) => r.colSpan)).toEqual([1, 1, 1]);
   });
 });
