@@ -15,45 +15,34 @@ import { useRef, useState } from 'react';
 import { saveMilestones } from '../[specialty]/actions';
 
 /**
- * Editor for the plain-text milestones blob on the Milestones tab. Two ways
- * in: paste/type directly, or load a `.txt` file (read client-side via
+ * Editor panel for the plain-text milestones blob on the Milestones tab. Two
+ * ways in: paste/type directly, or load a `.txt` file (read client-side via
  * `FileReader` — it only fills the textarea, never auto-saves, so the editor
  * can review before committing). Save goes through the `saveMilestones`
  * server action, then `router.refresh()` re-renders the read-only preview in
  * `MilestonesView`.
  *
- * Disabled while the extract-milestones workflow is running — that workflow
- * writes the same field and would race a manual save.
+ * Controlled by the parent (`open` / `onClose`) so the trigger button can sit
+ * inline next to the extraction button while this panel drops below it.
+ * Mounted only while open, so `useState(initialValue)` always seeds from the
+ * latest saved value.
  */
 export function MilestonesEditor({
   slug,
   initialValue,
-  extractionRunning,
+  onClose,
 }: {
   slug: string;
   initialValue: string;
-  extractionRunning: boolean;
+  onClose: () => void;
 }) {
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
   const [value, setValue] = useState(initialValue);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasExisting = initialValue.trim().length > 0;
-
-  function openEditor() {
-    setValue(initialValue);
-    setError(null);
-    setOpen(true);
-  }
-
-  function cancel() {
-    setOpen(false);
-    setError(null);
-    setValue(initialValue);
-  }
 
   function onFilePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -77,33 +66,13 @@ export function MilestonesEditor({
         setError(result.error);
         return;
       }
-      setOpen(false);
+      onClose();
       router.refresh();
     } catch {
       setError('Failed to save milestones. Please try again.');
     } finally {
       setSaving(false);
     }
-  }
-
-  if (!open) {
-    return (
-      <div>
-        <Button
-          type="button"
-          variant="tertiary"
-          disabled={extractionRunning}
-          onClick={openEditor}
-        >
-          {hasExisting ? 'Edit milestones' : 'Add milestones manually'}
-        </Button>
-        {extractionRunning ? (
-          <Text size="s" color="secondary">
-            Editing is disabled while a milestone extraction run is active.
-          </Text>
-        ) : null}
-      </div>
-    );
   }
 
   return (
@@ -157,7 +126,7 @@ export function MilestonesEditor({
             <Button type="button" variant="primary" disabled={saving} onClick={save}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
-            <Button type="button" variant="tertiary" disabled={saving} onClick={cancel}>
+            <Button type="button" variant="tertiary" disabled={saving} onClick={onClose}>
               Cancel
             </Button>
           </Inline>

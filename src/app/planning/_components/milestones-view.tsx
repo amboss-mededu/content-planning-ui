@@ -1,6 +1,16 @@
 'use client';
 
-import { Callout, Card, CardBox, H5, Stack, Text } from '@amboss/design-system';
+import {
+  Button,
+  Callout,
+  Card,
+  CardBox,
+  H5,
+  Inline,
+  Stack,
+  Text,
+} from '@amboss/design-system';
+import { useState } from 'react';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartMilestonesModal } from '../[specialty]/pipeline/_components/start-milestones-modal';
 import { MilestonesEditor } from './milestones-editor';
@@ -26,6 +36,9 @@ export function MilestonesView({
   extractionState: { running: boolean; completed: boolean; runId: string | null };
 }) {
   useRefreshWhileRunning(extractionState.running);
+  const [editing, setEditing] = useState(false);
+  const running = extractionState.running;
+
   if (!milestones) {
     return (
       <Stack space="l">
@@ -33,18 +46,32 @@ export function MilestonesView({
           type="info"
           text="No milestones have been approved for this specialty yet."
         />
-        <StartMilestonesModal
-          specialtySlug={specialtySlug}
-          sources={sources}
-          running={extractionState.running}
-          completed={extractionState.completed}
-          runId={extractionState.runId}
-        />
-        <MilestonesEditor
-          slug={specialtySlug}
-          initialValue=""
-          extractionRunning={extractionState.running}
-        />
+        <Inline space="s" vAlignItems="center">
+          <StartMilestonesModal
+            specialtySlug={specialtySlug}
+            sources={sources}
+            running={running}
+            completed={extractionState.completed}
+            runId={extractionState.runId}
+          />
+          {!editing ? (
+            <Button
+              type="button"
+              variant="tertiary"
+              disabled={running}
+              onClick={() => setEditing(true)}
+            >
+              Add milestones manually
+            </Button>
+          ) : null}
+        </Inline>
+        {editing ? (
+          <MilestonesEditor
+            slug={specialtySlug}
+            initialValue=""
+            onClose={() => setEditing(false)}
+          />
+        ) : null}
       </Stack>
     );
   }
@@ -54,18 +81,32 @@ export function MilestonesView({
 
   return (
     <Stack space="l">
-      <StartMilestonesModal
-        specialtySlug={specialtySlug}
-        sources={sources}
-        running={extractionState.running}
-        completed={extractionState.completed}
-        runId={extractionState.runId}
-      />
-      <MilestonesEditor
-        slug={specialtySlug}
-        initialValue={milestones}
-        extractionRunning={extractionState.running}
-      />
+      <Inline space="s" vAlignItems="center">
+        <StartMilestonesModal
+          specialtySlug={specialtySlug}
+          sources={sources}
+          running={running}
+          completed={extractionState.completed}
+          runId={extractionState.runId}
+        />
+        {!editing ? (
+          <Button
+            type="button"
+            variant="tertiary"
+            disabled={running}
+            onClick={() => setEditing(true)}
+          >
+            Edit milestones
+          </Button>
+        ) : null}
+      </Inline>
+      {editing ? (
+        <MilestonesEditor
+          slug={specialtySlug}
+          initialValue={milestones}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
       <Card title="Milestones" titleAs="h3" outlined>
         <CardBox>
           <Stack space="m">
