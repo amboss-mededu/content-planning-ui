@@ -14,7 +14,11 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
+    // Probe a public path that answers without redirects. `/` bounces
+    // cookie-less clients through the auth gate, and with
+    // DEV_AUTOLOGIN_EMAIL set locally that becomes a redirect loop the
+    // probe chases until the webServer setup times out.
+    url: 'http://localhost:3000/login',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
