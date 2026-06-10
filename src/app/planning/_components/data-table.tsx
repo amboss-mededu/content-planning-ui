@@ -12,175 +12,33 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { errorMessage } from '@/lib/error-message';
+import {
+  BLANKS_FILTER_VALUE,
+  COLUMN_HEADER_STICKY_TOP_GROUPED,
+  DEFAULT_ROW_STRIPE,
+  GROUP_STYLES,
+  MIN_COLUMN_WIDTH,
+  miniButtonStyle,
+  VIRTUALIZE_THRESHOLD,
+  VIRTUALIZED_HEADER_PX,
+} from './data-table/constants';
+import type {
+  BodyProps,
+  Column,
+  EditableConfig,
+  NumericFilter,
+  NumOp,
+  SortState,
+} from './data-table/types';
+import {
+  compareNum,
+  compareTyped,
+  computeGroupRuns,
+  effectiveWidth,
+  stringifyValue,
+} from './data-table/value-utils';
 
-/**
- * Column definition.
- *
- * - `render`  : what shows in each cell (can be arbitrary JSX).
- * - `accessor`: opt-in sortable/filterable value extractor. Without one, the
- *               column renders but has no sort affordance.
- * - `type`    : 'string' (default) | 'number' | 'date' | 'boolean'. Drives
- *               both the sort comparator and whether the numeric-filter
- *               popover is offered. `boolean` sorts true-before-false.
- * - `filterable`: only meaningful for `type: 'number'` — adds the ▽ icon
- *               in the header that opens an operator+value popover.
- * - `editable`: opt-in inline edit. When present, the cell shows a pencil
- *               on hover; click swaps to a text input (Enter to save,
- *               Escape/blur to cancel). Save errors render inline below.
- */
-export interface EditableConfig<T> {
-  getValue: (row: T) => string;
-  onSave: (row: T, next: string) => Promise<void>;
-  multiline?: boolean;
-}
-
-export type ColumnGroup =
-  | 'metadata'
-  | 'coverage'
-  | 'consolidation'
-  | 'suggestions'
-  | 'actions';
-
-export interface Column<T> {
-  key: string;
-  label: string;
-  /** Plain-text description shown in a Tooltip when the user hovers on the
-   *  column-header label. Omit for columns whose label is self-explanatory. */
-  description?: string;
-  render: (row: T) => ReactNode;
-  width?: string | number;
-  align?: 'left' | 'right' | 'center';
-  /** Vertical alignment for body cells. Defaults to `'middle'` so badges
-   *  and numbers stay centered in tall rows; set to `'top'` for columns
-   *  whose content can wrap to several lines (long descriptions,
-   *  justifications, category names) so the text starts at the top of
-   *  the cell instead of floating in the middle. */
-  verticalAlign?: 'top' | 'middle' | 'bottom';
-  accessor?: (row: T) => string | number | boolean | Date | null | undefined;
-  type?: 'string' | 'number' | 'date' | 'boolean';
-  /** Opts the column into the header dropdown's filter section. Number
-   *  columns get the comparison UI (op + value); other columns get a
-   *  single-select list of `filterOptions` (or unique values derived from
-   *  `filterValue` / `accessor` when `filterOptions` is omitted). */
-  filterable?: boolean;
-  /** Returns the row's value for non-numeric filter matching. Defaults to
-   *  stringifying `accessor`'s output. Override when sort and filter need
-   *  different views (e.g. coverage rank vs level string) or when the
-   *  accessor is numeric but the filter should compare a label. */
-  filterValue?: (row: T) => string | undefined;
-  /** Predefined filter choices (with display labels). When omitted, the
-   *  unique non-empty values returned by `filterValue` (or `accessor`) are
-   *  used and labelled with their raw value. */
-  filterOptions?: Array<{ value: string; label: string }>;
-  /** Filter UI mode for non-numeric columns. Defaults to `'select'`
-   *  (multi-select dropdown of options). Use `'contains'` for free-form
-   *  text columns where a checkbox list of unique values is impractical —
-   *  it shows a text input that does case-insensitive substring matching
-   *  against `filterValue` (or `accessor` stringified). */
-  filterMode?: 'select' | 'contains';
-  editable?: EditableConfig<T>;
-  group?: ColumnGroup;
-  /** Start the column hidden. The user can re-enable it from the Columns
-   *  menu. Use for columns that exist for completeness but aren't useful
-   *  at the current aggregation level (e.g. per-section fields shown on
-   *  a per-article row). Persisted state still wins over this default. */
-  defaultHidden?: boolean;
-}
-
-const GROUP_STYLES: Record<
-  ColumnGroup,
-  {
-    label: string;
-    bg: string;
-    fg: string;
-    border: string;
-    /** Alternating-row tint applied to body cells in this group. Even rows
-     *  render plain white; odd rows pick up `stripe` so each group reads as a
-     *  shaded column band (Google Sheets-style). */
-    stripe: string;
-  }
-> = {
-  metadata: {
-    label: 'Metadata',
-    // `bg` colors are pre-blended over white (the page background) so the
-    // sticky group banner stays opaque when rows scroll under it. `stripe`
-    // stays translucent — it sits on already-opaque body cells.
-    bg: 'rgb(241, 241, 242)',
-    fg: 'rgba(15, 23, 42, 0.65)',
-    border: 'rgba(15, 23, 42, 0.25)',
-    stripe: 'rgba(15, 23, 42, 0.035)',
-  },
-  coverage: {
-    label: 'Coverage',
-    bg: 'rgb(228, 241, 234)',
-    fg: 'rgb(15, 95, 50)',
-    border: 'rgb(34, 139, 80)',
-    stripe: 'rgba(34, 139, 80, 0.06)',
-  },
-  consolidation: {
-    label: 'Consolidation',
-    bg: 'rgb(231, 235, 247)',
-    fg: 'rgb(40, 60, 130)',
-    border: 'rgb(79, 102, 184)',
-    stripe: 'rgba(79, 102, 184, 0.06)',
-  },
-  suggestions: {
-    label: 'Suggestions',
-    bg: 'rgb(250, 236, 220)',
-    fg: 'rgb(133, 77, 14)',
-    border: 'rgb(217, 119, 6)',
-    stripe: 'rgba(217, 119, 6, 0.07)',
-  },
-  actions: {
-    label: '',
-    bg: 'transparent',
-    fg: 'inherit',
-    border: 'transparent',
-    stripe: 'transparent',
-  },
-};
-
-// Default zebra stripe applied to odd rows in cells that don't belong to a
-// `ColumnGroup`. Same shade as the metadata-group stripe so tables with and
-// without groups share the same baseline readability.
-const DEFAULT_ROW_STRIPE = 'rgba(15, 23, 42, 0.035)';
-
-type SortState = { key: string; dir: 'asc' | 'desc' } | null;
-
-type NumOp = '>' | '>=' | '<' | '<=' | '=' | '!=';
-type NumericFilter = { op: NumOp; value: number };
-
-// Always virtualize: only the rows in (and slightly around) the visible
-// viewport are rendered, so initial paint cost stays roughly constant
-// regardless of total row count. With the adaptive height in `VirtualizedBody`,
-// short lists collapse to their natural size instead of locking to the
-// viewport — so virtualization is safe everywhere and there's no need for a
-// "small enough to render plain" carve-out.
-const VIRTUALIZE_THRESHOLD = 0;
-
-// Sentinel value used in the categorical filter to represent "rows whose
-// filter value is empty/undefined". Stored in `stringFilters` like any other
-// value, but special-cased in the per-row match loop so blanks become a
-// first-class selectable option in select-style filters. Picked as a string
-// that no real `filterValue` would produce so there's no risk of collision.
-const BLANKS_FILTER_VALUE = '__amboss_blanks__';
-
-// Approximate vertical space taken by the sticky header band (group banner +
-// column header row + a small buffer). Used to compute the virtualized
-// container's natural height so tables shorter than the viewport collapse
-// to fit instead of being pinned to `100vh - 120px`.
-const VIRTUALIZED_HEADER_PX = 80;
-
-const MIN_COLUMN_WIDTH = 50;
-
-/** Sticky `top` (px) for the column-header row when group banners are
- *  present. Deliberately a few px LESS than the banner's intrinsic height
- *  (~32px at 14px Lato + 6/12 padding + ~1.4 line-height) so the
- *  column-header row overlaps the banner's bottom edge. Banner has z-index
- *  2 and covers the overlap zone, so the eye sees them flush — no gap,
- *  regardless of how the browser sizes the banner. The overlapped pixels
- *  of the column header are inside its 10px top padding, not its content. */
-const COLUMN_HEADER_STICKY_TOP_GROUPED = 28;
+export type { Column, ColumnGroup, EditableConfig } from './data-table/types';
 
 export function DataTable<T>({
   rows,
@@ -633,52 +491,6 @@ export function DataTable<T>({
       />
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Comparators.
-// ---------------------------------------------------------------------------
-
-function stringifyValue(
-  v: string | number | boolean | Date | null | undefined,
-): string | undefined {
-  if (v === null || v === undefined) return undefined;
-  if (v instanceof Date) return v.toISOString();
-  return String(v);
-}
-
-function compareTyped(
-  av: string | number | boolean | Date,
-  bv: string | number | boolean | Date,
-  type: 'string' | 'number' | 'date' | 'boolean',
-): number {
-  if (type === 'number') return (Number(av) || 0) - (Number(bv) || 0);
-  if (type === 'date') {
-    const a = av instanceof Date ? av.getTime() : new Date(String(av)).getTime();
-    const b = bv instanceof Date ? bv.getTime() : new Date(String(bv)).getTime();
-    return a - b;
-  }
-  if (type === 'boolean') {
-    return (av ? 1 : 0) - (bv ? 1 : 0);
-  }
-  return String(av).localeCompare(String(bv), undefined, { numeric: true });
-}
-
-function compareNum(n: number, op: NumOp, v: number): boolean {
-  switch (op) {
-    case '>':
-      return n > v;
-    case '>=':
-      return n >= v;
-    case '<':
-      return n < v;
-    case '<=':
-      return n <= v;
-    case '=':
-      return n === v;
-    case '!=':
-      return n !== v;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,16 +1208,6 @@ function CategoricalFilter({
   );
 }
 
-const miniButtonStyle: React.CSSProperties = {
-  background: 'none',
-  border: '1px solid var(--ads-c-divider, rgba(0,0,0,0.15))',
-  borderRadius: 4,
-  padding: '3px 8px',
-  fontSize: 12,
-  cursor: 'pointer',
-  font: 'inherit',
-};
-
 /**
  * Free-form text filter section rendered inside the header dropdown for
  * columns with `filterMode: 'contains'`. Used for free-form fields like
@@ -1962,44 +1764,6 @@ function EditableCell<T>({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Shared props across plain + virtualized bodies.
-// ---------------------------------------------------------------------------
-
-type BodyProps<T> = {
-  rows: T[];
-  columns: Column<T>[];
-  getRowKey: (row: T, index: number) => string;
-  getRowStyle?: (row: T, index: number) => CSSProperties | undefined;
-  onRowClick?: (row: T, index: number) => void;
-  sort: SortState;
-  onSortSet: (key: string, dir: 'asc' | 'desc' | null) => void;
-  numFilters: Record<string, NumericFilter | null>;
-  onNumFilterChange: (key: string, next: NumericFilter | null) => void;
-  stringFilters: Record<string, string[] | null>;
-  onStringFilterChange: (key: string, next: string[] | null) => void;
-  textFilters: Record<string, string | null>;
-  onTextFilterChange: (key: string, next: string | null) => void;
-  uniqueFilterValues: Record<string, string[]>;
-  blanksByColumn: Record<string, boolean>;
-  widths: Record<string, number>;
-  onResize: (key: string, next: number) => void;
-};
-
-/**
- * Resolve the effective width for a column. User-dragged widths (in `widths`)
- * override the column definition's own `width`. Returned in a form that both
- * `<col>` elements and `<th>` inline styles accept.
- */
-function effectiveWidth<T>(
-  column: Column<T>,
-  widths: Record<string, number>,
-): number | string | undefined {
-  const override = widths[column.key];
-  if (override !== undefined) return override;
-  return column.width;
-}
-
 /**
  * `<colgroup>` so user-dragged widths apply to body cells too. Without it,
  * setting width on `<th>` only constrains the header and browsers may
@@ -2030,25 +1794,6 @@ function ColGroup<T>({
       })}
     </colgroup>
   );
-}
-
-type GroupRun = {
-  group: ColumnGroup | undefined;
-  startKey: string;
-  colSpan: number;
-};
-
-function computeGroupRuns<T>(columns: Column<T>[]): GroupRun[] {
-  const runs: GroupRun[] = [];
-  for (const c of columns) {
-    const last = runs[runs.length - 1];
-    if (last && last.group === c.group) {
-      last.colSpan += 1;
-    } else {
-      runs.push({ group: c.group, startKey: c.key, colSpan: 1 });
-    }
-  }
-  return runs;
 }
 
 function Header<T>({
