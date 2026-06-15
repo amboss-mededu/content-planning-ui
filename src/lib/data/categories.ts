@@ -15,6 +15,7 @@ import type {
 import type { CodeCategory } from '@/lib/types';
 import {
   type BucketCodeStatus,
+  deriveBucketStaleness,
   deriveBucketStats,
 } from '@/lib/workflows/consolidation/buckets';
 
@@ -182,6 +183,15 @@ export type CategoryOrchestration = {
   /** True when current consolidated article/section output exists for
    *  this consolidation bucket. */
   hasConsolidatedOutput: boolean;
+  /** Start time (ms) of this bucket's last consolidation run, or null if it
+   *  has never been consolidated. */
+  consolidatedAt: number | null;
+  /** Latest consolidation-input change (ms) across this bucket's codes + the
+   *  bucket-level stamp; null when nothing has changed. */
+  staleInputAt: number | null;
+  /** True when the bucket has output but an input changed after it ran — the
+   *  consolidation is out of date and should be re-run. */
+  isStale: boolean;
 };
 
 const UNBUCKETED_LABEL = '(unbucketed)';
@@ -228,12 +238,20 @@ export async function listCategoryOrchestration(
   // Group codes by consolidationCategory. Codes with no consolidationCategory
   // share an "(unbucketed)" row. A Set keys by code-string so duplicates in
   // the codes collection don't inflate counts.
+  // Index codeCategories rows by bucket name for staleness timestamps.
+  const categoryByName = new Map<string, CodeCategoryRecord>();
+  for (const row of categoryRows) {
+    const name = row.codeCategory?.trim();
+    if (name) categoryByName.set(name, row);
+  }
+
   type Bucket = {
     key: string;
     isUnbucketed: boolean;
     codes: Set<string>;
     mappedCodes: Set<string>;
     sources: string[];
+    changedAts: Array<{ code: string; changedAt?: number | null }>;
   };
   const byBucket = new Map<string, Bucket>();
   for (const r of codes) {
@@ -246,10 +264,12 @@ export async function listCategoryOrchestration(
       codes: new Set<string>(),
       mappedCodes: new Set<string>(),
       sources: [],
+      changedAts: [],
     };
     entry.codes.add(r.code);
     if ((r.mappedAt ?? 0) > 0) entry.mappedCodes.add(r.code);
     if (r.source) entry.sources.push(r.source);
+    entry.changedAts.push({ code: r.code, changedAt: r.consolidationInputChangedAt });
     byBucket.set(key, entry);
   }
 
@@ -260,6 +280,13 @@ export async function listCategoryOrchestration(
       codes: bucket.codes,
       outputRows,
       decisionRows: categoryRows,
+    });
+    const categoryRow = categoryByName.get(bucket.key);
+    const staleness = deriveBucketStaleness({
+      hasConsolidatedOutput: stats.hasConsolidatedOutput,
+      consolidatedAt: categoryRow?.consolidatedAt,
+      bucketInputChangedAt: categoryRow?.inputChangedAt,
+      codeChangedAts: bucket.changedAts,
     });
 
     out.push({
@@ -274,6 +301,9 @@ export async function listCategoryOrchestration(
       hasAnyStatusInfo: stats.hasAnyStatusInfo,
       numMappedCodes: bucket.mappedCodes.size,
       hasConsolidatedOutput: stats.hasConsolidatedOutput,
+      consolidatedAt: categoryRow?.consolidatedAt ?? null,
+      staleInputAt: staleness.staleInputAt > 0 ? staleness.staleInputAt : null,
+      isStale: staleness.isStale,
     });
   }
 
@@ -295,6 +325,12 @@ export type BucketCode = {
   category?: string;
   status: BucketCodeStatus;
   mapped: boolean;
+  /** ms — last consolidation-input change on this code (0 if never). */
+  inputChangedAt: number;
+  /** True when this code changed after the bucket was last consolidated —
+   *  i.e. it's a reason the bucket is stale. False when the bucket has no
+   *  consolidation to compare against. */
+  changedSinceConsolidation: boolean;
 };
 
 /**
@@ -342,6 +378,11 @@ export async function listBucketCodes(
     decisionRows: categoryRows,
   });
 
+  // The bucket's last-consolidation timestamp gates per-code "changed since"
+  // — a code only counts as changed-since when the bucket actually has output.
+  const categoryRow = categoryRows.find((row) => row.codeCategory?.trim() === bucket);
+  const consolidatedAt = categoryRow?.consolidatedAt ?? 0;
+
   // De-dupe on code-string to mirror the bucket-level aggregation; pick the
   // first occurrence's metadata.
   const seen = new Set<string>();
@@ -349,6 +390,7 @@ export async function listBucketCodes(
   for (const r of matched) {
     if (seen.has(r.code)) continue;
     seen.add(r.code);
+    const inputChangedAt = r.consolidationInputChangedAt ?? 0;
     out.push({
       code: r.code,
       description: r.description ?? undefined,
@@ -356,6 +398,9 @@ export async function listBucketCodes(
       category: r.category ?? undefined,
       status: stats.statusByCode.get(r.code) ?? 'pending',
       mapped: (r.mappedAt ?? 0) > 0,
+      inputChangedAt,
+      changedSinceConsolidation:
+        stats.hasConsolidatedOutput && inputChangedAt > consolidatedAt,
     });
   }
   return out.sort((a, b) => a.code.localeCompare(b.code));
