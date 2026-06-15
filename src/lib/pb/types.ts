@@ -64,6 +64,10 @@ export interface CodeRecord extends PbRecord {
   description?: string;
   isInAMBOSS?: boolean;
   mappedAt?: number;
+  /** ms since epoch — last time a consolidation-relevant field on this
+   *  code changed value. Drives per-bucket staleness; see
+   *  `deriveBucketStaleness` in `src/lib/workflows/consolidation/buckets.ts`. */
+  consolidationInputChangedAt?: number;
   articlesWhereCoverageIs?: CoveredSection[];
   notes?: string;
   gaps?: string;
@@ -86,6 +90,13 @@ export interface CodeCategoryRecord extends PbRecord {
   source?: string;
   areAllCodesRun?: boolean;
   isConsolidated?: boolean;
+  /** ms since epoch — start time of this bucket's last primary
+   *  consolidation run. Compared against codes' / the bucket's
+   *  `*ChangedAt` to derive staleness. */
+  consolidatedAt?: number;
+  /** ms since epoch — bucket-level dirty stamp, set when a code leaves
+   *  this bucket (the new bucket goes stale via the code's own stamp). */
+  inputChangedAt?: number;
   description?: string;
   numCodes?: number;
   totalArticleCodes?: number;
