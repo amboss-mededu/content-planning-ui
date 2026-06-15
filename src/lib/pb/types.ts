@@ -453,6 +453,51 @@ export interface ConsolidatedSectionRecord extends PbRecord {
   areAllSourcesFetched?: boolean;
 }
 
+// --- Collection: contentChangeEvents ---------------------------------------
+
+export type ContentChangeEventType =
+  | 'renamed'
+  | 'moved'
+  | 'archived'
+  | 'merged'
+  | 'deleted';
+
+export type ContentChangeEventStatus = 'open' | 'resolved';
+
+/**
+ * One CMS article/section change ingested from the content-change feed.
+ * Events are CMS-global (no specialtySlug); specialty filtering happens
+ * at join time in `computeDriftImpacts`. `eventKey` is the idempotency
+ * key — re-syncing a window upserts on it. See
+ * `src/lib/data/content-drift.ts`.
+ */
+export interface ContentChangeEventRecord extends PbRecord {
+  eventKey: string;
+  articleEid: string;
+  sectionId?: string;
+  changeType: ContentChangeEventType;
+  newTitle?: string;
+  mergedIntoEid?: string;
+  /** ms since epoch — when the change happened in the CMS. */
+  occurredAt?: number;
+  /** ms since epoch — when this app ingested the event. */
+  ingestedAt?: number;
+  status: ContentChangeEventStatus;
+  resolvedBy?: string;
+  /** ms since epoch */
+  resolvedAt?: number;
+  notes?: string;
+}
+
+// --- Collection: integrationState ------------------------------------------
+
+/** Generic key/value store. Holds the content-change feed cursor under
+ *  key `contentChangeFeedCursor`. */
+export interface IntegrationStateRecord extends PbRecord {
+  key: string;
+  value?: unknown;
+}
+
 // --- Ontology mirror tables ------------------------------------------------
 
 export interface OntologyCodeRecord extends PbRecord {
