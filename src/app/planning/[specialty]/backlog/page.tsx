@@ -14,6 +14,7 @@ import { listConsolidatedSections } from '@/lib/data/sections';
 import { listAssignableUsers } from '@/lib/data/users';
 import type { ArticleBacklogRecord, ArticleSourceRecord } from '@/lib/pb/types';
 import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
+import { computeBacklogOrphans } from '@/lib/workflows/consolidation/orphans';
 import { type BacklogRow, BacklogView } from '../../_components/backlog-view';
 import {
   type CategoryLookup,
@@ -206,10 +207,18 @@ async function BacklogData({ slug }: { slug: string }) {
 
   const initialBacklog: Record<string, ArticleBacklogRecord> = backlogRecs;
 
+  // Orphans: backlog rows whose articleKey is no longer produced by the
+  // current consolidated output (a re-run regenerated different keys). The
+  // candidate keys are every current new-article key plus the `upd::<id>`
+  // key for each parent article that still has consolidated sections.
+  const currentArticleKeys = new Set<string>(rows.map((r) => r.articleKey));
+  const orphans = computeBacklogOrphans(Object.values(backlogRecs), currentArticleKeys);
+
   return (
     <BacklogView
       slug={slug}
       rows={rows}
+      orphans={orphans}
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}
