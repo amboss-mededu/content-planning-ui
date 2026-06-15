@@ -191,8 +191,13 @@ function codeArticleEids(c: CodeRecord): string[] {
  * backlog rows. Returns one impact per open event (events that touch
  * nothing are still surfaced). Pure join + extraction live in
  * `drift-impacts.ts`; this only fetches + projects.
+ *
+ * Each impact carries the open event's PB record `eventId` so the queue UI
+ * can resolve it (the pure `DriftImpact` only knows the feed `eventKey`).
  */
-export async function getDriftImpacts(slug: string): Promise<DriftImpact[]> {
+export type DriftImpactRecord = DriftImpact & { eventId: string };
+
+export async function getDriftImpacts(slug: string): Promise<DriftImpactRecord[]> {
   await connection();
   const pb = await userClient();
   const [events, codes, articles, sections, articleReviews, sectionReviews, backlog] =
@@ -275,7 +280,10 @@ export async function getDriftImpacts(slug: string): Promise<DriftImpact[]> {
     })),
   });
 
-  return computeDriftImpacts(events.map(toEventInput), refs);
+  // computeDriftImpacts preserves event order, so zip the PB record id
+  // back on by index.
+  const impacts = computeDriftImpacts(events.map(toEventInput), refs);
+  return impacts.map((imp, i) => ({ ...imp, eventId: events[i].id }));
 }
 
 // --- Resolution ------------------------------------------------------------

@@ -19,6 +19,9 @@ const TABS = [
   // top-level tab labelled "2nd consolidation".
   { label: 'Consolidation', segment: 'consolidation-review', numbered: true },
   { label: 'Backlog', segment: 'backlog', numbered: true },
+  // Reference surface, not a workflow step: open CMS drift events that
+  // touch this specialty. Flag-only review queue.
+  { label: 'Drift', segment: 'drift', numbered: false },
 ] as const;
 
 // Sub-routes that should highlight the "1st consolidation" parent tab.
