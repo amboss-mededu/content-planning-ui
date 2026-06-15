@@ -35,7 +35,7 @@ export function RerunConfirmModal({
   const verb = hasOutput ? 'Re-run' : 'Run';
   const header = `${verb} consolidation`;
   const bodyText = hasOutput
-    ? `This will erase the current consolidation output for "${category}" and produce a fresh result.`
+    ? `This replaces the consolidation suggestions for "${category}" with a fresh result. Approvals, sources, and drafts re-attach to articles the re-run reproduces; anything it no longer produces is flagged for review, not deleted.`
     : `Run consolidation for "${category}".`;
   const trimmed = note.trim();
   const errorMessages =
@@ -52,8 +52,9 @@ export function RerunConfirmModal({
       isDismissible
       role={hasOutput ? 'dialog' : 'alertdialog'}
       actionButton={{
+        // No longer destructive: a re-run preserves approvals/sources and
+        // only flags orphaned items, so it reads as a normal action.
         text: verb,
-        destructive: hasOutput,
         onClick: () => onConfirm(trimmed.length > 0 ? trimmed : null),
         disabled: !canConfirm,
       }}
