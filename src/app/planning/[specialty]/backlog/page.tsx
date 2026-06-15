@@ -8,6 +8,7 @@ import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { getDriftAffectedArticleKeys } from '@/lib/data/content-drift';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
@@ -128,6 +129,7 @@ async function BacklogData({ slug }: { slug: string }) {
     commentsByArticleKind,
     user,
     draftRunsByArticle,
+    driftAffectedKeys,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
     listArticleReviews(slug),
@@ -141,6 +143,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listReviewComments(slug, 'article'),
     getCurrentUser(),
     listLatestDraftRunsForArticles(slug),
+    getDriftAffectedArticleKeys(slug),
   ]);
 
   const categoryLookup: CategoryLookup = {};
@@ -214,11 +217,20 @@ async function BacklogData({ slug }: { slug: string }) {
   const currentArticleKeys = new Set<string>(rows.map((r) => r.articleKey));
   const orphans = computeBacklogOrphans(Object.values(backlogRecs), currentArticleKeys);
 
+  // CMS drift: backlog rows whose referenced article changed in the CMS
+  // (renamed/moved/merged/archived). Flag-only — listed in a warning so the
+  // editor can review on the Drift tab; nothing here is mutated.
+  const driftKeySet = new Set(driftAffectedKeys);
+  const driftAffected = rows
+    .filter((r) => driftKeySet.has(r.articleKey))
+    .map((r) => ({ articleKey: r.articleKey, articleTitle: r.articleTitle }));
+
   return (
     <BacklogView
       slug={slug}
       rows={rows}
       orphans={orphans}
+      driftAffected={driftAffected}
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}

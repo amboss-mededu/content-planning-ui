@@ -120,6 +120,7 @@ export function BacklogView({
   slug,
   rows,
   orphans = [],
+  driftAffected = [],
   categoryLookup,
   assignableUsers,
   initialBacklog,
@@ -137,6 +138,10 @@ export function BacklogView({
    *  consolidation output (orphaned by a re-run). Surfaced as a warning so
    *  the editor can keep, re-point, or clear the work — never auto-deleted. */
   orphans?: BacklogOrphan[];
+  /** Backlog rows whose referenced CMS article has an open drift event
+   *  (renamed/moved/merged/archived). Warning only — review on the Drift
+   *  tab; nothing is mutated here. */
+  driftAffected?: Array<{ articleKey: string; articleTitle?: string }>;
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
@@ -887,6 +892,24 @@ export function BacklogView({
               (o) => `${o.articleKey}${o.assigneeEmail ? ` (${o.assigneeEmail})` : ''}`,
             )
             .join(', ')}`}
+        />
+      ) : null}
+      {driftAffected.length > 0 ? (
+        <Callout
+          type="warning"
+          text={`${driftAffected.length} backlog item${
+            driftAffected.length === 1 ? '' : 's'
+          } affected by CMS drift`}
+          description={
+            <>
+              The CMS article behind{' '}
+              {driftAffected.length === 1 ? 'this item' : 'these items'} was renamed,
+              moved, merged, or archived since consolidation. Review on the{' '}
+              <a href={`/planning/${slug}/drift`}>Drift tab</a> — nothing was changed
+              automatically. Affected:{' '}
+              {driftAffected.map((d) => d.articleTitle || d.articleKey).join(', ')}.
+            </>
+          }
         />
       ) : null}
       {actionError ? (

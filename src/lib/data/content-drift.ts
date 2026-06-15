@@ -286,6 +286,23 @@ export async function getDriftImpacts(slug: string): Promise<DriftImpactRecord[]
   return impacts.map((imp, i) => ({ ...imp, eventId: events[i].id }));
 }
 
+/**
+ * Distinct `articleKey`s (article/section/backlog refs) touched by open
+ * drift events in `slug`. Lets views that already key on `articleKey` —
+ * backlog, articles — flag affected rows without re-running the full join
+ * themselves. Empty array when nothing drifted.
+ */
+export async function getDriftAffectedArticleKeys(slug: string): Promise<string[]> {
+  const impacts = await getDriftImpacts(slug);
+  const keys = new Set<string>();
+  for (const imp of impacts) {
+    for (const ref of imp.refs) {
+      if (ref.articleKey) keys.add(ref.articleKey);
+    }
+  }
+  return Array.from(keys);
+}
+
 // --- Resolution ------------------------------------------------------------
 
 /**
