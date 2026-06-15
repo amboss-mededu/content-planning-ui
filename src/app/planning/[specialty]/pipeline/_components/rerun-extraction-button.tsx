@@ -68,7 +68,7 @@ export function RerunExtractionButton({
       const res = await fetch('/api/workflows/reset-stage', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ runId, specialtySlug, stage }),
+        body: JSON.stringify({ runId, specialtySlug, stage, confirm: true }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
