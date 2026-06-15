@@ -80,6 +80,14 @@ function nullableCount(value: number | null): ReactNode {
   return value === null ? '—' : value;
 }
 
+function staleTooltip(r: CategoryOrchestration): string {
+  const changed = r.staleInputAt ? new Date(r.staleInputAt).toLocaleString() : 'recently';
+  const ranAt = r.consolidatedAt
+    ? new Date(r.consolidatedAt).toLocaleString()
+    : 'an earlier run';
+  return `A mapping input changed (${changed}) after this bucket was last consolidated (${ranAt}). Re-run the bucket to refresh its suggestions — existing approvals and sources for unchanged articles are kept.`;
+}
+
 function settlementErrorMessage(settlement: PipelineRunSettlement): string | null {
   if (settlement.status !== 'failed' && settlement.status !== 'cancelled') return null;
   const categories = settlement.categories.join(', ');
@@ -214,6 +222,15 @@ export function ConsolidationBucketsView({
         if (isCategoryRunning(r.consolidationCategory)) {
           return <ConsolidationProgressBadge />;
         }
+        if (r.isStale) {
+          return (
+            <Tooltip content={staleTooltip(r)}>
+              <span style={{ display: 'inline-flex' }}>
+                <Badge text="Stale" color="yellow" icon="rotate-cw" />
+              </span>
+            </Tooltip>
+          );
+        }
         const status = deriveStatus(r);
         if (status === 'consolidated') {
           return <Badge text="Consolidated" color="green" icon="check" />;
@@ -226,6 +243,7 @@ export function ConsolidationBucketsView({
       width: 220,
       align: 'left',
       accessor: (r) => {
+        if (r.isStale) return 3;
         const status = deriveStatus(r);
         return status === 'consolidated' ? 2 : status === 'ready' ? 1 : 0;
       },
@@ -235,6 +253,7 @@ export function ConsolidationBucketsView({
         { value: '0', label: 'Not ready' },
         { value: '1', label: 'Ready for consolidation' },
         { value: '2', label: 'Consolidated' },
+        { value: '3', label: 'Stale — re-run' },
       ],
       group: 'metadata',
     },

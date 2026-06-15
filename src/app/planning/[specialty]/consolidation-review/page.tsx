@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { computeArticleKey, computeSectionKey } from '@/lib/data/article-keys';
 import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listConsolidatedArticles } from '@/lib/data/articles';
+import { listCategoryOrchestration } from '@/lib/data/categories';
 import { listCodes } from '@/lib/data/codes';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
@@ -233,6 +234,7 @@ async function ConsolidationReviewData({
     sectionReviewRecs,
     commentsByArticle,
     commentsBySection,
+    orchestration,
     user,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
@@ -242,8 +244,13 @@ async function ConsolidationReviewData({
     listSectionReviews(slug),
     listReviewComments(slug, 'article'),
     listReviewComments(slug, 'section'),
+    listCategoryOrchestration(slug),
     getCurrentUser(),
   ]);
+
+  // Per-bucket staleness for the rail badge — keyed by consolidationCategory.
+  const staleByCategory: Record<string, boolean> = {};
+  for (const o of orchestration) staleByCategory[o.consolidationCategory] = o.isStale;
 
   const categoryLookup: CategoryLookup = {};
   const codeMetadataLookup: CodeMetadataLookup = {};
@@ -319,6 +326,7 @@ async function ConsolidationReviewData({
       articles={articles}
       sections={sections}
       mappingByCategory={mappingByCategory}
+      staleByCategory={staleByCategory}
       categoryLookup={categoryLookup}
       titleOriginLookup={titleOriginLookup}
       initialArticleReviews={initialArticleReviews}

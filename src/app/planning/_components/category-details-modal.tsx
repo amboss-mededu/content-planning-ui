@@ -103,6 +103,9 @@ function CodesList({ codes }: { codes: BucketCode[] }) {
           </span>
           <CodeStatusBadge status={c.status} />
           {!c.mapped && <Badge text="unmapped" color="gray" />}
+          {c.changedSinceConsolidation && (
+            <Badge text="changed" color="yellow" icon="rotate-cw" />
+          )}
           {c.description && (
             <Text size="xs" color="secondary">
               {c.description}
@@ -201,6 +204,14 @@ export function CategoryDetailsModal({
             </Text>
             <StatusBadge bucket={bucket} isRerunning={isRerunning} />
           </Inline>
+
+          {bucket.isStale && !isRerunning ? (
+            <Callout
+              type="warning"
+              text="This bucket is out of date"
+              description="A mapping input changed after the last consolidation. Re-run to refresh its suggestions — approvals and sources for unchanged articles are kept. Changed codes are tagged below."
+            />
+          ) : null}
 
           <MappingCounts bucket={bucket} />
 

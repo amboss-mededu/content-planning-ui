@@ -71,6 +71,7 @@ export function ConsolidationReviewView({
   articles,
   sections,
   mappingByCategory,
+  staleByCategory,
   categoryLookup,
   titleOriginLookup,
   initialArticleReviews,
@@ -102,6 +103,10 @@ export function ConsolidationReviewView({
    *  set, which is the precondition for the (still-to-be-built) per-
    *  category consolidation trigger. */
   mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
+  /** consolidationCategory → whether its consolidation output is out of date
+   *  (a mapping input changed after the last run). Drives the rail's stale
+   *  badge. Computed on the server from `listCategoryOrchestration`. */
+  staleByCategory: Record<string, boolean>;
   categoryLookup: CategoryLookup;
   titleOriginLookup: TitleOriginLookup;
   initialArticleReviews: ReviewMap;
@@ -515,6 +520,7 @@ export function ConsolidationReviewView({
           categories={categories}
           counts={counts}
           mappingByCategory={mappingByCategory}
+          staleByCategory={staleByCategory}
           hasAnyMapping={hasAnyMapping}
           selectedCategory={selectedCategory}
           onSelect={selectCategory}
@@ -715,6 +721,7 @@ function CategoryRail({
   categories,
   counts,
   mappingByCategory,
+  staleByCategory,
   hasAnyMapping,
   selectedCategory,
   onSelect,
@@ -735,6 +742,7 @@ function CategoryRail({
     { articleApproved: number; sectionApproved: number; total: number }
   >;
   mappingByCategory: Record<string, { mapped: number; total: number; ready: boolean }>;
+  staleByCategory: Record<string, boolean>;
   hasAnyMapping: boolean;
   selectedCategory: string | null;
   onSelect: (cat: string) => void;
@@ -891,6 +899,9 @@ function CategoryRail({
                 </Text>
                 {!isConsolidating ? (
                   <Inline space="xxs" vAlignItems="center">
+                    {staleByCategory[cat] && (
+                      <Badge text="Stale" color="yellow" icon="rotate-cw" />
+                    )}
                     {allApproved && <Badge text="all approved" color="green" />}
                     {!allApproved && hasOutput && (
                       <Text size="xs" color="secondary">
