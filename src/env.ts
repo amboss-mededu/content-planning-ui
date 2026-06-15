@@ -65,6 +65,11 @@ export const env = createEnv({
     // unblocks the orchestration UX before the API contract is final.
     CORTEX_API_URL: z.string().url().optional(),
     CORTEX_API_KEY: optionalString,
+    // CMS content-change feed (article renames/moves/merges/archives).
+    // Cursor-based — see src/lib/integrations/content-change-feed.ts. When
+    // unset, the feed returns no events and the drift queue stays empty.
+    CONTENT_CHANGE_FEED_URL: z.string().url().optional(),
+    CONTENT_CHANGE_FEED_API_KEY: optionalString,
     // n8n webhook that owns the literature-search pipeline (query gen +
     // PubMed + ranking). The app POSTs per-article jobs and listens on
     // /api/workflows/literature-search/callback for results — see
@@ -120,6 +125,8 @@ export const env = createEnv({
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
+    CONTENT_CHANGE_FEED_URL: process.env.CONTENT_CHANGE_FEED_URL,
+    CONTENT_CHANGE_FEED_API_KEY: process.env.CONTENT_CHANGE_FEED_API_KEY,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,
     N8N_CALLBACK_SECRET: process.env.N8N_CALLBACK_SECRET,
     N8N_CALLBACK_BASE_URL: process.env.N8N_CALLBACK_BASE_URL,
