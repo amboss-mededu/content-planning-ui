@@ -11,16 +11,16 @@ import { RemapModal } from './remap-modal';
  * with the view selector. Holds the two bulk actions: "Import codes" (file
  * upload) and "Map by category" (kicks off mapping for unmapped codes).
  *
- * Owns its own lightweight summary fetch (unmapped count + consolidation lock)
- * so the buttons can enable/disable without threading state up from the codes
- * table. The button stays mounted at all times — it's disabled, never hidden,
- * so it doesn't pop in and out while the table's pages stream in.
+ * Owns its own lightweight summary fetch (unmapped count + consolidation
+ * activity) so the buttons can enable/disable without threading state up from
+ * the codes table. The button stays mounted at all times — it's disabled, never
+ * hidden, so it doesn't pop in and out while the table's pages stream in.
  */
 export function CodesActionsToolbar({ slug }: { slug: string }) {
   const [supportReady, setSupportReady] = useState(false);
   const [unmappedCount, setUnmappedCount] = useState(0);
-  const [locked, setLocked] = useState(false);
-  const [lockStatus, setLockStatus] = useState<string | null>(null);
+  // Bulk mapping only needs to pause during a full-specialty consolidation.
+  const [runningAll, setRunningAll] = useState(false);
 
   const [remapOpen, setRemapOpen] = useState(false);
   const [remapData, setRemapData] = useState<{
@@ -37,11 +37,10 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       if (!res.ok) return;
       const data = (await res.json()) as {
         unmappedCount: number;
-        lock: { locked: boolean; status: string | null };
+        activity: { runningAll: boolean; runningBuckets: string[] };
       };
       setUnmappedCount(data.unmappedCount);
-      setLocked(data.lock.locked);
-      setLockStatus(data.lock.status);
+      setRunningAll(data.activity.runningAll);
       setSupportReady(true);
     } catch {
       /* buttons stay disabled until the next refetch */
@@ -73,8 +72,8 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
     }
   }, [slug]);
 
-  const canRemap = supportReady && !locked && unmappedCount > 0;
-  const lockedFromRemap = supportReady && locked && unmappedCount > 0;
+  const canRemap = supportReady && !runningAll && unmappedCount > 0;
+  const lockedFromRemap = supportReady && runningAll && unmappedCount > 0;
 
   const remapButton = (
     <Button
@@ -95,7 +94,7 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       <ImportCodesModal slug={slug} />
       {lockedFromRemap ? (
         <Tooltip
-          content={`Consolidation has already been run${lockStatus ? ` (${lockStatus})` : ''} — reset the consolidation stage to re-enable bulk mapping.`}
+          content="A full consolidation is running — bulk mapping resumes as soon as it finishes."
         >
           <span style={{ display: 'inline-flex' }}>{remapButton}</span>
         </Tooltip>

@@ -408,9 +408,9 @@ export function CodesView({
     <Stack space="m">
       {supportReady && !canEdit ? (
         <Text color="secondary">
-          Consolidation is active{lockStatus ? ` (${lockStatus})` : ''} — edits and
-          re-mapping of already-mapped codes are disabled. Reset the consolidation stage
-          on the pipeline page to re-enable. Unmapped codes can still be mapped from here.
+          A full consolidation is running{lockStatus ? ` (${lockStatus})` : ''} — codes
+          will be editable again as soon as it finishes (usually a minute or two). Edits
+          to a single bucket that's rebuilding are blocked only for that bucket.
         </Text>
       ) : null}
       <DataTable

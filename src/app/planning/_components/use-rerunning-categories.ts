@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getBrowserClient } from '@/lib/pb/browser';
 import type { PipelineRunRecord } from '@/lib/pb/types';
+import { FRESH_RUNNING_MS } from '@/lib/pipeline-stage-state';
 
 // Maximum age of a `status='running'` row that we'll still treat as
 // in-flight. Anything older is a stale row from a crashed/aborted run
 // whose terminal status never landed — without this guard the UI's
-// "Rebuilding…" placeholder would hide every consolidation forever
-// after one bad run. Sized at 10 minutes: well over the chained stubs'
-// actual runtime (seconds) and over the worst-case LLM run we expect.
-const RUNNING_RECENCY_MS = 10 * 60 * 1000;
+// "Rebuilding…" placeholder would hide every consolidation forever after
+// one bad run. Shared with the server-side `isStageRunningFresh` guard
+// (`FRESH_RUNNING_MS`) so the client and `getConsolidationActivity` agree
+// on when a run stops counting as live.
+const RUNNING_RECENCY_MS = FRESH_RUNNING_MS;
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export type PipelineRunTerminalStatus = 'completed' | 'failed' | 'cancelled';
 

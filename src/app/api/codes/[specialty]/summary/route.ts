@@ -5,7 +5,7 @@ import {
   listInFlightCodes,
   listUnmappedCodeCount,
 } from '@/lib/data/codes';
-import { getConsolidationLockState } from '@/lib/data/pipeline';
+import { getConsolidationActivity } from '@/lib/data/pipeline';
 
 export async function GET(
   _req: Request,
@@ -16,12 +16,12 @@ export async function GET(
   const { specialty } = await params;
   const slug = decodeURIComponent(specialty);
 
-  const [totalCount, unmappedCount, inFlightCodes, lock] = await Promise.all([
+  const [totalCount, unmappedCount, inFlightCodes, activity] = await Promise.all([
     listCodeCount(slug),
     listUnmappedCodeCount(slug),
     listInFlightCodes(slug),
-    getConsolidationLockState(slug),
+    getConsolidationActivity(slug),
   ]);
 
-  return NextResponse.json({ totalCount, unmappedCount, inFlightCodes, lock });
+  return NextResponse.json({ totalCount, unmappedCount, inFlightCodes, activity });
 }

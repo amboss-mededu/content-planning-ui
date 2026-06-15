@@ -154,7 +154,8 @@ describe('applyPipelineRunRealtimeEvent', () => {
         action: 'create',
         record: run({
           id: 'run-1',
-          startedAt: now - 11 * 60 * 1000,
+          // Older than the shared FRESH_RUNNING_MS window (15 min).
+          startedAt: now - 16 * 60 * 1000,
           targetCategories: ['Airway'],
         }),
       },

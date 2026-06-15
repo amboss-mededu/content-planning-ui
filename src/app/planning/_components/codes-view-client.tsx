@@ -18,7 +18,10 @@ type SupportSummary = {
   totalCount: number;
   unmappedCount: number;
   inFlightCodes: string[];
-  lock: { locked: boolean; status: string | null };
+  /** Which consolidation buckets are rebuilding right now. The sheet is
+   *  always editable except during a full-specialty consolidation
+   *  (`runningAll`); per-bucket runs are enforced server-side via 409. */
+  activity: { runningAll: boolean; runningBuckets: string[] };
 };
 
 export function CodesViewClient({
@@ -239,8 +242,11 @@ export function CodesViewClient({
   );
 
   const supportReady = summary !== null;
-  const canEdit = supportReady ? !summary.lock.locked : false;
-  const lockStatus = summary?.lock.status ?? null;
+  // Always editable once support data loads, except during a full-specialty
+  // consolidation. Per-bucket runs don't lock the whole sheet — the server
+  // 409s edits to a code in an actively-rebuilding bucket.
+  const canEdit = supportReady ? !summary.activity.runningAll : false;
+  const lockStatus = null;
   const allRowsLoaded = loadState === 'complete' && !hasMore;
   const totalCount = summary?.totalCount ?? (allRowsLoaded ? codes.length : undefined);
 
