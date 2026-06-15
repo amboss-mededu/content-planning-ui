@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
+import { ClientResponseError } from 'pocketbase';
 import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   ArticleSuggestionRecord,
@@ -80,6 +81,48 @@ export async function patchCategoryAsAdmin(
 ): Promise<void> {
   const pb = await createAdminClient();
   await pb.collection('codeCategories').update(id, fields);
+}
+
+/**
+ * Bucket-level dirty stamp. Called when a code LEAVES a bucket (the bucket
+ * it left no longer "owns" that code's change stamp, so without this the old
+ * bucket would silently read fresh). Upserts the `codeCategories` row for the
+ * bucket — rows don't exist for every consolidationCategory value — and sets
+ * `inputChangedAt`. The destination bucket needs no stamp here: it goes stale
+ * via the moved code's own `consolidationInputChangedAt`.
+ *
+ * The `(unbucketed)` sentinel and empty bucket names are ignored — there is no
+ * real consolidation bucket to mark stale.
+ */
+export async function touchBucketInputChangedAsAdmin(
+  slug: string,
+  bucket: string | null | undefined,
+): Promise<void> {
+  const name = bucket?.trim();
+  if (!name || name === UNBUCKETED_LABEL) return;
+  const pb = await createAdminClient();
+  const now = Date.now();
+  try {
+    const row = await pb
+      .collection<CodeCategoryRecord>('codeCategories')
+      .getFirstListItem(
+        pb.filter('specialtySlug = {:slug} && codeCategory = {:bucket}', {
+          slug,
+          bucket: name,
+        }),
+      );
+    await pb.collection('codeCategories').update(row.id, { inputChangedAt: now });
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) {
+      await pb.collection('codeCategories').create({
+        specialtySlug: slug,
+        codeCategory: name,
+        inputChangedAt: now,
+      });
+      return;
+    }
+    throw e;
+  }
 }
 
 export async function bulkInsertCategoriesAsAdmin(
