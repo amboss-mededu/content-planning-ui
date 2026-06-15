@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Badge,
   Box,
   Button,
   Card,
@@ -160,6 +161,26 @@ const LEVEL_COLOR: Record<string, string> = {
 function formatTs(ts: Date | null | undefined): string | null {
   if (!ts) return null;
   return new Date(ts).toLocaleString();
+}
+
+/**
+ * Coarse "time ago" for the at-a-glance freshness line on the card header.
+ * Browser-only (this is a client component); rendered with
+ * suppressHydrationWarning since the SSR value can differ by a tick.
+ */
+function formatRelative(ts: Date | null | undefined): string | null {
+  if (!ts) return null;
+  const then = new Date(ts).getTime();
+  if (!Number.isFinite(then) || then <= 0) return null;
+  const diff = Date.now() - then;
+  if (diff < 60_000) return 'just now';
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(ts).toLocaleDateString();
 }
 
 /**
@@ -537,6 +558,7 @@ export function StageCard({
   unmappedCount,
   mappedCount,
   manualState,
+  staleBucketCount,
   children,
 }: {
   title: string;
@@ -583,6 +605,10 @@ export function StageCard({
    *  outputSummary and giving the user a true progress signal. */
   unmappedCount?: number;
   mappedCount?: number;
+  /** Consolidate-primary only: number of buckets whose mapping inputs
+   *  changed since their last consolidation. Renders an amber chip linking
+   *  to the categories tab so re-runs can be triggered per bucket. */
+  staleBucketCount?: number;
 }) {
   const runInputs = normalizeInputs(runUrls);
   const [displayManualState, setDisplayManualState] = useState(manualState);
@@ -737,6 +763,28 @@ export function StageCard({
     />
   );
 
+  // At-a-glance freshness: when the latest run wrapped up and nothing is
+  // mid-flight, show how long ago it finished. Stays visible while the card
+  // body is collapsed.
+  const lastCompletedRelative =
+    !isActuallyRunning && !isInProgress && status === 'completed'
+      ? formatRelative(stage?.finishedAt ?? stage?.approvedAt)
+      : null;
+  const staleChip =
+    typeof staleBucketCount === 'number' && staleBucketCount > 0 ? (
+      <a
+        href={`/planning/${encodeURIComponent(specialtySlug)}/categories`}
+        style={{ textDecoration: 'none' }}
+        title="One or more buckets changed since their last consolidation — open the categories tab to re-run them"
+      >
+        <Badge
+          text={`${staleBucketCount} bucket${staleBucketCount === 1 ? '' : 's'} stale`}
+          color="yellow"
+          icon="rotate-cw"
+        />
+      </a>
+    ) : null;
+
   return (
     <div className="card-fill">
       <Card outlined>
@@ -746,6 +794,14 @@ export function StageCard({
               <Inline space="s" vAlignItems="center">
                 {titleNode}
                 {badgeNode}
+                {staleChip}
+                {lastCompletedRelative ? (
+                  <Text size="s" color="secondary">
+                    <span suppressHydrationWarning>
+                      Last completed {lastCompletedRelative}
+                    </span>
+                  </Text>
+                ) : null}
               </Inline>
             </div>
             <ModelSettingsPopover specialtySlug={specialtySlug} stage={stageName} />

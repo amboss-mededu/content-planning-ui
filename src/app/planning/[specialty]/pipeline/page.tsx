@@ -6,6 +6,7 @@ import {
   listArticleSourcesByArticleKey,
 } from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
+import { listCategoryOrchestration } from '@/lib/data/categories';
 import { listCodeSources } from '@/lib/data/code-sources';
 import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
@@ -79,6 +80,7 @@ async function PipelineData({ slug }: { slug: string }) {
     articleSourceCount,
     sourcesByKey,
     stageStates,
+    orchestration,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
@@ -94,7 +96,10 @@ async function PipelineData({ slug }: { slug: string }) {
     listArticleSourceCount(slug),
     listArticleSourcesByArticleKey(slug),
     getPipelineStageStates(slug),
+    listCategoryOrchestration(slug),
   ]);
+
+  const staleBucketCount = orchestration.filter((o) => o.isStale).length;
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
@@ -193,6 +198,7 @@ async function PipelineData({ slug }: { slug: string }) {
       draftEligibleIds={draftEligibleIds}
       stageHasOutput={stageHasOutput}
       stageStates={stageStates}
+      staleBucketCount={staleBucketCount}
     />
   );
 }
