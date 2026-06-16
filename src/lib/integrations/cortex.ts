@@ -5,17 +5,19 @@ import { env } from '@/env';
 import { log } from '@/lib/log';
 
 /**
- * Minimal client for Cortex CMS source registration.
+ * Client for Cortex CMS source registration. `registerCortexSource` is the
+ * stable entry point Stage 2 calls; it selects a backend:
  *
- * Cortex receives source metadata only (title, URL, authors, etc.) — it
- * does NOT store PDFs. Stage 2 of the article pipeline POSTs each
- * articleSources row's metadata to this endpoint and persists the
- * returned `cortexSourceId` back on the row so the final article HTML
- * can cite the source by ID.
+ *   1. `CORTEX_MCP_URL` set → register via the MCP `createSourceEnx` tool and
+ *      persist the created source's ribosomId. This is the real contract —
+ *      see ./cortex-mcp.
+ *   2. else `CORTEX_API_URL` set → the legacy REST `/sources` POST below.
+ *   3. else → a deterministic stub ID (logs a warning), so the orchestration
+ *      UX still works offline / before any backend is wired.
  *
- * Feature-flagged: if `CORTEX_API_URL` is unset the client returns a
- * deterministic stub ID and logs a warning. This lets the orchestration
- * UX ship before the API contract is final.
+ * Either way Cortex stores source metadata only (title, URL, authors, …) — not
+ * PDFs — and the returned `cortexSourceId` is persisted on the articleSources
+ * row so the final article can cite the source.
  */
 
 export type CortexSourceMetadata = {
@@ -60,6 +62,14 @@ const STUB_PREFIX = 'cortex_stub_';
 export async function registerCortexSource(
   meta: CortexSourceMetadata,
 ): Promise<CortexRegistrationResult> {
+  // Preferred path: the real Cortex contract is the MCP `createSourceEnx`
+  // tool. When the MCP server is configured, register through it and persist
+  // the created source's ribosomId. See ./cortex-mcp.
+  if (env.CORTEX_MCP_URL) {
+    const { registerCortexSourceViaMcp } = await import('./cortex-mcp');
+    return registerCortexSourceViaMcp(meta);
+  }
+
   if (!env.CORTEX_API_URL) {
     const stubId = `${STUB_PREFIX}${randomUUID()}`;
     log('cortex').warn(

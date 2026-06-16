@@ -32,12 +32,14 @@ import {
 import {
   createArticleSourceAsAdmin,
   deleteArticleSourcesByArticleKeyAsAdmin,
+  getArticleSourceByIdAsAdmin,
   markSourceCortexRegisteredAsAdmin,
   setArticleSourceReviewAsAdmin,
   setSourceDoiAsAdmin,
   setSourceNotesAsAdmin,
   setSourcesPriorityAsAdmin,
   setSourceUrlAsAdmin,
+  updateSourceBibliographyAsAdmin,
 } from '@/lib/data/article-sources';
 import {
   deleteWritingRunsForArticleAsAdmin,
@@ -70,6 +72,8 @@ import {
   setTabOverride as setTabOverrideData,
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
+import { errorMessage } from '@/lib/error-message';
+import { fetchSourceMetadataViaMcp } from '@/lib/integrations/cortex-mcp';
 import type {
   ArticleBacklogStatus,
   ArticleReviewStatus,
@@ -84,6 +88,7 @@ import {
   type PipelineCardState,
 } from '@/lib/pipeline-stage-state';
 import { isSafeUrl } from '@/lib/url';
+import { runCortexRegistrationForSource } from '@/lib/workflows/cortex-register/run';
 import type { ApprovalActionResult } from './actions.types';
 
 // NOTE: This file carries the `'use server'` directive, so every *export* must
@@ -224,6 +229,61 @@ export async function submitSourceNotes(
 ): Promise<void> {
   await setSourceNotesAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+/**
+ * Register a single source in Cortex (per-row "Register" button). Creates the
+ * source via the MCP `createSourceEnx` tool — enriching from the DOI first —
+ * and fills in its Source ID (cortexSourceId + ribosomId).
+ */
+export async function registerSourceInCortex(
+  slug: string,
+  sourceId: string,
+): Promise<{ ok: boolean; cortexSourceId?: string; error?: string }> {
+  const user = await getCurrentUser();
+  try {
+    const result = await runCortexRegistrationForSource(
+      slug,
+      sourceId,
+      user?.email ?? null,
+    );
+    revalidatePath(`/planning/${slug}`, 'layout');
+    return { ok: true, cortexSourceId: result.cortexSourceId };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+/**
+ * Pull bibliographic metadata for a source's DOI (read-only
+ * `fetchSourceMetadataEnx`) and overwrite its title + journal. Guarded: only
+ * runs when the source has a DOI and has NOT yet been registered in Cortex.
+ */
+export async function fetchSourceMetadataForSource(
+  slug: string,
+  sourceId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const source = await getArticleSourceByIdAsAdmin(sourceId);
+    if (!source) return { ok: false, error: 'Source not found' };
+    if (source.cortexSourceId) {
+      return { ok: false, error: 'Already registered — fetch is disabled' };
+    }
+    const doi = source.doi?.trim();
+    if (!doi) return { ok: false, error: 'No DOI on this source' };
+
+    const fields = await fetchSourceMetadataViaMcp(doi);
+    if (!fields) return { ok: false, error: 'No metadata found for this DOI' };
+
+    await updateSourceBibliographyAsAdmin(sourceId, {
+      title: typeof fields.title === 'string' ? fields.title : undefined,
+      journal: typeof fields.journal === 'string' ? fields.journal : undefined,
+    });
+    revalidatePath(`/planning/${slug}`, 'layout');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
 }
 
 /**

@@ -3,7 +3,14 @@
 // Sources table (curation + priority modes), resizable headers, and the
 // per-cell inline editors. Extracted verbatim from article-manager-modal-v2.tsx.
 
-import { Badge, Inline, Stack, Text } from '@amboss/design-system';
+import {
+  Badge,
+  Button,
+  Inline,
+  PictogramButton,
+  Stack,
+  Text,
+} from '@amboss/design-system';
 import {
   type CSSProperties,
   useCallback,
@@ -12,10 +19,13 @@ import {
   useRef,
   useState,
 } from 'react';
+import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { ArticleSourceRecord, SourceReviewStatus } from '@/lib/pb/types';
 import { isSafeUrl } from '@/lib/url';
 import {
+  fetchSourceMetadataForSource,
+  registerSourceInCortex,
   submitSourceCortexId,
   submitSourceDoi,
   submitSourceNotes,
@@ -388,6 +398,9 @@ function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: str
     setValue(source.cortexSourceId ?? '');
   }, [source.cortexSourceId]);
 
+  const [registering, setRegistering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const persist = useCallback(async () => {
     const trimmed = value.trim();
     const current = source.cortexSourceId ?? '';
@@ -403,30 +416,68 @@ function SourceIdCell({ source, slug }: { source: ArticleSourceRecord; slug: str
     }
   }, [value, source.id, source.cortexSourceId, slug]);
 
+  // Create this one source in Cortex (enriching from its DOI first) and fill in
+  // the Source ID. The new cortexSourceId flows back via the live row.
+  const register = useCallback(async () => {
+    if (registering) return;
+    setRegistering(true);
+    setError(null);
+    try {
+      const res = await registerSourceInCortex(slug, source.id);
+      if (!res.ok) setError(res.error ?? 'Registration failed');
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setRegistering(false);
+    }
+  }, [registering, slug, source.id]);
+
+  const registered = Boolean(source.cortexSourceId);
+
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => void persist()}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      disabled={submitting}
-      placeholder="Paste source ID"
-      style={{
-        width: '100%',
-        padding: '4px 6px',
-        fontSize: 12,
-        border: '1px solid rgba(0, 0, 0, 0.15)',
-        borderRadius: 4,
-        background: '#fff',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-      }}
-    />
+    <Stack space="xxs">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => void persist()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        disabled={submitting || registering}
+        placeholder="Paste source ID"
+        style={{
+          width: '100%',
+          padding: '4px 6px',
+          fontSize: 12,
+          border: '1px solid rgba(0, 0, 0, 0.15)',
+          borderRadius: 4,
+          background: '#fff',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        }}
+      />
+      {!registered && (
+        <Inline space="xxs" vAlignItems="center">
+          <Button
+            size="s"
+            variant="secondary"
+            leftIcon="plus"
+            loading={registering}
+            onClick={() => void register()}
+          >
+            Register
+          </Button>
+          {error && (
+            <Text size="xs" color="error">
+              {error}
+            </Text>
+          )}
+        </Inline>
+      )}
+    </Stack>
   );
 }
 
@@ -521,6 +572,9 @@ function SourceDoiCell({ source, slug }: { source: ArticleSourceRecord; slug: st
     setValue(source.doi ?? '');
   }, [source.doi]);
 
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const persist = useCallback(async () => {
     const trimmed = value.trim();
     const current = source.doi ?? '';
@@ -536,7 +590,24 @@ function SourceDoiCell({ source, slug }: { source: ArticleSourceRecord; slug: st
     }
   }, [value, source.id, source.doi, slug]);
 
+  // Pull title + journal from the DOI. Only offered before the source is
+  // registered, so it can't clobber a source already written to Cortex.
+  const fetchMeta = useCallback(async () => {
+    if (fetching) return;
+    setFetching(true);
+    setFetchError(null);
+    try {
+      const res = await fetchSourceMetadataForSource(slug, source.id);
+      if (!res.ok) setFetchError(res.error ?? 'Fetch failed');
+    } catch (e) {
+      setFetchError(errorMessage(e));
+    } finally {
+      setFetching(false);
+    }
+  }, [fetching, slug, source.id]);
+
   const trimmed = value.trim();
+  const canFetch = trimmed.length > 0 && !source.cortexSourceId;
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
       <input
@@ -550,10 +621,26 @@ function SourceDoiCell({ source, slug }: { source: ArticleSourceRecord; slug: st
             (e.target as HTMLInputElement).blur();
           }
         }}
-        disabled={submitting}
+        disabled={submitting || fetching}
         placeholder="Paste DOI"
         style={editableInputStyle}
       />
+      {canFetch && (
+        <PictogramButton
+          icon="rotate-cw"
+          size="xs"
+          variant="tertiary"
+          label={
+            fetching
+              ? 'Fetching…'
+              : fetchError
+                ? `Fetch failed: ${fetchError}`
+                : 'Fetch title + journal from DOI'
+          }
+          disabled={fetching}
+          onClick={() => void fetchMeta()}
+        />
+      )}
       {trimmed && (
         <a
           href={`https://doi.org/${trimmed}`}
