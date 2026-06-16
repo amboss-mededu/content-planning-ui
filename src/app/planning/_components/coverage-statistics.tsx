@@ -270,7 +270,6 @@ export function CoverageStatistics({ stats }: { stats: CoverageStats }) {
         <StatRow
           label="Avg new articles / consolidation"
           value={fmtNum(stats.avgNewArticlesPerConsolidation)}
-          sub={`${stats.consolidationsRun} run`}
         />
         <StatRow
           label="Article updates"
@@ -280,7 +279,6 @@ export function CoverageStatistics({ stats }: { stats: CoverageStats }) {
         <StatRow
           label="Avg article updates / consolidation"
           value={fmtNum(stats.avgArticleUpdatesPerConsolidation)}
-          sub={`${stats.consolidationsRun} run`}
         />
         <StatRow
           label="Total section changes"
