@@ -93,9 +93,7 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
     <Inline space="s" vAlignItems="center" noWrap>
       <ImportCodesModal slug={slug} />
       {lockedFromRemap ? (
-        <Tooltip
-          content="A full consolidation is running — bulk mapping resumes as soon as it finishes."
-        >
+        <Tooltip content="A full consolidation is running — bulk mapping resumes as soon as it finishes.">
           <span style={{ display: 'inline-flex' }}>{remapButton}</span>
         </Tooltip>
       ) : (

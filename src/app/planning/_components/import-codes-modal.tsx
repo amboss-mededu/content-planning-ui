@@ -208,9 +208,7 @@ export function ImportCodesModal({ slug }: { slug: string }) {
   return (
     <>
       {importBlocked ? (
-        <Tooltip
-          content="A consolidation is running — importing resumes once it finishes."
-        >
+        <Tooltip content="A consolidation is running — importing resumes once it finishes.">
           <span style={{ display: 'inline-flex' }}>{trigger}</span>
         </Tooltip>
       ) : (

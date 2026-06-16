@@ -15,10 +15,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { errorMessage } from '@/lib/error-message';
 import type { ContentChangeEventType } from '@/lib/pb/types';
-import type {
-  DriftContentRef,
-  DriftImpact,
-} from '@/lib/workflows/drift/drift-impacts';
+import type { DriftContentRef, DriftImpact } from '@/lib/workflows/drift/drift-impacts';
 
 type ImpactWithId = DriftImpact & { eventId: string };
 

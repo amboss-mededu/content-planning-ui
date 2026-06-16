@@ -61,9 +61,10 @@ export async function PATCH(
     getConsolidationActivity(slug),
     getCode(slug, codeId),
   ]);
-  const blockedBucket = [current?.consolidationCategory, fields.consolidationCategory].find(
-    (b) => !activity.runningAll && isBucketEditBlocked(activity, b),
-  );
+  const blockedBucket = [
+    current?.consolidationCategory,
+    fields.consolidationCategory,
+  ].find((b) => !activity.runningAll && isBucketEditBlocked(activity, b));
   if (activity.runningAll || blockedBucket !== undefined) {
     const label = activity.runningAll
       ? 'A full consolidation'
