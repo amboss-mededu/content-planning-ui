@@ -216,8 +216,6 @@ const EXPLAIN = {
   overall: 'Code-level coverage across this specialty.',
   aggregate: 'How many AMBOSS articles and sections the mapped codes touch.',
   distribution: 'How mapped codes are spread across the 0–5 coverage score.',
-  consolidated:
-    'New and updated articles & sections proposed by the consolidation step — the rows shown on the Consolidation Review tab.',
   // Mapping progress
   mappingProgress: 'Share of codes that have been run through mapping.',
   // Overall coverage
@@ -234,24 +232,9 @@ const EXPLAIN = {
   sectionsCovered:
     "Total section references across all codes' coverage (duplicates included); avg is per code.",
   uniqueSections: 'Distinct sections covered; avg is per code.',
-  // Consolidated suggestions
-  consolidationsRun:
-    'Consolidation categories that have produced output, out of the number expected.',
-  newArticles: 'Brand-new articles proposed after consolidation.',
-  avgNewArticles:
-    'New articles divided by the number of consolidations that have actually run.',
-  articleUpdates: 'Existing articles with proposed section changes.',
-  avgArticleUpdates:
-    'Article updates divided by the number of consolidations that have actually run.',
-  totalSectionChanges: 'All proposed section changes (new sections plus updates).',
-  newSections: 'Brand-new sections proposed after consolidation.',
-  sectionUpdates: 'Proposed changes to existing sections.',
-  avgSections:
-    'Total section changes divided by the number of consolidations that have actually run.',
 } as const;
 
 export function CoverageStatistics({ stats }: { stats: CoverageStats }) {
-  const lt3 = (n: number) => `${n} with score <3`;
   return (
     <Stack space="m">
       <H2>Coverage statistics</H2>
@@ -350,62 +333,6 @@ export function CoverageStatistics({ stats }: { stats: CoverageStats }) {
           <ScoreBarChart stats={stats} />
           <ScoreTable rows={stats.scoreRows} />
         </Stack>
-      </Panel>
-
-      <Panel title="Consolidated suggestions" titleTooltip={EXPLAIN.consolidated}>
-        <StatRow
-          label="Consolidations run"
-          value={`${stats.consolidationsRun} / ${stats.consolidationsExpected}`}
-          sub={fmtPct(
-            (stats.consolidationsRun / Math.max(1, stats.consolidationsExpected)) * 100,
-          )}
-          tooltip={EXPLAIN.consolidationsRun}
-        />
-        <StatRow
-          label="New articles"
-          value={stats.newArticles}
-          sub={lt3(stats.newArticlesLt3)}
-          tooltip={EXPLAIN.newArticles}
-        />
-        <StatRow
-          label="Avg new articles / consolidation"
-          value={fmtNum(stats.avgNewArticlesPerConsolidation)}
-          tooltip={EXPLAIN.avgNewArticles}
-        />
-        <StatRow
-          label="Article updates"
-          value={stats.articleUpdates}
-          sub={lt3(stats.articleUpdatesLt3)}
-          tooltip={EXPLAIN.articleUpdates}
-        />
-        <StatRow
-          label="Avg article updates / consolidation"
-          value={fmtNum(stats.avgArticleUpdatesPerConsolidation)}
-          tooltip={EXPLAIN.avgArticleUpdates}
-        />
-        <StatRow
-          label="Total section changes"
-          value={stats.totalSectionChanges}
-          sub={lt3(stats.totalSectionChangesLt3)}
-          tooltip={EXPLAIN.totalSectionChanges}
-        />
-        <StatRow
-          label="New sections"
-          value={stats.newSections}
-          sub={lt3(stats.newSectionsLt3)}
-          tooltip={EXPLAIN.newSections}
-        />
-        <StatRow
-          label="Section updates"
-          value={stats.sectionUpdates}
-          sub={lt3(stats.sectionUpdatesLt3)}
-          tooltip={EXPLAIN.sectionUpdates}
-        />
-        <StatRow
-          label="Avg sections / consolidation"
-          value={fmtNum(stats.avgSectionsPerConsolidation)}
-          tooltip={EXPLAIN.avgSections}
-        />
       </Panel>
     </Stack>
   );

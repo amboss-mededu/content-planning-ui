@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { getBacklogStats } from '@/lib/data/backlog-stats';
 import { getCoverageStats } from '@/lib/data/coverage-stats';
 import { getOverviewCounts } from '@/lib/data/overview';
 import { getPipelineStageStates, getSpecialty } from '@/lib/data/specialties';
@@ -22,9 +23,10 @@ async function OverviewData({ slug }: { slug: string }) {
   const specialty = await getSpecialty(slug);
   if (!specialty) return null;
 
-  const [counts, coverageStats, stageStates] = await Promise.all([
+  const [counts, coverageStats, backlogStats, stageStates] = await Promise.all([
     getOverviewCounts(slug),
     getCoverageStats(slug),
+    getBacklogStats(slug),
     getPipelineStageStates(slug),
   ]);
   const base = `/planning/${slug}`;
@@ -60,6 +62,7 @@ async function OverviewData({ slug }: { slug: string }) {
     <OverviewView
       stats={statItems}
       coverageStats={coverageStats}
+      backlogStats={backlogStats}
       stageStates={stageStates}
     />
   );
