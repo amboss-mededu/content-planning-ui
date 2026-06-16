@@ -65,6 +65,14 @@ export const env = createEnv({
     // unblocks the orchestration UX before the API contract is final.
     CORTEX_API_URL: z.string().url().optional(),
     CORTEX_API_KEY: optionalString,
+    // Cortex CMS source-registration via MCP — the real contract (the
+    // `createSourceEnx` tool). Preferred over the REST CORTEX_API_URL above:
+    // when set, Stage 2 registers each source through the MCP client and
+    // persists the created source's ribosomId. See
+    // src/lib/integrations/cortex-mcp.ts. When neither this nor CORTEX_API_URL
+    // is set, registration returns a deterministic stub id.
+    CORTEX_MCP_URL: z.string().url().optional(),
+    CORTEX_MCP_TOKEN: optionalString,
     // CMS content-change feed (article renames/moves/merges/archives).
     // Cursor-based — see src/lib/integrations/content-change-feed.ts. When
     // unset, the feed returns no events and the drift queue stays empty.
@@ -125,6 +133,8 @@ export const env = createEnv({
     DEV_AUTOLOGIN_EMAIL: process.env.DEV_AUTOLOGIN_EMAIL,
     CORTEX_API_URL: process.env.CORTEX_API_URL,
     CORTEX_API_KEY: process.env.CORTEX_API_KEY,
+    CORTEX_MCP_URL: process.env.CORTEX_MCP_URL,
+    CORTEX_MCP_TOKEN: process.env.CORTEX_MCP_TOKEN,
     CONTENT_CHANGE_FEED_URL: process.env.CONTENT_CHANGE_FEED_URL,
     CONTENT_CHANGE_FEED_API_KEY: process.env.CONTENT_CHANGE_FEED_API_KEY,
     NEXT_PUBLIC_POCKETBASE_URL: process.env.NEXT_PUBLIC_POCKETBASE_URL,

@@ -3,6 +3,7 @@ import 'server-only';
 import { setArticleBacklogStatusAsAdmin } from '@/lib/data/article-backlog';
 import { computeArticleKey } from '@/lib/data/article-keys';
 import {
+  getArticleSourceByIdAsAdmin,
   listArticleSourcesForArticleAsAdmin,
   markSourceCortexRegisteredAsAdmin,
 } from '@/lib/data/article-sources';
@@ -91,24 +92,11 @@ export async function runCortexRegistration(input: {
     outcomes.every((o) => o.status === 'registered' || o.status === 'reused');
 
   if (fullyRegistered) {
-    const article = await getNewArticleSuggestionByIdAsAdmin(input.articleRecordId);
-    const articleTitle = article?.articleTitle ?? '';
-    const articleKey = computeArticleKey({
-      specialtySlug: input.specialtySlug,
-      articleTitle,
-      articleId: article?.articleId,
-    });
-    if (articleKey) {
-      await setArticleBacklogStatusAsAdmin(
-        input.specialtySlug,
-        articleKey,
-        input.articleRecordId,
-        'ready-for-llm-draft',
-        input.requestedByEmail,
-      ).catch((e) => {
-        log('cortex-register').error('failed to flip backlog status', e);
-      });
-    }
+    await advanceBacklogToReadyForDraft(
+      input.specialtySlug,
+      input.articleRecordId,
+      input.requestedByEmail,
+    );
   }
 
   return {
@@ -120,4 +108,88 @@ export async function runCortexRegistration(input: {
     },
     fullyRegistered,
   };
+}
+
+/**
+ * Flip the article's backlog row to `ready-for-llm-draft`. Shared by the bulk
+ * and single-source registration paths. Caller is responsible for first
+ * confirming every source on the article carries a cortexSourceId.
+ */
+async function advanceBacklogToReadyForDraft(
+  specialtySlug: string,
+  articleRecordId: string,
+  requestedByEmail: string | null,
+): Promise<void> {
+  const article = await getNewArticleSuggestionByIdAsAdmin(articleRecordId);
+  const articleKey = computeArticleKey({
+    specialtySlug,
+    articleTitle: article?.articleTitle ?? '',
+    articleId: article?.articleId,
+  });
+  if (!articleKey) return;
+  await setArticleBacklogStatusAsAdmin(
+    specialtySlug,
+    articleKey,
+    articleRecordId,
+    'ready-for-llm-draft',
+    requestedByEmail,
+  ).catch((e) => {
+    log('cortex-register').error('failed to flip backlog status', e);
+  });
+}
+
+export type SingleSourceRegisterResult = {
+  cortexSourceId: string;
+  stub: boolean;
+  /** True when the source already had a cortexSourceId (no Cortex write). */
+  reused: boolean;
+};
+
+/**
+ * Register a single source in Cortex (the per-row "Register" button). Mirrors
+ * the per-source body of `runCortexRegistration`: skips if already registered,
+ * otherwise creates in Cortex, persists the ribosomId to `cortexSourceId` /
+ * `ribosomId`, and advances the backlog if this was the article's last
+ * unregistered source.
+ */
+export async function runCortexRegistrationForSource(
+  specialtySlug: string,
+  sourceId: string,
+  requestedByEmail: string | null,
+): Promise<SingleSourceRegisterResult> {
+  const source = await getArticleSourceByIdAsAdmin(sourceId);
+  if (!source) throw new Error('Source not found');
+  if (source.specialtySlug !== specialtySlug) {
+    throw new Error('Source does not belong to this specialty');
+  }
+  if (source.cortexSourceId) {
+    return { cortexSourceId: source.cortexSourceId, stub: false, reused: true };
+  }
+
+  const result = await registerCortexSource({
+    title: source.title,
+    url: source.url,
+    doi: source.doi,
+    journal: source.journal,
+    journalNlm: source.journalNlm,
+    sourceType: source.sourceType,
+    originalFilename: source.originalFilename,
+    llmSummary: source.llmSummary,
+    specialtySlug,
+  });
+  await markSourceCortexRegisteredAsAdmin(source.id, result.cortexSourceId);
+
+  const siblings = await listArticleSourcesForArticleAsAdmin(
+    specialtySlug,
+    source.articleRecordId,
+  );
+  if (siblings.length > 0 && siblings.every((s) => Boolean(s.cortexSourceId))) {
+    await advanceBacklogToReadyForDraft(
+      specialtySlug,
+      source.articleRecordId,
+      requestedByEmail,
+    );
+  }
+
+  return { cortexSourceId: result.cortexSourceId, stub: result.stub, reused: false };
 }

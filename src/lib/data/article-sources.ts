@@ -168,6 +168,35 @@ export async function listArticleSourcesForArticleAsAdmin(
   });
 }
 
+/** Fetch one articleSources row by id. Returns null if it doesn't exist. */
+export async function getArticleSourceByIdAsAdmin(
+  sourceId: string,
+): Promise<ArticleSourceRecord | null> {
+  const pb = await createAdminClient();
+  try {
+    return await pb.collection<ArticleSourceRecord>('articleSources').getOne(sourceId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Overwrite bibliographic fields on a single source row from a DOI lookup.
+ * Only the keys provided (and non-empty) are written — used by the per-row
+ * "Fetch DOI" button to refresh title/journal without clobbering other fields.
+ */
+export async function updateSourceBibliographyAsAdmin(
+  sourceId: string,
+  fields: { title?: string; journal?: string },
+): Promise<void> {
+  const patch: Record<string, string> = {};
+  if (fields.title?.trim()) patch.title = fields.title.trim();
+  if (fields.journal?.trim()) patch.journal = fields.journal.trim();
+  if (Object.keys(patch).length === 0) return;
+  const pb = await createAdminClient();
+  await pb.collection('articleSources').update(sourceId, patch);
+}
+
 /**
  * Mark a single articleSources row as uploaded to Gemini Files API.
  * `uri` becomes the canonical pointer the writing pipeline attaches
@@ -187,15 +216,22 @@ export async function markSourceUploadedAsAdmin(
 
 /**
  * Mark a single articleSources row as registered in Cortex CMS.
- * The cortexSourceId is the canonical ID used in the final article
- * HTML when citing the source.
+ *
+ * In this pipeline the Cortex "Source ID" is the source's ribosomId, and it
+ * doubles as both the cited id (the writing pipeline lists `ribosomId` to the
+ * model — see writing/passes.ts) and the source PDF name (`<ribosomId>.pdf`).
+ * So we write the value to BOTH `cortexSourceId` and `ribosomId`, matching
+ * `createArticleSourceAsAdmin` which populates both for manually-added sources.
+ * Passing an empty string clears both (manual escape hatch).
  */
 export async function markSourceCortexRegisteredAsAdmin(
   sourceId: string,
   cortexSourceId: string,
 ): Promise<void> {
   const pb = await createAdminClient();
-  await pb.collection('articleSources').update(sourceId, { cortexSourceId });
+  await pb
+    .collection('articleSources')
+    .update(sourceId, { cortexSourceId, ribosomId: cortexSourceId });
 }
 
 export async function setSourceUrlAsAdmin(sourceId: string, url: string): Promise<void> {
