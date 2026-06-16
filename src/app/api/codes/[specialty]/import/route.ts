@@ -17,7 +17,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import { createCodeSource, listCodeSources } from '@/lib/data/code-sources';
 import { listCodeStrings, upsertCodesAsAdmin } from '@/lib/data/codes';
-import { getConsolidationLockState } from '@/lib/data/pipeline';
+import { getConsolidationActivity } from '@/lib/data/pipeline';
 import { errorMessage } from '@/lib/error-message';
 import { type ParsedCodeRow, parseCodeImportFile } from '@/lib/import/code-import';
 import { log } from '@/lib/log';
@@ -50,11 +50,14 @@ export async function POST(
   const { specialty } = await params;
   const slug = decodeURIComponent(specialty);
 
-  const lock = await getConsolidationLockState(slug);
-  if (lock.locked) {
+  // An import rewrites metadata across many buckets, so block while ANY
+  // consolidation is actively running rather than scoping per-bucket.
+  const activity = await getConsolidationActivity(slug);
+  if (activity.runningAll || activity.runningBuckets.length > 0) {
     return NextResponse.json(
       {
-        error: 'Consolidation is active — reset the consolidation stage to edit codes.',
+        error:
+          'A consolidation is running — try the import again once it finishes (a minute or two).',
       },
       { status: 409 },
     );

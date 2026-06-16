@@ -12,8 +12,9 @@ import { requireUserResponse } from '@/lib/auth';
 import { getCodeAsAdmin } from '@/lib/data/codes';
 import {
   createPipelineRun,
-  getConsolidationLockState,
+  getConsolidationActivity,
   initPipelineStage,
+  isBucketEditBlocked,
   updatePipelineRun,
 } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
@@ -68,16 +69,6 @@ export async function POST(req: NextRequest) {
 
   log('remap-code').info({ slug, code });
 
-  const lock = await getConsolidationLockState(slug);
-  if (lock.locked) {
-    return NextResponse.json(
-      {
-        error: 'Consolidation is active — reset the consolidation stage to remap codes.',
-      },
-      { status: 409 },
-    );
-  }
-
   const spec = await getSpecialty(slug);
   if (!spec) {
     return NextResponse.json({ error: `specialty not found: ${slug}` }, { status: 404 });
@@ -86,6 +77,19 @@ export async function POST(req: NextRequest) {
   const existing = await getCodeAsAdmin(slug, code);
   if (!existing) {
     return NextResponse.json({ error: `code not found: ${code}` }, { status: 404 });
+  }
+
+  // Block only when this code's bucket (or the whole specialty) is actively
+  // rebuilding — the sheet is otherwise always remappable.
+  const activity = await getConsolidationActivity(slug);
+  if (isBucketEditBlocked(activity, existing.consolidationCategory)) {
+    const label = activity.runningAll
+      ? 'A full consolidation'
+      : `Consolidation for "${existing.consolidationCategory}"`;
+    return NextResponse.json(
+      { error: `${label} is running — remap once it finishes (a minute or two).` },
+      { status: 409 },
+    );
   }
 
   // Resolve keys BEFORE clearing the existing mapping + creating the run, so a

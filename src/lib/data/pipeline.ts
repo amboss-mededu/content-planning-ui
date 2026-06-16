@@ -388,37 +388,73 @@ export async function getCodeRunMetadataPipeline(
   return null;
 }
 
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const CONSOLIDATE_STAGES = new Set<StageName>([
+  'consolidate_primary',
+  'consolidate_articles',
+  'consolidate_sections',
+]);
+
 /**
- * Consolidation lock state for a specialty. Locked when the most recent
- * `consolidate_primary` stage across every run for the specialty is in any
- * status other than `pending`/`skipped`.
+ * Which consolidation buckets are *actively rebuilding right now* for a
+ * specialty — the replacement for the old global consolidation lock.
+ *
+ * The mapping sheet is always editable; we only block edits to a bucket whose
+ * consolidation job is genuinely in flight. A run counts as active when it is
+ * non-terminal AND has a `consolidate_*` stage that passes the same 15-minute
+ * freshness guard (`isStageRunningFresh`) the dashboard uses — so a crashed
+ * fire-and-forget run that left a stage pinned at `running` stops blocking
+ * edits after the window elapses.
+ *
+ * `runningAll` is true for a full-specialty consolidation (no
+ * `targetCategories`); `runningBuckets` lists the categories of scoped
+ * per-bucket re-runs. Callers gate edits with: blocked iff `runningAll` or the
+ * edited code's bucket ∈ `runningBuckets`.
  */
-export async function getConsolidationLockState(
+export async function getConsolidationActivity(
   slug: string,
-): Promise<{ locked: boolean; status: string | null }> {
+): Promise<{ runningAll: boolean; runningBuckets: string[] }> {
   await connection();
   const pb = await userClient();
   const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
     filter: pb.filter('specialtySlug = {:slug}', { slug }),
   });
-  let latest: { status: string; ts: number } | null = null;
+  let runningAll = false;
+  const runningBuckets = new Set<string>();
   for (const r of runs) {
+    if (TERMINAL_RUN_STATUSES.has(r.status)) continue;
     const stages = await pb
       .collection<PipelineStageRecord>('pipelineStages')
-      .getFullList({
-        filter: pb.filter('runId = {:runId} && stage = {:stage}', {
-          runId: r.id,
-          stage: 'consolidate_primary',
-        }),
-      });
-    for (const s of stages) {
-      const ts = s.finishedAt ?? s.startedAt ?? r.startedAt;
-      if (!latest || ts > latest.ts) latest = { status: s.status, ts };
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: r.id }) });
+    const consolidating = stages.some(
+      (s) =>
+        CONSOLIDATE_STAGES.has(s.stage as StageName) &&
+        isStageRunningFresh({ status: s.status, startedAt: s.startedAt }),
+    );
+    if (!consolidating) continue;
+    const targets = Array.isArray(r.targetCategories) ? r.targetCategories : null;
+    if (!targets || targets.length === 0) {
+      runningAll = true;
+    } else {
+      for (const t of targets) {
+        const name = typeof t === 'string' ? t.trim() : '';
+        if (name) runningBuckets.add(name);
+      }
     }
   }
-  const status = latest?.status ?? null;
-  const locked = status !== null && status !== 'pending' && status !== 'skipped';
-  return { locked, status };
+  return { runningAll, runningBuckets: Array.from(runningBuckets) };
+}
+
+/** True when an edit to `bucket` must be blocked because its consolidation is
+ *  actively running. A null/empty bucket is only blocked by a full-specialty
+ *  run. */
+export function isBucketEditBlocked(
+  activity: { runningAll: boolean; runningBuckets: string[] },
+  bucket: string | null | undefined,
+): boolean {
+  if (activity.runningAll) return true;
+  const name = bucket?.trim();
+  return !!name && activity.runningBuckets.includes(name);
 }
 
 export type ExtractionStageState = {

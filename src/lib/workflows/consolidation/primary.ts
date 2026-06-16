@@ -273,6 +273,7 @@ async function updateCategoryDecisions({
   newArticles,
   sectionUpdates,
   decisions,
+  consolidatedAt,
 }: {
   slug: string;
   category: string;
@@ -280,13 +281,15 @@ async function updateCategoryDecisions({
   newArticles: Array<Record<string, unknown>>;
   sectionUpdates: Array<Record<string, unknown>>;
   decisions?: ConsolidationRows['decisions'];
+  /** Run START time (ms). Stored as the bucket's `consolidatedAt` so edits
+   *  made WHILE the run was reading codes still compare as stale afterwards. */
+  consolidatedAt: number;
 }): Promise<void> {
   const pb = await createAdminClient();
   const rows = await pb
     .collection<CodeCategoryRecord>('codeCategories')
     .getFullList({ filter: pb.filter('specialtySlug = {:slug}', { slug }) });
   const row = rows.find((r) => r.codeCategory?.trim() === category.trim());
-  if (!row) return;
 
   const codesFromRows = (inputRows: Array<Record<string, unknown>>): string[] => {
     const out = new Set<string>();
@@ -321,8 +324,9 @@ async function updateCategoryDecisions({
     allowedCodes,
   );
 
-  await pb.collection('codeCategories').update(row.id, {
+  const fields = {
     isConsolidated: true,
+    consolidatedAt,
     includedArticleCodes,
     numIncludedArticleCodes: includedArticleCodes.length,
     excludedArticleCodes,
@@ -340,7 +344,20 @@ async function updateCategoryDecisions({
       ...excludedSectionCodes,
       ...totallyIgnoredCodes,
     ]).size,
-  });
+  };
+
+  // Upsert: a codeCategories row may not exist for every consolidation bucket
+  // (buckets are derived from codes.consolidationCategory). Create it so the
+  // bucket's consolidatedAt stamp is always recorded.
+  if (row) {
+    await pb.collection('codeCategories').update(row.id, fields);
+  } else {
+    await pb.collection('codeCategories').create({
+      specialtySlug: slug,
+      codeCategory: category.trim(),
+      ...fields,
+    });
+  }
 }
 
 export async function consolidatePrimaryWorkflow(
@@ -353,6 +370,9 @@ export async function consolidatePrimaryWorkflow(
   });
 
   try {
+    // Stamp buckets with the run's START time so an edit landing mid-run still
+    // reads as stale once the run completes.
+    const runStartedAt = Date.now();
     await markStageRunning(input.runId, 'consolidate_primary');
 
     const [codes, specialty, articleTitles] = await Promise.all([
@@ -454,6 +474,7 @@ export async function consolidatePrimaryWorkflow(
         newArticles,
         sectionUpdates,
         decisions: consolidated.decisions,
+        consolidatedAt: runStartedAt,
       });
       totalArticles += newArticles.length;
       totalSections += sectionUpdates.length;

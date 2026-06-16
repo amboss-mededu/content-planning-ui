@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import type PocketBase from 'pocketbase';
 import { ClientResponseError } from 'pocketbase';
+import { touchBucketInputChangedAsAdmin } from '@/lib/data/categories';
 import {
   type CodeCategorySummary,
   deriveCodeCategories,
@@ -36,6 +37,7 @@ export type CodeTableRow = Pick<
   | 'description'
   | 'isInAMBOSS'
   | 'mappedAt'
+  | 'consolidationInputChangedAt'
   | 'coverageLevel'
   | 'depthOfCoverage'
   | 'coverageArticleCount'
@@ -65,6 +67,7 @@ const CODE_TABLE_FIELDS = [
   'description',
   'isInAMBOSS',
   'mappedAt',
+  'consolidationInputChangedAt',
   'coverageLevel',
   'depthOfCoverage',
   'coverageArticleCount',
@@ -287,6 +290,29 @@ const MAPPING_SIGNAL_FIELDS: Array<keyof PatchCodeFields> = [
   'newArticlesNeeded',
 ];
 
+// Fields that feed the consolidation prompt (see
+// `listMappedCodesWithSuggestionsAsAdmin`). Changing any of them — or newly
+// mapping a code — invalidates the bucket's consolidation output, so we stamp
+// `consolidationInputChangedAt`. `notes`/`gaps`/`improvements`/`source`/
+// `category` are editor metadata, NOT consolidation inputs, and are excluded.
+const CONSOLIDATION_INPUT_FIELDS: Array<keyof PatchCodeFields> = [
+  'consolidationCategory',
+  'isInAMBOSS',
+  'coverageLevel',
+  'depthOfCoverage',
+  'description',
+  'articlesWhereCoverageIs',
+  'existingArticleUpdates',
+  'newArticlesNeeded',
+];
+
+/** Structural inequality — scalars by identity, arrays/objects by JSON. Treats
+ *  null/undefined/absent as equal so a no-op save never stamps staleness. */
+function valuesDiffer(a: unknown, b: unknown): boolean {
+  if (a === b) return false;
+  return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+}
+
 /**
  * Apply an editor's per-code edit. Composite-key lookup; the caller (the
  * route) has already validated `fields` against the strict schema and enforced
@@ -334,7 +360,27 @@ export async function patchCode(
     MAPPING_SIGNAL_FIELDS.some((k) => fields[k] !== undefined);
   if (stampsMapping) update.mappedAt = Date.now();
 
+  // Stamp consolidation staleness when a consolidation-input field actually
+  // changes value, or when the code transitions to mapped (it now becomes
+  // consolidation input). No-op edits (same value) don't stamp.
+  const changedConsolidationInput = CONSOLIDATION_INPUT_FIELDS.some(
+    (k) => fields[k] !== undefined && valuesDiffer(fields[k], row[k]),
+  );
+  if (changedConsolidationInput || stampsMapping) {
+    update.consolidationInputChangedAt = Date.now();
+  }
+
+  // A bucket move stales BOTH buckets: the destination via this code's own
+  // stamp above, the origin via a bucket-level stamp (the code is gone from
+  // it, so nothing else would mark it stale).
+  const movedBucket =
+    fields.consolidationCategory !== undefined &&
+    valuesDiffer(fields.consolidationCategory, row.consolidationCategory);
+
   const updated = await pb.collection<CodeTableRowSource>('codes').update(row.id, update);
+  if (movedBucket) {
+    await touchBucketInputChangedAsAdmin(slug, row.consolidationCategory);
+  }
   return toCodeTableRow(updated);
 }
 
@@ -465,6 +511,8 @@ export async function writeCodeMappingAsAdmin(args: WriteCodeMappingArgs): Promi
     ...mapping,
     ...buildMappingCounts(mapping),
     mappedAt,
+    // A (re)mapping rewrites this code's consolidation input — stale its bucket.
+    consolidationInputChangedAt: mappedAt,
   });
 
   // Drop in-flight markers for this code.
@@ -479,6 +527,7 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
   const rows = await pb
     .collection<CodeRecord>('codes')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
+  const now = Date.now();
   for (const r of rows) {
     if (!r.mappedAt) continue;
     await pb.collection('codes').update(r.id, {
@@ -496,6 +545,8 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       coverageSectionCount: 0,
       existingArticleUpdateCount: 0,
       newArticleSuggestionCount: 0,
+      // Unmapping removes the code from consolidation input — stale its bucket.
+      consolidationInputChangedAt: now,
     });
   }
   const flights = await pb
@@ -530,6 +581,8 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     coverageSectionCount: 0,
     existingArticleUpdateCount: 0,
     newArticleSuggestionCount: 0,
+    // Unmapping removes the code from consolidation input — stale its bucket.
+    consolidationInputChangedAt: Date.now(),
   });
 }
 
@@ -573,9 +626,9 @@ export async function upsertCodesAsAdmin(
   const pb = await createAdminClient();
   const existing = await pb.collection<CodeRecord>('codes').getFullList({
     filter: pb.filter('specialtySlug = {:slug}', { slug }),
-    fields: 'id,code',
+    fields: 'id,code,consolidationCategory,description',
   });
-  const idByCode = new Map(existing.map((r) => [r.code, r.id]));
+  const byCode = new Map(existing.map((r) => [r.code, r]));
 
   // Last-one-wins for duplicate codes within the file.
   const deduped = new Map<string, ParsedCodeRow>();
@@ -591,10 +644,25 @@ export async function upsertCodesAsAdmin(
     if (row.consolidationCategory !== undefined)
       metadata.consolidationCategory = row.consolidationCategory;
 
-    const id = idByCode.get(row.code);
-    if (id) {
+    const prev = byCode.get(row.code);
+    if (prev) {
+      // Stamp staleness when the import rewrites a consolidation-input column
+      // (consolidationCategory or description); touch the old bucket when the
+      // bucket assignment itself changes.
+      const movedBucket =
+        metadata.consolidationCategory !== undefined &&
+        valuesDiffer(metadata.consolidationCategory, prev.consolidationCategory);
+      const changedConsolidationInput =
+        movedBucket ||
+        (metadata.description !== undefined &&
+          valuesDiffer(metadata.description, prev.description));
       if (Object.keys(metadata).length > 0) {
-        await pb.collection('codes').update(id, metadata);
+        const patch: Record<string, unknown> = { ...metadata };
+        if (changedConsolidationInput) patch.consolidationInputChangedAt = Date.now();
+        await pb.collection('codes').update(prev.id, patch);
+        if (movedBucket) {
+          await touchBucketInputChangedAsAdmin(slug, prev.consolidationCategory);
+        }
       }
       updated++;
     } else {

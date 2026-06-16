@@ -1,6 +1,14 @@
 'use client';
 
-import { Badge, Button, Inline, Select, Stack, Text } from '@amboss/design-system';
+import {
+  Badge,
+  Button,
+  Callout,
+  Inline,
+  Select,
+  Stack,
+  Text,
+} from '@amboss/design-system';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -20,6 +28,7 @@ import type {
 } from '@/lib/pb/types';
 import { useApprovalState } from '@/lib/pb/use-approval-state';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
+import type { BacklogOrphan } from '@/lib/workflows/consolidation/orphans';
 import { AddArticleModal } from './add-article-modal';
 import { AnimatedDotsBadge } from './animated-dots-badge';
 import { ArticleManagerModalV2 } from './article-manager-modal-v2';
@@ -110,6 +119,8 @@ const statusOverlayStyle: CSSProperties = {
 export function BacklogView({
   slug,
   rows,
+  orphans = [],
+  driftAffected = [],
   categoryLookup,
   assignableUsers,
   initialBacklog,
@@ -123,6 +134,14 @@ export function BacklogView({
 }: {
   slug: string;
   rows: BacklogRow[];
+  /** Backlog rows whose articleKey is no longer produced by the current
+   *  consolidation output (orphaned by a re-run). Surfaced as a warning so
+   *  the editor can keep, re-point, or clear the work — never auto-deleted. */
+  orphans?: BacklogOrphan[];
+  /** Backlog rows whose referenced CMS article has an open drift event
+   *  (renamed/moved/merged/archived). Warning only — review on the Drift
+   *  tab; nothing is mutated here. */
+  driftAffected?: Array<{ articleKey: string; articleTitle?: string }>;
   categoryLookup: CategoryLookup;
   assignableUsers: AssignableUser[];
   initialBacklog: Record<string, ArticleBacklogRecord>;
@@ -862,6 +881,37 @@ export function BacklogView({
 
   return (
     <Stack space="m">
+      {orphans.length > 0 ? (
+        <Callout
+          type="warning"
+          text={`${orphans.length} backlog item${
+            orphans.length === 1 ? '' : 's'
+          } no longer produced by the latest consolidation`}
+          description={`A re-run regenerated different article keys, so these rows (with their assignee, status, and draft pointer) are orphaned. Review and re-point them, or clear them — nothing was deleted automatically. Affected: ${orphans
+            .map(
+              (o) => `${o.articleKey}${o.assigneeEmail ? ` (${o.assigneeEmail})` : ''}`,
+            )
+            .join(', ')}`}
+        />
+      ) : null}
+      {driftAffected.length > 0 ? (
+        <Callout
+          type="warning"
+          text={`${driftAffected.length} backlog item${
+            driftAffected.length === 1 ? '' : 's'
+          } affected by CMS drift`}
+          description={
+            <>
+              The CMS article behind{' '}
+              {driftAffected.length === 1 ? 'this item' : 'these items'} was renamed,
+              moved, merged, or archived since consolidation. Review on the{' '}
+              <a href={`/planning/${slug}/drift`}>Drift tab</a> — nothing was changed
+              automatically. Affected:{' '}
+              {driftAffected.map((d) => d.articleTitle || d.articleKey).join(', ')}.
+            </>
+          }
+        />
+      ) : null}
       {actionError ? (
         <button
           type="button"

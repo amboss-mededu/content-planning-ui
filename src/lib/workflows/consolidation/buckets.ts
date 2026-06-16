@@ -189,6 +189,58 @@ export function deriveBucketStats({
   };
 }
 
+export type BucketStalenessInput = {
+  /** Whether the bucket currently has consolidated output. A bucket that
+   *  was never consolidated is never "stale" — it's "not started". */
+  hasConsolidatedOutput: boolean;
+  /** Start time (ms) of the bucket's last consolidation run; 0/undefined if
+   *  it has never run. */
+  consolidatedAt?: number | null;
+  /** Bucket-level dirty stamp (ms) — set when a code LEAVES this bucket, so
+   *  the old bucket reads stale even though that code is gone. */
+  bucketInputChangedAt?: number | null;
+  /** Per-code consolidation-input change stamps (ms) for codes currently in
+   *  the bucket. */
+  codeChangedAts: Array<{ code: string; changedAt?: number | null }>;
+};
+
+export type DerivedBucketStaleness = {
+  /** True when consolidated output exists but an input changed after it. */
+  isStale: boolean;
+  /** Latest input change across the bucket's codes + the bucket stamp (0 if
+   *  none) — drives the "changed N ago" tooltip. */
+  staleInputAt: number;
+  /** Codes whose own change is newer than the last consolidation. Empty when
+   *  the bucket isn't consolidated (nothing to compare against). */
+  changedCodes: string[];
+};
+
+/**
+ * Pure staleness derivation for one consolidation bucket. A bucket is stale
+ * when it has output AND any consolidation-relevant input changed after the
+ * output was produced. Two change sources are unioned:
+ *  - a code currently in the bucket changed (`codeChangedAts`), and
+ *  - a code LEFT the bucket (`bucketInputChangedAt`, stamped on the old
+ *    bucket at move time; the destination bucket goes stale via the moved
+ *    code's own `changedAt`).
+ */
+export function deriveBucketStaleness(
+  input: BucketStalenessInput,
+): DerivedBucketStaleness {
+  const consolidatedAt = input.consolidatedAt ?? 0;
+  const bucketChanged = input.bucketInputChangedAt ?? 0;
+  let maxCodeChanged = 0;
+  const changedCodes: string[] = [];
+  for (const { code, changedAt } of input.codeChangedAts) {
+    const ts = changedAt ?? 0;
+    if (ts > maxCodeChanged) maxCodeChanged = ts;
+    if (input.hasConsolidatedOutput && ts > consolidatedAt) changedCodes.push(code);
+  }
+  const staleInputAt = Math.max(maxCodeChanged, bucketChanged);
+  const isStale = input.hasConsolidatedOutput && staleInputAt > consolidatedAt;
+  return { isStale, staleInputAt, changedCodes };
+}
+
 export function deriveReviewCategories(
   mappingByCategory: Record<string, ConsolidationMappingSummary>,
 ): string[] {

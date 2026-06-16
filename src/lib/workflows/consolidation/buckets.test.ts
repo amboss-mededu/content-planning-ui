@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deriveBucketStaleness,
   deriveBucketStats,
   deriveConsolidationMappingByCategory,
   deriveOutputCategories,
@@ -159,5 +160,78 @@ describe('consolidation buckets', () => {
       B: 'orphan',
       C: 'ignored',
     });
+  });
+});
+
+describe('deriveBucketStaleness', () => {
+  it('never marks a never-consolidated bucket stale', () => {
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: false,
+      consolidatedAt: 0,
+      codeChangedAts: [{ code: 'A', changedAt: 5000 }],
+    });
+    expect(result.isStale).toBe(false);
+    expect(result.changedCodes).toEqual([]);
+  });
+
+  it('marks a bucket stale when a code changed after consolidation', () => {
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: true,
+      consolidatedAt: 1000,
+      codeChangedAts: [
+        { code: 'A', changedAt: 500 },
+        { code: 'B', changedAt: 2000 },
+      ],
+    });
+    expect(result.isStale).toBe(true);
+    expect(result.staleInputAt).toBe(2000);
+    expect(result.changedCodes).toEqual(['B']);
+  });
+
+  it('is fresh when all code changes predate the last consolidation', () => {
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: true,
+      consolidatedAt: 3000,
+      codeChangedAts: [
+        { code: 'A', changedAt: 500 },
+        { code: 'B', changedAt: 2000 },
+      ],
+    });
+    expect(result.isStale).toBe(false);
+    expect(result.changedCodes).toEqual([]);
+  });
+
+  it('marks the OLD bucket stale via the bucket stamp when a code leaves', () => {
+    // The departed code is no longer in codeChangedAts, but the bucket-level
+    // stamp (written at move time) still trips staleness.
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: true,
+      consolidatedAt: 1000,
+      bucketInputChangedAt: 2500,
+      codeChangedAts: [{ code: 'A', changedAt: 500 }],
+    });
+    expect(result.isStale).toBe(true);
+    expect(result.staleInputAt).toBe(2500);
+    expect(result.changedCodes).toEqual([]); // remaining code A is unchanged
+  });
+
+  it('marks the NEW bucket stale via the moved code own stamp', () => {
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: true,
+      consolidatedAt: 1000,
+      codeChangedAts: [{ code: 'MOVED', changedAt: 2500 }],
+    });
+    expect(result.isStale).toBe(true);
+    expect(result.changedCodes).toEqual(['MOVED']);
+  });
+
+  it('treats missing/zero stamps as no change', () => {
+    const result = deriveBucketStaleness({
+      hasConsolidatedOutput: true,
+      consolidatedAt: 1000,
+      codeChangedAts: [{ code: 'A' }, { code: 'B', changedAt: 0 }],
+    });
+    expect(result.isStale).toBe(false);
+    expect(result.staleInputAt).toBe(0);
   });
 });

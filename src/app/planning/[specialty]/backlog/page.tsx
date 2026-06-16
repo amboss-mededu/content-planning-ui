@@ -8,12 +8,14 @@ import { listArticleReviews } from '@/lib/data/article-reviews';
 import { listArticleSourcesByArticleKey } from '@/lib/data/article-sources';
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCodes } from '@/lib/data/codes';
+import { getDriftAffectedArticleKeys } from '@/lib/data/content-drift';
 import { listReviewComments } from '@/lib/data/review-comments';
 import { listSectionReviews } from '@/lib/data/section-reviews';
 import { listConsolidatedSections } from '@/lib/data/sections';
 import { listAssignableUsers } from '@/lib/data/users';
 import type { ArticleBacklogRecord, ArticleSourceRecord } from '@/lib/pb/types';
 import type { ConsolidatedArticle, ConsolidatedSection } from '@/lib/types';
+import { computeBacklogOrphans } from '@/lib/workflows/consolidation/orphans';
 import { type BacklogRow, BacklogView } from '../../_components/backlog-view';
 import {
   type CategoryLookup,
@@ -127,6 +129,7 @@ async function BacklogData({ slug }: { slug: string }) {
     commentsByArticleKind,
     user,
     draftRunsByArticle,
+    driftAffectedKeys,
   ] = await Promise.all([
     listConsolidatedArticles(slug),
     listArticleReviews(slug),
@@ -140,6 +143,7 @@ async function BacklogData({ slug }: { slug: string }) {
     listReviewComments(slug, 'article'),
     getCurrentUser(),
     listLatestDraftRunsForArticles(slug),
+    getDriftAffectedArticleKeys(slug),
   ]);
 
   const categoryLookup: CategoryLookup = {};
@@ -206,10 +210,27 @@ async function BacklogData({ slug }: { slug: string }) {
 
   const initialBacklog: Record<string, ArticleBacklogRecord> = backlogRecs;
 
+  // Orphans: backlog rows whose articleKey is no longer produced by the
+  // current consolidated output (a re-run regenerated different keys). The
+  // candidate keys are every current new-article key plus the `upd::<id>`
+  // key for each parent article that still has consolidated sections.
+  const currentArticleKeys = new Set<string>(rows.map((r) => r.articleKey));
+  const orphans = computeBacklogOrphans(Object.values(backlogRecs), currentArticleKeys);
+
+  // CMS drift: backlog rows whose referenced article changed in the CMS
+  // (renamed/moved/merged/archived). Flag-only — listed in a warning so the
+  // editor can review on the Drift tab; nothing here is mutated.
+  const driftKeySet = new Set(driftAffectedKeys);
+  const driftAffected = rows
+    .filter((r) => driftKeySet.has(r.articleKey))
+    .map((r) => ({ articleKey: r.articleKey, articleTitle: r.articleTitle }));
+
   return (
     <BacklogView
       slug={slug}
       rows={rows}
+      orphans={orphans}
+      driftAffected={driftAffected}
       categoryLookup={categoryLookup}
       assignableUsers={users}
       initialBacklog={initialBacklog}

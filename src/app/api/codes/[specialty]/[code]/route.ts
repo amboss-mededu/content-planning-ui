@@ -5,17 +5,18 @@
  *   body: strict — scalar metadata/coverage fields plus the three JSON
  *   suggestion arrays (full replacements). See `lib/validation/code-patch.ts`.
  *
- * Gated on consolidation state — returns 409 if `consolidate_primary` is in
- * any state other than `pending`/`skipped`. The gate is also enforced in the
- * UI, but re-checked here so a stale tab can't bypass it. Returns the updated
- * row so the client can merge it into local table state.
+ * The mapping sheet is always editable; an edit is rejected with 409 only when
+ * the code's consolidation bucket (or the whole specialty) is actively
+ * rebuilding. A bucket move is checked against BOTH the origin and destination
+ * bucket so a code can't be moved out of, or into, a running bucket.
+ * Returns the updated row so the client can merge it into local table state.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
 import { requireUserResponse } from '@/lib/auth';
 import { getCode, type PatchCodeFields, patchCode } from '@/lib/data/codes';
-import { getConsolidationLockState } from '@/lib/data/pipeline';
+import { getConsolidationActivity, isBucketEditBlocked } from '@/lib/data/pipeline';
 import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
@@ -46,22 +47,32 @@ export async function PATCH(
   const slug = decodeURIComponent(specialty);
   const codeId = decodeURIComponent(code);
 
-  const lock = await getConsolidationLockState(slug);
-  if (lock.locked) {
-    return NextResponse.json(
-      {
-        error: 'Consolidation is active — reset the consolidation stage to edit codes.',
-      },
-      { status: 409 },
-    );
-  }
-
   const body = await parseBodyOr400(req, CodePatchBody);
   if (body instanceof NextResponse) return body;
 
   const fields = toPatchFields(body);
   if (Object.keys(fields).length === 0) {
     return NextResponse.json({ error: 'no editable fields supplied' }, { status: 400 });
+  }
+
+  // Block only when this code's bucket is actively rebuilding. A bucket move is
+  // gated against the origin (current bucket) and the destination.
+  const [activity, current] = await Promise.all([
+    getConsolidationActivity(slug),
+    getCode(slug, codeId),
+  ]);
+  const blockedBucket = [
+    current?.consolidationCategory,
+    fields.consolidationCategory,
+  ].find((b) => !activity.runningAll && isBucketEditBlocked(activity, b));
+  if (activity.runningAll || blockedBucket !== undefined) {
+    const label = activity.runningAll
+      ? 'A full consolidation'
+      : `Consolidation for "${blockedBucket}"`;
+    return NextResponse.json(
+      { error: `${label} is running — codes will be editable again shortly.` },
+      { status: 409 },
+    );
   }
   log('codes').info('PATCH', { slug, code: codeId, fields: Object.keys(fields) });
 

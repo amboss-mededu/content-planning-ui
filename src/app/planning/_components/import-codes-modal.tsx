@@ -57,8 +57,9 @@ const ERROR_CAP = 20;
 
 export function ImportCodesModal({ slug }: { slug: string }) {
   const router = useRouter();
-  const [lockLocked, setLockLocked] = useState(false);
-  const [lockStatus, setLockStatus] = useState<string | null>(null);
+  // Import rewrites many buckets at once, so it pauses while ANY consolidation
+  // is actively running (mirrors the import route's gate).
+  const [importBlocked, setImportBlocked] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('pick');
@@ -79,11 +80,12 @@ export function ImportCodesModal({ slug }: { slug: string }) {
         });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
-          lock: { locked: boolean; status: string | null };
+          activity: { runningAll: boolean; runningBuckets: string[] };
         };
         if (!cancelled) {
-          setLockLocked(data.lock.locked);
-          setLockStatus(data.lock.status);
+          setImportBlocked(
+            data.activity.runningAll || data.activity.runningBuckets.length > 0,
+          );
         }
       } catch {
         /* leave unlocked; the route still enforces the gate */
@@ -193,7 +195,7 @@ export function ImportCodesModal({ slug }: { slug: string }) {
     <Button
       variant="secondary"
       size="m"
-      disabled={lockLocked}
+      disabled={importBlocked}
       onClick={() => {
         reset();
         setOpen(true);
@@ -205,10 +207,8 @@ export function ImportCodesModal({ slug }: { slug: string }) {
 
   return (
     <>
-      {lockLocked ? (
-        <Tooltip
-          content={`Consolidation is active${lockStatus ? ` (${lockStatus})` : ''} — reset the consolidation stage to import codes.`}
-        >
+      {importBlocked ? (
+        <Tooltip content="A consolidation is running — importing resumes once it finishes.">
           <span style={{ display: 'inline-flex' }}>{trigger}</span>
         </Tooltip>
       ) : (

@@ -7,7 +7,7 @@ import type { StageName } from '@/lib/workflows/lib/db-writes';
 import { refreshSpecialty } from '../../actions';
 
 const CONFIRM_MESSAGE =
-  'Cancel this run? The workflow will be stopped and this stage (plus everything downstream) will be cleared.';
+  'Cancel this run? The workflow stops and this stage becomes re-runnable. Your existing data (mappings, consolidations, downstream work) is kept — use "Start over" if you want to clear it.';
 
 export function CancelButton({
   runId,
@@ -37,9 +37,9 @@ export function CancelButton({
         setError(body?.error ?? `HTTP ${res.status}`);
         return;
       }
-      // Cancel runs the same downstream-clearing cascade as reset; purge the
-      // whole /planning/<slug> client cache so every tab reflects the wipe,
-      // not just the current route (which is all router.refresh() covers).
+      // Cancel only stops the run + resets this stage's row; no data is wiped.
+      // Still purge the whole /planning/<slug> client cache so every tab
+      // reflects the no-longer-running state, not just the current route.
       await refreshSpecialty(specialtySlug);
       router.refresh();
     } finally {

@@ -41,6 +41,7 @@ export function PipelineDashboard({
   draftEligibleIds,
   stageHasOutput,
   stageStates,
+  staleBucketCount,
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -62,6 +63,9 @@ export function PipelineDashboard({
   draftEligibleIds: string[];
   stageHasOutput: Record<string, boolean>;
   stageStates: PipelineStageStates;
+  /** Buckets whose mapping inputs changed since their last consolidation.
+   *  Surfaced as an amber chip on the primary consolidation card. */
+  staleBucketCount: number;
 }) {
   const runActive =
     run !== null &&
@@ -178,6 +182,7 @@ export function PipelineDashboard({
             events={stages.consolidate_primary?.events ?? []}
             hasOutput={stageHasOutput.consolidate_primary ?? false}
             manualState={stageState(stageStates, 'consolidate_primary')}
+            staleBucketCount={staleBucketCount}
           >
             <RunConsolidationButton
               specialtySlug={specialtySlug}

@@ -64,6 +64,10 @@ export interface CodeRecord extends PbRecord {
   description?: string;
   isInAMBOSS?: boolean;
   mappedAt?: number;
+  /** ms since epoch — last time a consolidation-relevant field on this
+   *  code changed value. Drives per-bucket staleness; see
+   *  `deriveBucketStaleness` in `src/lib/workflows/consolidation/buckets.ts`. */
+  consolidationInputChangedAt?: number;
   articlesWhereCoverageIs?: CoveredSection[];
   notes?: string;
   gaps?: string;
@@ -86,6 +90,13 @@ export interface CodeCategoryRecord extends PbRecord {
   source?: string;
   areAllCodesRun?: boolean;
   isConsolidated?: boolean;
+  /** ms since epoch — start time of this bucket's last primary
+   *  consolidation run. Compared against codes' / the bucket's
+   *  `*ChangedAt` to derive staleness. */
+  consolidatedAt?: number;
+  /** ms since epoch — bucket-level dirty stamp, set when a code leaves
+   *  this bucket (the new bucket goes stale via the code's own stamp). */
+  inputChangedAt?: number;
   description?: string;
   numCodes?: number;
   totalArticleCodes?: number;
@@ -440,6 +451,51 @@ export interface ConsolidatedSectionRecord extends PbRecord {
   justifcation?: string;
   isSufficientlyCovered?: boolean;
   areAllSourcesFetched?: boolean;
+}
+
+// --- Collection: contentChangeEvents ---------------------------------------
+
+export type ContentChangeEventType =
+  | 'renamed'
+  | 'moved'
+  | 'archived'
+  | 'merged'
+  | 'deleted';
+
+export type ContentChangeEventStatus = 'open' | 'resolved';
+
+/**
+ * One CMS article/section change ingested from the content-change feed.
+ * Events are CMS-global (no specialtySlug); specialty filtering happens
+ * at join time in `computeDriftImpacts`. `eventKey` is the idempotency
+ * key — re-syncing a window upserts on it. See
+ * `src/lib/data/content-drift.ts`.
+ */
+export interface ContentChangeEventRecord extends PbRecord {
+  eventKey: string;
+  articleEid: string;
+  sectionId?: string;
+  changeType: ContentChangeEventType;
+  newTitle?: string;
+  mergedIntoEid?: string;
+  /** ms since epoch — when the change happened in the CMS. */
+  occurredAt?: number;
+  /** ms since epoch — when this app ingested the event. */
+  ingestedAt?: number;
+  status: ContentChangeEventStatus;
+  resolvedBy?: string;
+  /** ms since epoch */
+  resolvedAt?: number;
+  notes?: string;
+}
+
+// --- Collection: integrationState ------------------------------------------
+
+/** Generic key/value store. Holds the content-change feed cursor under
+ *  key `contentChangeFeedCursor`. */
+export interface IntegrationStateRecord extends PbRecord {
+  key: string;
+  value?: unknown;
 }
 
 // --- Ontology mirror tables ------------------------------------------------
