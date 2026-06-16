@@ -72,9 +72,10 @@ export interface CoverageStats {
   numConsolidations: number;
   newArticles: number;
   newArticlesLt3: number;
-  avgArticlesPerConsolidation: number;
+  avgNewArticlesPerConsolidation: number;
   articleUpdates: number;
   articleUpdatesLt3: number;
+  avgArticleUpdatesPerConsolidation: number;
   totalSectionChanges: number;
   totalSectionChangesLt3: number;
   newSections: number;
@@ -272,15 +273,18 @@ export function computeCoverageStats(
     numConsolidations,
     newArticles,
     newArticlesLt3,
-    avgArticlesPerConsolidation: avg(newArticles, numConsolidations),
+    // Per-consolidation averages divide by the consolidations that have RUN
+    // (suggestions only exist for run consolidations), not the total expected.
+    avgNewArticlesPerConsolidation: avg(newArticles, consolidationsRun),
     articleUpdates,
     articleUpdatesLt3,
+    avgArticleUpdatesPerConsolidation: avg(articleUpdates, consolidationsRun),
     totalSectionChanges,
     totalSectionChangesLt3,
     newSections,
     newSectionsLt3,
     sectionUpdates,
     sectionUpdatesLt3,
-    avgSectionsPerConsolidation: avg(totalSectionChanges, numConsolidations),
+    avgSectionsPerConsolidation: avg(totalSectionChanges, consolidationsRun),
   };
 }

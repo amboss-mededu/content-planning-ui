@@ -128,6 +128,8 @@ describe('computeCoverageStats', () => {
       makeCode({ consolidationCategory: 'C2' }),
     ];
     const stats = computeCoverageStats(codes, {
+      consolidationsExpected: 2,
+      consolidationsRun: 2,
       consolidatedArticles: [
         { overallCoverage: 1 }, // < 3
         { overallCoverage: 4 }, // ≥ 3
@@ -144,7 +146,10 @@ describe('computeCoverageStats', () => {
     expect(stats.numConsolidations).toBe(2);
     expect(stats.newArticles).toBe(3);
     expect(stats.newArticlesLt3).toBe(1); // only overallCoverage 1
-    expect(stats.avgArticlesPerConsolidation).toBe(1.5); // 3 / 2 consolidations
+    // Averages divide by RUN consolidations (2), not the distinct categories.
+    expect(stats.avgNewArticlesPerConsolidation).toBe(1.5); // 3 / 2 run
+    expect(stats.avgArticleUpdatesPerConsolidation).toBe(1.5); // 3 / 2 run
+    expect(stats.avgSectionsPerConsolidation).toBe(2); // 4 / 2 run
 
     expect(stats.totalSectionChanges).toBe(4);
     expect(stats.newSections).toBe(1); // the exists:false row
@@ -154,6 +159,29 @@ describe('computeCoverageStats', () => {
     expect(stats.newSectionsLt3).toBe(1);
     expect(stats.sectionUpdatesLt3).toBe(1); // only the coverage-2 update
     expect(stats.articleUpdatesLt3).toBe(2); // a1 (has a <3 section) and a2
+  });
+
+  it('uses run consolidations as the per-consolidation average denominator', () => {
+    // 3 distinct categories but only 1 has run — averages divide by 1, not 3.
+    const codes = [
+      makeCode({ consolidationCategory: 'A' }),
+      makeCode({ consolidationCategory: 'B' }),
+      makeCode({ consolidationCategory: 'C' }),
+    ];
+    const stats = computeCoverageStats(codes, {
+      consolidationsExpected: 3,
+      consolidationsRun: 1,
+      consolidatedArticles: [{ overallCoverage: 4 }, { overallCoverage: 2 }],
+      consolidatedSections: [
+        { exists: true, overallCoverage: 4, articleId: 'a1' },
+        { exists: false, overallCoverage: 1, articleId: 'a2' },
+      ],
+    });
+    expect(stats.numConsolidations).toBe(3);
+    expect(stats.consolidationsRun).toBe(1);
+    expect(stats.avgNewArticlesPerConsolidation).toBe(2); // 2 / 1 run
+    expect(stats.avgArticleUpdatesPerConsolidation).toBe(2); // 2 distinct articles / 1
+    expect(stats.avgSectionsPerConsolidation).toBe(2); // 2 / 1 run
   });
 
   it('reports consolidation run progress from the passed-in counts', () => {
@@ -190,7 +218,8 @@ describe('computeCoverageStats', () => {
     const empty = computeCoverageStats([]);
     expect(empty.total).toBe(0);
     expect(empty.avgCoverage).toBe(0);
-    expect(empty.avgArticlesPerConsolidation).toBe(0); // no divide-by-zero
+    expect(empty.avgNewArticlesPerConsolidation).toBe(0); // no divide-by-zero
+    expect(empty.avgArticleUpdatesPerConsolidation).toBe(0);
     expect(empty.pctInAmboss).toBe(0);
     expect(empty.consolidationsExpected).toBe(0);
     expect(empty.consolidationsRun).toBe(0);
