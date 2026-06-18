@@ -70,6 +70,7 @@ export function CodesView({
   totalCount,
   loadState,
   onPatchRow,
+  mappingOnly = false,
 }: {
   codes: Code[];
   specialtySlug: string;
@@ -82,6 +83,9 @@ export function CodesView({
   /** Present only when inline edits are wired (the client view supplies it).
    *  Cells are editable when `canEdit` is also true. */
   onPatchRow?: PatchRowHandler;
+  /** Mapping-only specialties hide the suggestion columns (Updates /
+   *  New articles) and the Consolidation-category column. */
+  mappingOnly?: boolean;
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
 
@@ -119,7 +123,7 @@ export function CodesView({
     const edit = (cfg: EditableConfig<Code>): EditableConfig<Code> | undefined =>
       editingEnabled ? cfg : undefined;
 
-    return [
+    const cols: Column<Code>[] = [
       {
         key: 'source',
         label: 'Source',
@@ -402,7 +406,13 @@ export function CodesView({
         group: 'suggestions',
       },
     ];
-  }, [onOpenDetail, inFlightSet, editingEnabled, onPatchRow, sourceOptions]);
+    // Mapping-only specialties have no suggestions or consolidation buckets,
+    // so drop those columns entirely.
+    if (!mappingOnly) return cols;
+    return cols.filter(
+      (c) => c.group !== 'suggestions' && c.key !== 'consolidationCategory',
+    );
+  }, [onOpenDetail, inFlightSet, editingEnabled, onPatchRow, sourceOptions, mappingOnly]);
 
   return (
     <Stack space="m">

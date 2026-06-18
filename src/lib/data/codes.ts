@@ -469,6 +469,59 @@ export async function listMappedCodesWithSuggestionsAsAdmin(
     }));
 }
 
+/**
+ * Count codes that have been coverage-mapped (`mappedAt > 0`) but never
+ * processed for suggestions (`suggestionsGeneratedAt` unset). Drives the
+ * visibility + actionable count of the "Generate suggestions" backfill card.
+ */
+export async function countMappedWithoutSuggestions(slug: string): Promise<number> {
+  await connection();
+  const pb = await userClient();
+  const list = await pb.collection<CodeRecord>('codes').getList(1, 1, {
+    filter: `specialtySlug = "${slug}" && mappedAt > 0 && (suggestionsGeneratedAt = 0 || suggestionsGeneratedAt = null)`,
+    skipTotal: false,
+  });
+  return list.totalItems;
+}
+
+export type MappedCodeForSuggestions = {
+  code: string;
+  category: string | null;
+  description: string | null;
+  isInAMBOSS?: boolean;
+  coverageLevel: string | null;
+  depthOfCoverage?: number;
+  notes: string | null;
+  gaps: string | null;
+  articlesWhereCoverageIs: CoveredSection[];
+};
+
+/**
+ * Read coverage-mapped codes still missing suggestions, with the stored
+ * coverage the suggestion-only pass needs as input. Admin-scoped (workflow).
+ */
+export async function listMappedCodesWithoutSuggestionsAsAdmin(
+  slug: string,
+): Promise<MappedCodeForSuggestions[]> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: `specialtySlug = "${slug}" && mappedAt > 0 && (suggestionsGeneratedAt = 0 || suggestionsGeneratedAt = null)`,
+  });
+  return rows.map((r) => ({
+    code: r.code,
+    category: r.category ?? null,
+    description: r.description ?? null,
+    isInAMBOSS: r.isInAMBOSS,
+    coverageLevel: r.coverageLevel ?? null,
+    depthOfCoverage: r.depthOfCoverage,
+    notes: r.notes ?? null,
+    gaps: r.gaps ?? null,
+    articlesWhereCoverageIs: Array.isArray(r.articlesWhereCoverageIs)
+      ? r.articlesWhereCoverageIs
+      : [],
+  }));
+}
+
 export async function getCodeAsAdmin(
   slug: string,
   code: string,
@@ -498,6 +551,9 @@ export type WriteCodeMappingArgs = {
   articlesWhereCoverageIs?: CoveredSection[];
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
+  /** Stamp the suggestion-processed marker (combined full-mode write). Left
+   *  unset by coverage-only writes so the backfill stage can find the code. */
+  suggestionsGeneratedAt?: number;
 };
 
 export async function writeCodeMappingAsAdmin(args: WriteCodeMappingArgs): Promise<void> {
@@ -513,6 +569,57 @@ export async function writeCodeMappingAsAdmin(args: WriteCodeMappingArgs): Promi
     mappedAt,
     // A (re)mapping rewrites this code's consolidation input — stale its bucket.
     consolidationInputChangedAt: mappedAt,
+  });
+
+  // Drop in-flight markers for this code.
+  const flights = await pb
+    .collection<MappingInFlightRecord>('mappingsInFlight')
+    .getFullList({ filter: `specialtySlug = "${slug}" && code = "${code}"` });
+  await Promise.all(flights.map((f) => pb.collection('mappingsInFlight').delete(f.id)));
+}
+
+export type WriteCodeSuggestionsArgs = {
+  slug: string;
+  code: string;
+  improvements?: string;
+  existingArticleUpdates?: SectionUpdate[];
+  newArticlesNeeded?: NewArticle[];
+};
+
+/**
+ * Partial write for the "Generate suggestions" backfill stage: writes ONLY
+ * the suggestion fields (+ their derived counts) and stamps
+ * `suggestionsGeneratedAt` + `consolidationInputChangedAt`. Coverage fields,
+ * coverage counts, and `mappedAt` are preserved — this never recomputes or
+ * touches the previously-performed coverage mapping.
+ */
+export async function writeCodeSuggestionsAsAdmin(
+  args: WriteCodeSuggestionsArgs,
+): Promise<void> {
+  const { slug, code, ...suggestions } = args;
+  const pb = await createAdminClient();
+  const row = await pb
+    .collection<CodeRecord>('codes')
+    .getFirstListItem(`specialtySlug = "${slug}" && code = "${code}"`);
+  // Recompute suggestion counts; keep the stored coverage counts by passing
+  // them through as fallbacks (no coverage arrays supplied here).
+  const counts = deriveCodeTableCounts({
+    existingArticleUpdates: suggestions.existingArticleUpdates,
+    newArticlesNeeded: suggestions.newArticlesNeeded,
+    coverageArticleCount: row.coverageArticleCount,
+    coverageSectionCount: row.coverageSectionCount,
+  });
+  const now = Date.now();
+  await pb.collection('codes').update(row.id, {
+    improvements: suggestions.improvements ?? null,
+    existingArticleUpdates: suggestions.existingArticleUpdates ?? [],
+    newArticlesNeeded: suggestions.newArticlesNeeded ?? [],
+    existingArticleUpdateCount: counts.existingArticleUpdateCount,
+    newArticleSuggestionCount: counts.newArticleSuggestionCount,
+    suggestionsGeneratedAt: now,
+    // Suggestions are consolidation input — stale the bucket so a later
+    // consolidation run picks them up.
+    consolidationInputChangedAt: now,
   });
 
   // Drop in-flight markers for this code.
@@ -545,6 +652,7 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       coverageSectionCount: 0,
       existingArticleUpdateCount: 0,
       newArticleSuggestionCount: 0,
+      suggestionsGeneratedAt: 0,
       // Unmapping removes the code from consolidation input — stale its bucket.
       consolidationInputChangedAt: now,
     });
@@ -553,6 +661,37 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
     .collection<MappingInFlightRecord>('mappingsInFlight')
     .getFullList({ filter: `specialtySlug = "${slug}"` });
   await Promise.all(flights.map((f) => pb.collection('mappingsInFlight').delete(f.id)));
+}
+
+/**
+ * Clear ONLY the generated suggestion fields (+ counts + the
+ * `suggestionsGeneratedAt` marker) for every mapped code in a specialty,
+ * reverting them to "needs suggestions". Coverage and `mappedAt` are
+ * preserved. Backs the `map_suggestions` stage reset.
+ */
+export async function clearSuggestionsForSpecialtyAsAdmin(slug: string): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<CodeRecord>('codes')
+    .getFullList({ filter: `specialtySlug = "${slug}" && mappedAt > 0` });
+  const now = Date.now();
+  for (const r of rows) {
+    const hasSuggestions =
+      (Array.isArray(r.existingArticleUpdates) && r.existingArticleUpdates.length > 0) ||
+      (Array.isArray(r.newArticlesNeeded) && r.newArticlesNeeded.length > 0) ||
+      !!r.improvements ||
+      !!r.suggestionsGeneratedAt;
+    if (!hasSuggestions) continue;
+    await pb.collection('codes').update(r.id, {
+      improvements: null,
+      existingArticleUpdates: [],
+      newArticlesNeeded: [],
+      existingArticleUpdateCount: 0,
+      newArticleSuggestionCount: 0,
+      suggestionsGeneratedAt: 0,
+      consolidationInputChangedAt: now,
+    });
+  }
 }
 
 export async function clearMappingAsAdmin(slug: string, code: string): Promise<void> {
@@ -581,6 +720,7 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     coverageSectionCount: 0,
     existingArticleUpdateCount: 0,
     newArticleSuggestionCount: 0,
+    suggestionsGeneratedAt: 0,
     // Unmapping removes the code from consolidation input — stale its bucket.
     consolidationInputChangedAt: Date.now(),
   });

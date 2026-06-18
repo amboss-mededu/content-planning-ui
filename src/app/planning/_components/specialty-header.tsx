@@ -4,8 +4,13 @@ import { Callout, H1, Inline, Stack, Text } from '@amboss/design-system';
 import type { Specialty } from '@/lib/types';
 import { Breadcrumbs } from './breadcrumbs';
 import { ChangeSpecialtyButton } from './change-specialty-button';
+import { MappingOnlyToggle } from './mapping-only-toggle';
 import { RefreshButton } from './refresh-button';
 import { SpecialtyTabs } from './specialty-tabs';
+
+// Tabs hidden for a mapping-only specialty — the consolidation parent and
+// everything downstream of suggestions.
+const MAPPING_ONLY_HIDDEN_SEGMENTS = ['consolidation-review', 'backlog', 'drift'];
 
 export function SpecialtyHeader({
   specialty,
@@ -14,6 +19,9 @@ export function SpecialtyHeader({
   specialty: Specialty;
   tabsComplete: Record<string, boolean>;
 }) {
+  const hiddenSegments = specialty.mappingOnly
+    ? new Set(MAPPING_ONLY_HIDDEN_SEGMENTS)
+    : undefined;
   return (
     <Stack space="l">
       <Breadcrumbs
@@ -27,11 +35,19 @@ export function SpecialtyHeader({
         <H1>{specialty.name}</H1>
         <ChangeSpecialtyButton />
         <RefreshButton slug={specialty.slug} />
+        <MappingOnlyToggle
+          slug={specialty.slug}
+          mappingOnly={specialty.mappingOnly ?? false}
+        />
       </Inline>
       <Text color="secondary">
         Slug: <code>{specialty.slug}</code>
       </Text>
-      <SpecialtyTabs slug={specialty.slug} tabsComplete={tabsComplete} />
+      <SpecialtyTabs
+        slug={specialty.slug}
+        tabsComplete={tabsComplete}
+        hiddenSegments={hiddenSegments}
+      />
     </Stack>
   );
 }

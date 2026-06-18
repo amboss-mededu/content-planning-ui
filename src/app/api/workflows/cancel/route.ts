@@ -29,6 +29,7 @@ const VALID_STAGES = [
   'extract_codes',
   'extract_milestones',
   'map_codes',
+  'map_suggestions',
   'consolidate_primary',
   'consolidate_articles',
   'consolidate_sections',

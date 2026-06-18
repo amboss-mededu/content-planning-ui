@@ -2,9 +2,9 @@
 
 import { Badge, Inline } from '@amboss/design-system';
 import {
-  PIPELINE_STAGE_NAMES,
   type PipelineCardState,
   type PipelineStageStates,
+  visiblePipelineStages,
 } from '@/lib/pipeline-stage-state';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
@@ -19,6 +19,7 @@ const STAGE_LABEL: Record<StageName, string> = {
   extract_codes: 'Codes',
   extract_milestones: 'Milestones',
   map_codes: 'Mapping',
+  map_suggestions: 'Suggestions',
   consolidate_primary: 'Consolidation',
   consolidate_articles: 'Articles 2nd',
   consolidate_sections: 'Sections 2nd',
@@ -27,12 +28,14 @@ const STAGE_LABEL: Record<StageName, string> = {
 
 export function PipelineStageStrip({
   stageStates,
+  mappingOnly = false,
 }: {
   stageStates?: PipelineStageStates;
+  mappingOnly?: boolean;
 }) {
   return (
     <Inline space="xxs">
-      {PIPELINE_STAGE_NAMES.map((stageName) => {
+      {visiblePipelineStages(mappingOnly).map((stageName) => {
         const state = stageStates?.[stageName] ?? 'not_started';
         const badge = (
           <Badge

@@ -28,6 +28,8 @@ export type Specialty = {
   source: 'sheets' | 'xlsx' | 'manual' | 'board' | (string & {});
   sheetId?: string;
   xlsxPath?: string;
+  /** Coverage-mapping-only mode — see `SpecialtyRecord.mappingOnly`. */
+  mappingOnly?: boolean;
 };
 
 // --- Code ------------------------------------------------------------------

@@ -14,18 +14,20 @@ export function OverviewView({
   coverageStats,
   backlogStats,
   stageStates,
+  mappingOnly = false,
 }: {
   stats: StatItem[];
   coverageStats: CoverageStatsData;
   backlogStats: BacklogStatsData;
   stageStates?: PipelineStageStates;
+  mappingOnly?: boolean;
 }) {
   return (
     <Stack space="l">
       {stageStates ? (
         <Card outlined>
           <CardBox>
-            <PipelineStageStrip stageStates={stageStates} />
+            <PipelineStageStrip stageStates={stageStates} mappingOnly={mappingOnly} />
           </CardBox>
         </Card>
       ) : null}

@@ -1,6 +1,14 @@
 'use client';
 
-import { Button, Callout, Inline, Input, Select, Stack } from '@amboss/design-system';
+import {
+  Button,
+  Callout,
+  Checkbox,
+  Inline,
+  Input,
+  Select,
+  Stack,
+} from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -19,6 +27,7 @@ export function AddSpecialtyForm() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [region, setRegion] = useState('');
   const [language, setLanguage] = useState('');
+  const [mappingOnly, setMappingOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +49,7 @@ export function AddSpecialtyForm() {
           source: 'manual',
           region: region || undefined,
           language: language || undefined,
+          mappingOnly: mappingOnly || undefined,
         }),
       });
       if (!res.ok) {
@@ -51,6 +61,7 @@ export function AddSpecialtyForm() {
       setSlugTouched(false);
       setRegion('');
       setLanguage('');
+      setMappingOnly(false);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add specialty.');
@@ -103,6 +114,13 @@ export function AddSpecialtyForm() {
             {submitting ? 'Adding…' : 'Add specialty'}
           </Button>
         </Inline>
+        <Checkbox
+          name="mappingOnly"
+          label="Mapping only"
+          labelHint="Skip consolidation & suggestions — run coverage mapping only."
+          checked={mappingOnly}
+          onChange={(e) => setMappingOnly(e.target.checked)}
+        />
         {error ? <Callout type="error" text={error} /> : null}
       </Stack>
     </form>

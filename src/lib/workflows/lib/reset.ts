@@ -24,6 +24,7 @@ import {
 import { deleteCategoriesForSpecialtyAsAdmin } from '@/lib/data/categories';
 import {
   clearAllMappingsForSpecialtyAsAdmin,
+  clearSuggestionsForSpecialtyAsAdmin,
   deleteCodesForSpecialtyAsAdmin,
 } from '@/lib/data/codes';
 import { deleteConsolidationCategoryReviewsForSpecialtyAsAdmin } from '@/lib/data/consolidation-category-reviews';
@@ -42,6 +43,7 @@ import type { StageName } from './db-writes';
 const DOWNSTREAM: Record<StageName, StageName[]> = {
   extract_codes: [
     'map_codes',
+    'map_suggestions',
     'consolidate_primary',
     'consolidate_articles',
     'consolidate_sections',
@@ -49,6 +51,15 @@ const DOWNSTREAM: Record<StageName, StageName[]> = {
   ],
   extract_milestones: [],
   map_codes: [
+    'map_suggestions',
+    'consolidate_primary',
+    'consolidate_articles',
+    'consolidate_sections',
+    'literature_search',
+  ],
+  // Suggestion backfill feeds consolidation; resetting it clears the
+  // generated suggestions and cascades into the consolidation stages.
+  map_suggestions: [
     'consolidate_primary',
     'consolidate_articles',
     'consolidate_sections',
@@ -85,6 +96,12 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       break;
     case 'map_codes':
       await clearAllMappingsForSpecialtyAsAdmin(specialtySlug);
+      break;
+    case 'map_suggestions':
+      // Clear only the generated suggestion fields (+ the
+      // `suggestionsGeneratedAt` marker) so the codes revert to
+      // "needs suggestions"; coverage and `mappedAt` are preserved.
+      await clearSuggestionsForSpecialtyAsAdmin(specialtySlug);
       break;
     case 'consolidate_primary':
       // Suggestions + everything editorial that derives from them: the

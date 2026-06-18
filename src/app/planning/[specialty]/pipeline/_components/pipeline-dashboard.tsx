@@ -15,6 +15,7 @@ import { PhaseGroup } from './phase-group';
 import { RunMapAllButton } from './run-all-mappings-button';
 import { RunConsolidationButton } from './run-consolidation-button';
 import { RunLitSearchButton } from './run-lit-search-button';
+import { RunSuggestionsButton } from './run-suggestions-button';
 import { StageCard } from './stage-card';
 import { StartCodesModal } from './start-codes-modal';
 import { StartMilestonesModal } from './start-milestones-modal';
@@ -42,6 +43,8 @@ export function PipelineDashboard({
   stageHasOutput,
   stageStates,
   staleBucketCount,
+  mappingOnly = false,
+  mappedWithoutSuggestionsCount = 0,
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -66,6 +69,12 @@ export function PipelineDashboard({
   /** Buckets whose mapping inputs changed since their last consolidation.
    *  Surfaced as an amber chip on the primary consolidation card. */
   staleBucketCount: number;
+  /** Coverage-mapping-only specialty — hide the suggestion-consolidation and
+   *  article-drafting groups. */
+  mappingOnly?: boolean;
+  /** Codes mapped without suggestions — drives the "Generate suggestions"
+   *  backfill card's visibility and count. */
+  mappedWithoutSuggestionsCount?: number;
 }) {
   const runActive =
     run !== null &&
@@ -149,118 +158,149 @@ export function PipelineDashboard({
       </PhaseGroup>
 
       <PhaseGroup title="Mapping">
-        <StageCard
-          title="Map codes"
-          description="Per-code LLM + AMBOSS MCP lookup. Runs once preprocessing is approved."
-          stage={stages.map_codes?.stage ?? null}
-          specialtySlug={specialtySlug}
-          stageName="map_codes"
-          events={stages.map_codes?.events ?? []}
-          treatAsInProgress={hasUnmappedCodes}
-          unmappedCount={unmappedCodeCount}
-          mappedCount={mappedCodeCount}
-          hasOutput={stageHasOutput.map_codes ?? false}
-          manualState={stageState(stageStates, 'map_codes')}
-        >
-          <RunMapAllButton
-            specialtySlug={specialtySlug}
-            unmappedCount={unmappedCodeCount}
-            defaultContentBase={defaultContentBase}
-            running={isStageRunningFresh(stages.map_codes?.stage)}
-          />
-        </StageCard>
-      </PhaseGroup>
-
-      <PhaseGroup title="Suggestion consolidation">
         <Stack space="m">
           <StageCard
-            title="Primary (per category)"
-            description="Combine mappings into new-article and article-update candidates."
-            stage={stages.consolidate_primary?.stage ?? null}
+            title="Map codes"
+            description="Per-code LLM + AMBOSS MCP lookup. Runs once preprocessing is approved."
+            stage={stages.map_codes?.stage ?? null}
             specialtySlug={specialtySlug}
-            stageName="consolidate_primary"
-            events={stages.consolidate_primary?.events ?? []}
-            hasOutput={stageHasOutput.consolidate_primary ?? false}
-            manualState={stageState(stageStates, 'consolidate_primary')}
-            staleBucketCount={staleBucketCount}
+            stageName="map_codes"
+            events={stages.map_codes?.events ?? []}
+            treatAsInProgress={hasUnmappedCodes}
+            unmappedCount={unmappedCodeCount}
+            mappedCount={mappedCodeCount}
+            hasOutput={stageHasOutput.map_codes ?? false}
+            manualState={stageState(stageStates, 'map_codes')}
           >
-            <RunConsolidationButton
+            <RunMapAllButton
               specialtySlug={specialtySlug}
-              mappedCodeCount={mappedCodeCount}
+              unmappedCount={unmappedCodeCount}
+              defaultContentBase={defaultContentBase}
+              running={isStageRunningFresh(stages.map_codes?.stage)}
             />
           </StageCard>
-          <StageCard
-            title="Articles (2nd consolidation)"
-            description="Optional second pass over new-article candidates."
-            stage={stages.consolidate_articles?.stage ?? null}
-            specialtySlug={specialtySlug}
-            stageName="consolidate_articles"
-            events={stages.consolidate_articles?.events ?? []}
-            hasOutput={stageHasOutput.consolidate_articles ?? false}
-            manualState={stageState(stageStates, 'consolidate_articles')}
-          />
-          <StageCard
-            title="Sections (2nd consolidation)"
-            description="Optional second pass over article-update section candidates."
-            stage={stages.consolidate_sections?.stage ?? null}
-            specialtySlug={specialtySlug}
-            stageName="consolidate_sections"
-            events={stages.consolidate_sections?.events ?? []}
-            hasOutput={stageHasOutput.consolidate_sections ?? false}
-            manualState={stageState(stageStates, 'consolidate_sections')}
-          />
+          {/* Backfill card: only for full specialties that have codes mapped
+              without suggestions (e.g. after switching off mapping-only). Stays
+              visible while its run is in flight so it doesn't vanish mid-run. */}
+          {!mappingOnly &&
+          (mappedWithoutSuggestionsCount > 0 ||
+            isStageRunningFresh(stages.map_suggestions?.stage)) ? (
+            <StageCard
+              title="Generate suggestions"
+              description="Backfill article suggestions for codes that were coverage-mapped without them — reuses the stored coverage, no remapping."
+              stage={stages.map_suggestions?.stage ?? null}
+              specialtySlug={specialtySlug}
+              stageName="map_suggestions"
+              events={stages.map_suggestions?.events ?? []}
+              mappedCount={mappedCodeCount}
+              hasOutput={stageHasOutput.map_suggestions ?? false}
+              manualState={stageState(stageStates, 'map_suggestions')}
+            >
+              <RunSuggestionsButton
+                specialtySlug={specialtySlug}
+                pendingCount={mappedWithoutSuggestionsCount}
+                defaultContentBase={defaultContentBase}
+                running={isStageRunningFresh(stages.map_suggestions?.stage)}
+              />
+            </StageCard>
+          ) : null}
         </Stack>
       </PhaseGroup>
 
-      <H2>Articles</H2>
-      <Stack space="m">
-        <StageCard
-          title="Literature search"
-          description={
-            litSearchStats.approvedTotal === 0
-              ? 'Run a PubMed literature search for each approved article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
-              : `Run a PubMed literature search for each approved article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
-          }
-          stage={stages.literature_search?.stage ?? null}
-          specialtySlug={specialtySlug}
-          stageName="literature_search"
-          events={stages.literature_search?.events ?? []}
-          hasOutput={stageHasOutput.literature_search ?? false}
-          manualState={stageState(stageStates, 'literature_search')}
-        >
-          <RunLitSearchButton
-            specialtySlug={specialtySlug}
-            waitingCount={litSearchStats.waitingForSources}
-            running={isStageRunningFresh(stages.literature_search?.stage)}
-          />
-        </StageCard>
-        <Card outlined>
-          <CardBox>
-            <Stack space="s">
-              <H2>Draft articles</H2>
-              <Text size="s" color="secondary">
-                {draftEligibleIds.length === 0
-                  ? 'Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
-                  : `Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
-              </Text>
-              <BulkDraftArticlesButton
+      {!mappingOnly ? (
+        <>
+          <PhaseGroup title="Suggestion consolidation">
+            <Stack space="m">
+              <StageCard
+                title="Primary (per category)"
+                description="Combine mappings into new-article and article-update candidates."
+                stage={stages.consolidate_primary?.stage ?? null}
                 specialtySlug={specialtySlug}
-                articleRecordIds={draftEligibleIds}
+                stageName="consolidate_primary"
+                events={stages.consolidate_primary?.events ?? []}
+                hasOutput={stageHasOutput.consolidate_primary ?? false}
+                manualState={stageState(stageStates, 'consolidate_primary')}
+                staleBucketCount={staleBucketCount}
+              >
+                <RunConsolidationButton
+                  specialtySlug={specialtySlug}
+                  mappedCodeCount={mappedCodeCount}
+                />
+              </StageCard>
+              <StageCard
+                title="Articles (2nd consolidation)"
+                description="Optional second pass over new-article candidates."
+                stage={stages.consolidate_articles?.stage ?? null}
+                specialtySlug={specialtySlug}
+                stageName="consolidate_articles"
+                events={stages.consolidate_articles?.events ?? []}
+                hasOutput={stageHasOutput.consolidate_articles ?? false}
+                manualState={stageState(stageStates, 'consolidate_articles')}
+              />
+              <StageCard
+                title="Sections (2nd consolidation)"
+                description="Optional second pass over article-update section candidates."
+                stage={stages.consolidate_sections?.stage ?? null}
+                specialtySlug={specialtySlug}
+                stageName="consolidate_sections"
+                events={stages.consolidate_sections?.events ?? []}
+                hasOutput={stageHasOutput.consolidate_sections ?? false}
+                manualState={stageState(stageStates, 'consolidate_sections')}
               />
             </Stack>
-          </CardBox>
-        </Card>
-        <Card outlined>
-          <CardBox>
-            <Stack space="s">
-              <H2>Content drafting</H2>
-              <Text size="s" color="secondary">
-                Full content drafting pipeline. Work in progress.
-              </Text>
-            </Stack>
-          </CardBox>
-        </Card>
-      </Stack>
+          </PhaseGroup>
+
+          <H2>Articles</H2>
+          <Stack space="m">
+            <StageCard
+              title="Literature search"
+              description={
+                litSearchStats.approvedTotal === 0
+                  ? 'Run a PubMed literature search for each approved article waiting for sources. Approve articles on the New Articles tab first; this card stays idle until at least one is waiting.'
+                  : `Run a PubMed literature search for each approved article waiting for sources. Currently ${litSearchStats.waitingForSources} waiting · ${litSearchStats.searched} already searched · ${litSearchStats.laterStages} further along.`
+              }
+              stage={stages.literature_search?.stage ?? null}
+              specialtySlug={specialtySlug}
+              stageName="literature_search"
+              events={stages.literature_search?.events ?? []}
+              hasOutput={stageHasOutput.literature_search ?? false}
+              manualState={stageState(stageStates, 'literature_search')}
+            >
+              <RunLitSearchButton
+                specialtySlug={specialtySlug}
+                waitingCount={litSearchStats.waitingForSources}
+                running={isStageRunningFresh(stages.literature_search?.stage)}
+              />
+            </StageCard>
+            <Card outlined>
+              <CardBox>
+                <Stack space="s">
+                  <H2>Draft articles</H2>
+                  <Text size="s" color="secondary">
+                    {draftEligibleIds.length === 0
+                      ? 'Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. No articles are currently ready.'
+                      : `Enqueue the 6-pass LLM article draft for every article whose approved sources all carry a Cortex ID. The dispatcher runs at most 3 concurrently. ${draftEligibleIds.length} article${draftEligibleIds.length === 1 ? '' : 's'} ready.`}
+                  </Text>
+                  <BulkDraftArticlesButton
+                    specialtySlug={specialtySlug}
+                    articleRecordIds={draftEligibleIds}
+                  />
+                </Stack>
+              </CardBox>
+            </Card>
+            <Card outlined>
+              <CardBox>
+                <Stack space="s">
+                  <H2>Content drafting</H2>
+                  <Text size="s" color="secondary">
+                    Full content drafting pipeline. Work in progress.
+                  </Text>
+                </Stack>
+              </CardBox>
+            </Card>
+          </Stack>
+        </>
+      ) : null}
     </Stack>
   );
 }

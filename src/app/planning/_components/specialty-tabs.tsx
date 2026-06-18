@@ -75,9 +75,14 @@ const circleBase: CSSProperties = {
 export function SpecialtyTabs({
   slug,
   tabsComplete,
+  hiddenSegments,
 }: {
   slug: string;
   tabsComplete: Record<string, boolean>;
+  /** Tab segments to omit (e.g. mapping-only specialties hide the
+   *  consolidation / backlog / drift tabs). Filtering happens before step
+   *  numbering, so the remaining numbered tabs renumber contiguously. */
+  hiddenSegments?: Set<string>;
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? '';
@@ -87,10 +92,14 @@ export function SpecialtyTabs({
     : '';
   const currentSegment = rest.split('/')[0] ?? '';
 
+  const visibleTabs = hiddenSegments
+    ? TABS.filter((tab) => !hiddenSegments.has(tab.segment))
+    : TABS;
+
   // Step numbers count only the `numbered: true` tabs — Overview and
   // Pipeline get a solid dark-green dot instead of a number.
   let stepCounter = 0;
-  const tabsWithStep = TABS.map((tab) => ({
+  const tabsWithStep = visibleTabs.map((tab) => ({
     ...tab,
     stepNumber: tab.numbered ? ++stepCounter : null,
   }));
