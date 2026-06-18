@@ -162,6 +162,8 @@ export async function POST(req: NextRequest) {
       language: body.language?.trim() || undefined,
       additionalInstructions: mappingInstructions ?? undefined,
       checkAgainstLibrary,
+      // Mapping-only specialties run coverage only — no suggestion generation.
+      includeSuggestions: !spec.mappingOnly,
       filter,
       primaryModel,
       backupModel,

@@ -209,7 +209,7 @@ Please note that some codes are ‘junk codes’. By this we mean codes that are
 - Malignant carcinoid tumor of the midgut, unspecified
 - Malignant carcinoid tumor of the hindgut, unspecified
 - Other malignant neuroendocrine tumors
-You should ignore making suggestions for these codes! You can still do the rest of the mapping. Make sure if it is junk code to return empty arrays for suggestions for articles and sections.
+<!--SUGGESTIONS:START-->You should ignore making suggestions for these codes!<!--SUGGESTIONS:END--> You can still do the rest of the mapping. <!--SUGGESTIONS:START-->Make sure if it is junk code to return empty arrays for suggestions for articles and sections.<!--SUGGESTIONS:END-->
 You will be provided with a specific medical specialty. If you are querying a code that seems to be unrelated to that specialty, make sure to modify your query so that you look for information of that code related exclusively for the specialty. If the code fits well in the specialty, ignore this. For example, for code ‘Echinococcosis’ and specialty ‘Gastrointestinal’, make sure that your analysis and suggestions of ‘Echoniococcosis’ are specific to this speciality.
 When mapping, only reference ‘xids’, ‘eid’, or ‘article_id’ or something similar, and have an alphanumeric format with 6 or 7 digits like:
 TyX6e00
@@ -253,6 +253,7 @@ There can be ‘Y’ or ‘Z’ IDs within the returned content that have a form
     - 3 == advanced-resident
     - 4 == attending
     - 5 == specialist
+<!--SUGGESTIONS:START-->
   - Improvement: suggestions to improve that fit AMBOSS content strategy. If the coverage is 5, then say 'None needed'. If the coverage is lower than 5, but is sufficient, please indicate that the coverage level should remain at its current level. Make sure that the improvements address the gaps.
   - Article updates: Areas inside of the current library that we have content gaps and can cover with either updated sections or new sections. Make sure that these updates reflect and are consistent with the improvements you have previously suggested.
 	- Make sure to format section updates within the article that they are found. This way we can granularly understand where our gaps are.
@@ -261,6 +262,7 @@ There can be ‘Y’ or ‘Z’ IDs within the returned content that have a form
 	- For new sections within an article to complete coverage. A new section can be fixed categories (ie etiology, differential diagnoses) or freestyle sections (ie specific disease name or treatment type) depending on the context.
     - Indicate how important you think this coverage is on a scale of 0-5
   - New Articles Needed: A list of new AMBOSS library articles that should be created to cover this code. The suggested article titles should be similar to current AMBOSS titles. If you feel the need to add a new article, query the article name to the MCP server to see if there is a relevant article already. If there is, please add your suggestions to the ‘Section update by article title’ described above for the respective article. If there is no suitable articles, return a list of suggested title to importance, rated 0 to 5.
+<!--SUGGESTIONS:END-->
 - AMBOSS Content Metadata: Annotating the existing article title to its article id and corresponding section title and ids that are keys in the output JSON to its corresponding article or section ID which should be exposed by the AMBOSS MCP server. The ids should be called ‘xids’, ‘eid’, or ‘article_id’ or something similar, and have an alphanumeric format with 6 or 7 digits like:
 TyX6e00
 0YYenn
@@ -305,7 +307,7 @@ CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE
       "gaps":"Gaps in current AMBOSS coverage. After summarizing the gaps, say in text whether you think the content is exhaustive for medical student, early resident, advanced resident, attending, or specialist.",
       "coverageLevel": "one of none, student, early-resident, advanced-resident, attending, or specialist",
       "coverageScore":"Rating the current AMBOSS coverage based on milestones/competencies."
-   },
+   }<!--SUGGESTIONS:START-->,
    "suggestion":{
       "improvement":"How to improve the content, either with updating existing article sections, adding sections to existing articles, or creating new articles",
       "sectionUpdates": [
@@ -344,10 +346,26 @@ CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE
             "importance":2
          }
       ]
-   }
+   }<!--SUGGESTIONS:END-->
 }
 \`\`\`
 `.trim();
+
+/**
+ * `DEFAULT_MAPPING_SYSTEM_PROMPT` is annotated with
+ * `<!--SUGGESTIONS:START-->…<!--SUGGESTIONS:END-->` markers around every
+ * suggestion-specific instruction and the `"suggestion"` block in the example
+ * output. Mapping-only specialties pass `include = false` to drop those spans
+ * so the model produces coverage only (it never reasons about suggestions);
+ * full specialties pass `include = true`, which simply strips the markers.
+ */
+export function applySuggestionVisibility(prompt: string, include: boolean): string {
+  const stripped = include
+    ? prompt.replace(/<!--SUGGESTIONS:(?:START|END)-->/g, '')
+    : prompt.replace(/<!--SUGGESTIONS:START-->[\s\S]*?<!--SUGGESTIONS:END-->/g, '');
+  // Tidy trailing whitespace and runaway blank lines left by removed spans.
+  return stripped.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+}
 
 // Ported verbatim from the n8n `code-mapper-agent` node's `text` parameter.
 // Contains `${specialty}`, `${code}`, `${codeCategory}`, `${description}`,
@@ -365,6 +383,96 @@ Language: \${language}
 CRITICAL: MAKE SURE TO ONLY RETURN SECTION IDS AND NOT SUBSECTION IDS!
 
 CRITICAL: Make sure to return 6-7 id/xid/eids, and not the long subsection IDs that start with Y or Z!
+
+CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
+`.trim();
+
+// ---------------------------------------------------------------------------
+// Suggestion-only pass (the "Generate suggestions" backfill stage). Coverage
+// was already computed by the mapping step and is supplied verbatim in the
+// user message under **KNOWN COVERAGE** — the model must NOT recompute it. It
+// only proposes content suggestions that close the gaps in that coverage. The
+// suggestion guidance mirrors the suggestion portion of
+// DEFAULT_MAPPING_SYSTEM_PROMPT; keep the two in sync if you edit either.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_SUGGESTIONS_ONLY_SYSTEM_PROMPT = `
+**ROLE**
+You are an expert in graduate medical education working on curating content for AMBOSS.
+
+**TASK**
+A previous step already evaluated how well AMBOSS covers a given disease code. That evaluation — whether the topic is in AMBOSS, the covered sections, the coverage level, and the gaps — is provided to you verbatim under **KNOWN COVERAGE** in the user message. Do NOT recompute or second-guess the coverage. Your ONLY task is to propose content suggestions that close the gaps described there:
+- improvements
+- updates to existing AMBOSS article sections
+- new AMBOSS articles that should be created
+
+Use the AMBOSS MCP server tools ('search_article_sections', 'get_article', 'get_sections') to locate and verify the specific articles and sections your suggestions reference, querying the correct content base (US/en or German/de) for the given specialty.
+
+AMBOSS is meant to be a 'cliffnotes' platform — the most relevant information for clinical care, not an exhaustive encyclopedia. Keep suggestions aligned with that strategy.
+
+When referencing existing content, only reference 'xids', 'eid', or 'article_id' with a 6-7 digit alphanumeric format like TyX6e00, 0YYenn, EmW8hN0. **IT IS PROHIBITED TO RETURN ANY ID STARTING WITH 'Y' or 'Z'** — those are subsection IDs. Only return section IDs you have verified via 'get_sections'.
+
+If the code is a 'junk code' (e.g. 'unspecified' / 'other'), return empty arrays for sectionUpdates and newArticlesNeeded.
+
+**MILESTONES**
+\${milestones}
+
+**INSTRUCTIONS**
+- Improvement: suggestions to improve that fit AMBOSS content strategy. If coverage is already a 5, say 'None needed'. Make sure the improvements address the gaps in **KNOWN COVERAGE**.
+- Article updates ('sectionUpdates'): areas inside the current library with content gaps you can cover with updated or new sections. Format section updates within the article they belong to. For existing sections to improve, choose section titles verbatim from the current article sections (full sections, not subsections — identify them by their 6-7 digit ID). For new sections, a section can be a fixed category (etiology, differential diagnoses) or freestyle. Indicate importance 0-5.
+- New Articles Needed ('newArticlesNeeded'): new AMBOSS articles that should be created to cover this code. Titles should resemble current AMBOSS titles. Query the MCP server to check whether a suitable article already exists first — if it does, prefer a section update on that article instead. Rate each suggested title's importance 0-5.
+
+**OUTPUT FORMAT**
+Return EXCLUSIVELY a JSON object with a single "suggestion" field, no preceding or trailing text or punctuation. Make sure to only cite real 6-7 digit section IDs (never Y/Z subsection IDs).
+
+**EXAMPLE OUTPUT**
+\`\`\`json
+{
+   "suggestion":{
+      "improvement":"How to improve the content, either by updating existing article sections, adding sections to existing articles, or creating new articles",
+      "sectionUpdates": [
+         {
+            "articleTitle": "the article title",
+            "articleId":"6-7 digit alphanumeric id",
+            "sections": [
+              {
+                 "sectionTitle":"the section title",
+                 "exists":true,
+                 "sectionId":"6-7 digit alphanumeric id that does not start with Y or Z",
+                 "changes":"what should be added to the existing section.",
+                 "importance":3
+              }
+           ]
+         }
+      ],
+      "newArticlesNeeded":[
+         {
+            "articleTitle":"suggested new article title",
+            "importance":3
+         }
+      ]
+   }
+}
+\`\`\`
+`.trim();
+
+// User message for the suggestion-only pass. Carries the same per-code fields
+// as the mapping template plus a rendered `${knownCoverage}` block.
+export const DEFAULT_SUGGESTIONS_ONLY_USER_TEMPLATE = `
+Please propose content suggestions for the following code using the available AMBOSS MCP server tools.
+Specialty: \${specialty}
+Code: \${code}
+Code Category: \${codeCategory}
+Description: \${description}
+AMBOSS Content Base: \${contentBase}
+Language: \${language}
+
+**KNOWN COVERAGE** (computed by the previous mapping step — do not recompute):
+\${knownCoverage}
+
+CRITICAL: Do not recompute coverage. Only return the "suggestion" JSON object.
+
+CRITICAL: MAKE SURE TO ONLY RETURN SECTION IDS AND NOT SUBSECTION IDS! Return 6-7 digit ids, not the long Y/Z subsection IDs.
 
 CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
 `.trim();

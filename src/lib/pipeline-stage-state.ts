@@ -4,11 +4,23 @@ export const PIPELINE_STAGE_NAMES = [
   'extract_codes',
   'extract_milestones',
   'map_codes',
+  'map_suggestions',
   'consolidate_primary',
   'consolidate_articles',
   'consolidate_sections',
   'literature_search',
 ] as const satisfies readonly StageName[];
+
+/**
+ * Stages shown in the high-level Overview strip. `map_suggestions` is a
+ * conditional backfill stage (surfaced only on the pipeline dashboard when a
+ * specialty has codes mapped without suggestions), so it's excluded here.
+ * Mapping-only specialties additionally drop everything downstream of mapping.
+ */
+export function visiblePipelineStages(mappingOnly: boolean): readonly StageName[] {
+  if (mappingOnly) return ['extract_codes', 'extract_milestones', 'map_codes'];
+  return PIPELINE_STAGE_NAMES.filter((s) => s !== 'map_suggestions');
+}
 
 export const SKIPPABLE_PIPELINE_STAGES = [
   'consolidate_articles',

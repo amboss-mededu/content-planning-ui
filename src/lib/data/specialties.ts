@@ -32,6 +32,7 @@ function toSpecialty(row: SpecialtyRecord): Specialty {
     source: row.source as Specialty['source'],
     sheetId: row.sheetId,
     xlsxPath: row.xlsxPath,
+    mappingOnly: row.mappingOnly ?? false,
   };
 }
 
@@ -103,6 +104,7 @@ export async function createSpecialty(args: {
   xlsxPath?: string;
   region?: string;
   language?: string;
+  mappingOnly?: boolean;
 }): Promise<string> {
   const pb = await userClient();
   const collection = pb.collection<SpecialtyRecord>('specialties');
@@ -160,6 +162,23 @@ export async function setTabOverride(
   if (value) next[segment] = true;
   else delete next[segment];
   await pb.collection('specialties').update(row.id, { tabOverrides: next });
+}
+
+/**
+ * Flip the "Mapping only" mode on a specialty. Backs the header toggle
+ * (PATCH /api/specialties). Coverage data and any already-generated
+ * suggestions are left untouched — the flag only changes future mapping
+ * behaviour and which surfaces are visible.
+ */
+export async function setSpecialtyMappingOnly(
+  slug: string,
+  value: boolean,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  await pb.collection('specialties').update(row.id, { mappingOnly: value });
 }
 
 /**

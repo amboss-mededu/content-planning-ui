@@ -28,10 +28,12 @@ export function CodesViewClient({
   slug,
   initialCodes,
   initialHasMore,
+  mappingOnly = false,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
+  mappingOnly?: boolean;
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -261,6 +263,7 @@ export function CodesViewClient({
       totalCount={totalCount}
       loadState={loadState}
       onPatchRow={patchRow}
+      mappingOnly={mappingOnly}
     />
   );
 }

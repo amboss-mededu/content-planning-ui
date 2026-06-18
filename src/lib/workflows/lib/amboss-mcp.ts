@@ -24,13 +24,17 @@ import { env } from '@/env';
 import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-library';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { CoveredSection } from '@/lib/pb/types';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
 import { estimateCostUsd } from './pricing';
 import {
+  applySuggestionVisibility,
   DEFAULT_MAPPING_SYSTEM_PROMPT,
   DEFAULT_MAPPING_USER_MESSAGE_TEMPLATE,
+  DEFAULT_SUGGESTIONS_ONLY_SYSTEM_PROMPT,
+  DEFAULT_SUGGESTIONS_ONLY_USER_TEMPLATE,
 } from './prompts';
 
 // ---------------------------------------------------------------------------
@@ -101,6 +105,19 @@ const MappingOutputSchema = z.object({
 
 export type MappingOutput = z.infer<typeof MappingOutputSchema>;
 
+// The suggestion-only pass returns just the `suggestion` block — coverage is
+// supplied as input and merged back in before validation.
+const SuggestionOnlyOutputSchema = z.object({
+  suggestion: z
+    .object({
+      improvement: z.string().optional().default(''),
+      sectionUpdates: z.array(SectionUpdateSchema).optional().default([]),
+      newArticlesNeeded: z.array(NewArticleSchema).optional().default([]),
+    })
+    .optional()
+    .default({ improvement: '', sectionUpdates: [], newArticlesNeeded: [] }),
+});
+
 export type MappingResult = {
   mapping: MappingOutput;
   attempts: number;
@@ -110,6 +127,16 @@ export type MappingResult = {
    *  mapping is still written through (last attempt's output) but the stage
    *  summary surfaces the count. */
   unresolved: boolean;
+};
+
+/** The stored coverage fed into the suggestion-only pass (never recomputed). */
+export type SuggestionCoverageInput = {
+  isInAMBOSS?: boolean;
+  coverageLevel?: string | null;
+  depthOfCoverage?: number;
+  notes?: string | null;
+  gaps?: string | null;
+  articlesWhereCoverageIs: CoveredSection[];
 };
 
 export function hasMappingCreds(): boolean {
@@ -176,10 +203,30 @@ export function validateMappingIds(
 // Prompt helpers.
 // ---------------------------------------------------------------------------
 
-function composeSystem(milestones: string, additional?: string): string {
+function composeSystem(
+  milestones: string,
+  additional?: string,
+  includeSuggestions = true,
+): string {
   // The system-prompt source contains a literal `${milestones}` placeholder
-  // we substitute at runtime — the string on the next line is deliberate.
-  const base = DEFAULT_MAPPING_SYSTEM_PROMPT.replace(
+  // we substitute at runtime — the string on the next line is deliberate. The
+  // suggestion-specific spans are then kept or dropped per `includeSuggestions`
+  // (mapping-only specialties run coverage only).
+  const base = applySuggestionVisibility(
+    DEFAULT_MAPPING_SYSTEM_PROMPT.replace(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional placeholder
+      '${milestones}',
+      milestones || 'N/A',
+    ),
+    includeSuggestions,
+  );
+  const extra = additional?.trim();
+  if (!extra) return base;
+  return `${base}\n\n## Additional instructions\n\n${extra}`;
+}
+
+function composeSuggestionsSystem(milestones: string, additional?: string): string {
+  const base = DEFAULT_SUGGESTIONS_ONLY_SYSTEM_PROMPT.replace(
     // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional placeholder
     '${milestones}',
     milestones || 'N/A',
@@ -206,6 +253,58 @@ function composeUser(input: {
     .replaceAll('${description}', input.description)
     .replaceAll('${contentBase}', input.contentBase)
     .replaceAll('${language}', input.language);
+  /* biome-ignore-end lint/suspicious/noTemplateCurlyInString: intentional placeholder */
+}
+
+/** Render the stored coverage as a compact block for the suggestion prompt. */
+function renderKnownCoverage(coverage: SuggestionCoverageInput): string {
+  const lines: string[] = [
+    `- In AMBOSS: ${coverage.isInAMBOSS ? 'yes' : 'no'}`,
+    `- Coverage level: ${coverage.coverageLevel || 'none'}`,
+  ];
+  if (typeof coverage.depthOfCoverage === 'number') {
+    lines.push(`- Coverage score (0-5): ${coverage.depthOfCoverage}`);
+  }
+  if (coverage.notes) lines.push(`- General notes: ${coverage.notes}`);
+  if (coverage.gaps) lines.push(`- Gaps: ${coverage.gaps}`);
+  const covered = coverage.articlesWhereCoverageIs ?? [];
+  if (covered.length > 0) {
+    lines.push('- Already covered in:');
+    for (const cs of covered) {
+      const sectionLabel = (cs.sections ?? [])
+        .map((s) => s.sectionTitle)
+        .filter(Boolean)
+        .join(', ');
+      lines.push(
+        `  - ${cs.articleTitle ?? cs.articleId ?? '(article)'}${sectionLabel ? ` (sections: ${sectionLabel})` : ''}`,
+      );
+    }
+  } else {
+    lines.push('- Already covered in: (none)');
+  }
+  return lines.join('\n');
+}
+
+function composeSuggestionsUser(input: {
+  specialty: string;
+  code: string;
+  codeCategory: string;
+  description: string;
+  contentBase: string;
+  language: string;
+  coverage: SuggestionCoverageInput;
+}): string {
+  /* biome-ignore-start lint/suspicious/noTemplateCurlyInString: intentional placeholder */
+  return DEFAULT_SUGGESTIONS_ONLY_USER_TEMPLATE.replaceAll(
+    '${specialty}',
+    input.specialty,
+  )
+    .replaceAll('${code}', input.code)
+    .replaceAll('${codeCategory}', input.codeCategory)
+    .replaceAll('${description}', input.description)
+    .replaceAll('${contentBase}', input.contentBase)
+    .replaceAll('${language}', input.language)
+    .replaceAll('${knownCoverage}', renderKnownCoverage(input.coverage));
   /* biome-ignore-end lint/suspicious/noTemplateCurlyInString: intentional placeholder */
 }
 
@@ -312,6 +411,9 @@ export async function mapAndValidateCode(input: {
   language: string;
   milestones: string;
   additionalInstructions?: string;
+  /** When false (mapping-only specialties) the suggestion portion of the
+   *  prompt is dropped, so the model returns coverage only. */
+  includeSuggestions?: boolean;
   checkAgainstLibrary: boolean;
   runId: string;
   stage: StageName;
@@ -398,7 +500,11 @@ export async function mapAndValidateCode(input: {
     ? await listAmbossSectionIds()
     : new Set<string>();
 
-  const system = composeSystem(input.milestones, input.additionalInstructions);
+  const system = composeSystem(
+    input.milestones,
+    input.additionalInstructions,
+    input.includeSuggestions ?? true,
+  );
   const userBase = composeUser({
     specialty: input.specialty,
     code: input.code,
@@ -551,6 +657,280 @@ export async function mapAndValidateCode(input: {
       stage: input.stage,
       level: 'warn',
       message: `Map unresolved after ${attempts} attempts: ${input.code} · ${cumulativeInvalid.length} invalid IDs`,
+      metrics: {
+        phase: 'map',
+        model: lastModel,
+        code: input.code,
+        completion: lastMapping,
+        invalidIds: cumulativeInvalid,
+        durationMs,
+        attempts,
+      },
+    });
+    return {
+      mapping: lastMapping,
+      attempts,
+      model: lastModel,
+      invalidIds: cumulativeInvalid,
+      unresolved: true,
+    };
+  } finally {
+    try {
+      await mcp.close();
+    } catch {
+      // non-fatal
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suggestion-only pass ("Generate suggestions" backfill). Mirrors
+// mapAndValidateCode's attempt ladder, but the system/user prompts focus on
+// suggestions and carry the previously-computed coverage as input. Coverage is
+// never recomputed; only the suggestion IDs are validated. Returns a
+// MappingResult whose `mapping.suggestion` is the part to persist.
+// ---------------------------------------------------------------------------
+
+export async function generateSuggestionsForCode(input: {
+  code: string;
+  description: string;
+  category: string;
+  specialty: string;
+  contentBase: string;
+  language: string;
+  milestones: string;
+  additionalInstructions?: string;
+  checkAgainstLibrary: boolean;
+  coverage: SuggestionCoverageInput;
+  runId: string;
+  stage: StageName;
+  primaryModel: ModelSpec;
+  backupModel: ModelSpec;
+  apiKeys: ProviderApiKeys;
+}): Promise<MappingResult> {
+  log('pipeline').info('generateSuggestionsForCode', {
+    code: input.code,
+    checkAgainstLibrary: input.checkAgainstLibrary,
+    primary: input.primaryModel.model,
+    backup: input.backupModel.model,
+    stubbed: !hasMappingCreds(),
+  });
+
+  // Assemble a MappingOutput from the model's suggestion block. Coverage is
+  // left empty here on purpose — it's not persisted from this pass, and
+  // keeping it empty means validateMappingIds only checks the *suggestion* IDs
+  // (the stored coverage IDs were already validated by the mapping step).
+  const assemble = (parsed: unknown): MappingOutput => {
+    const sug = SuggestionOnlyOutputSchema.parse(parsed);
+    return {
+      code: input.code,
+      coverage: {
+        inAMBOSS: input.coverage.isInAMBOSS ?? false,
+        coveredSections: [],
+        generalNotes: '',
+        gaps: '',
+        coverageLevel: input.coverage.coverageLevel ?? 'none',
+      },
+      suggestion: sug.suggestion,
+    };
+  };
+
+  // Stub path: no MCP creds → return empty suggestions so the workflow can be
+  // exercised end-to-end without backend access.
+  if (!hasMappingCreds()) {
+    const stub = assemble({
+      suggestion: { improvement: '', sectionUpdates: [], newArticlesNeeded: [] },
+    });
+    await logEvent({
+      runId: input.runId,
+      stage: input.stage,
+      level: 'info',
+      message: `Suggest (stub): ${input.code}`,
+      metrics: { phase: 'map', completion: stub, model: 'stub' },
+    });
+    return {
+      mapping: stub,
+      attempts: 0,
+      model: 'stub',
+      invalidIds: [],
+      unresolved: false,
+    };
+  }
+
+  const mcpUrl = env.AMBOSS_MCP_URL;
+  const mcpToken = env.AMBOSS_MCP_TOKEN;
+  if (!mcpUrl || !mcpToken) {
+    throw new Error('AMBOSS_MCP_URL and AMBOSS_MCP_TOKEN must be set');
+  }
+  const mcp = await createMCPClient({
+    transport: {
+      type: 'http',
+      url: mcpUrl,
+      headers: { Authorization: `Bearer ${mcpToken}` },
+    },
+  });
+  const allTools = await mcp.tools();
+  const toolNames = ['search_article_sections', 'get_article', 'get_sections'];
+  const tools: ToolSet = {};
+  for (const name of toolNames) {
+    if (name in allTools) tools[name] = allTools[name];
+  }
+
+  const articleSet = input.checkAgainstLibrary
+    ? await listAmbossArticleIds()
+    : new Set<string>();
+  const sectionSet = input.checkAgainstLibrary
+    ? await listAmbossSectionIds()
+    : new Set<string>();
+
+  const system = composeSuggestionsSystem(input.milestones, input.additionalInstructions);
+  const userBase = composeSuggestionsUser({
+    specialty: input.specialty,
+    code: input.code,
+    codeCategory: input.category,
+    description: input.description,
+    contentBase: input.contentBase,
+    language: input.language,
+    coverage: input.coverage,
+  });
+
+  const ladder: Array<{ spec: ModelSpec; label: string }> = [
+    { spec: input.primaryModel, label: 'primary-1' },
+    { spec: input.primaryModel, label: 'primary-2' },
+    { spec: input.primaryModel, label: 'primary-3' },
+    { spec: input.backupModel, label: 'backup' },
+  ];
+
+  let cumulativeInvalid: string[] = [];
+  let lastMapping: MappingOutput | null = null;
+  let lastModel = input.primaryModel.model;
+  let attempts = 0;
+
+  const started = Date.now();
+  try {
+    for (const step of ladder) {
+      attempts += 1;
+      const modelId = step.spec.model;
+      lastModel = modelId;
+
+      const userMessage =
+        cumulativeInvalid.length === 0
+          ? userBase
+          : `${userBase}\n\n${correctionMessage(cumulativeInvalid)}`;
+
+      await logEvent({
+        runId: input.runId,
+        stage: input.stage,
+        level: 'info',
+        message:
+          cumulativeInvalid.length === 0
+            ? `Suggest attempt ${attempts} (${step.label}): ${input.code}`
+            : `Suggest attempt ${attempts} (${step.label}, ${cumulativeInvalid.length} invalid IDs): ${input.code}`,
+        metrics: {
+          phase: 'map',
+          model: modelId,
+          provider: step.spec.provider,
+          reasoning: step.spec.reasoning,
+          code: input.code,
+          invalidIds: cumulativeInvalid,
+        },
+      });
+
+      const result = await runAgentAttempt({
+        spec: step.spec,
+        apiKeys: input.apiKeys,
+        system,
+        userMessage,
+        tools,
+      });
+
+      const durationMs = Date.now() - started;
+      let parsed: MappingOutput;
+      try {
+        parsed = assemble(parseAgentJson(result.text));
+      } catch (e) {
+        const msg = errorMessage(e);
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'warn',
+          message: `Suggest attempt ${attempts} (${step.label}) parse failed for ${input.code}: ${msg}`,
+          metrics: { phase: 'map', model: lastModel, code: input.code, durationMs },
+        });
+        cumulativeInvalid = ['<malformed JSON>'];
+        continue;
+      }
+      lastMapping = parsed;
+
+      if (!input.checkAgainstLibrary) {
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'info',
+          message: `Suggest done (no validation): ${input.code}`,
+          metrics: {
+            phase: 'map',
+            model: lastModel,
+            code: input.code,
+            completion: parsed,
+            durationMs,
+            ...result.usage,
+            costUsd: estimateCostUsd(lastModel, result.usage),
+            attempts,
+            mcpToolCalls: result.mcp.calls,
+            mcpToolNames: result.mcp.toolNames,
+          },
+        });
+        return {
+          mapping: parsed,
+          attempts,
+          model: lastModel,
+          invalidIds: [],
+          unresolved: false,
+        };
+      }
+
+      const invalid = validateMappingIds(parsed, articleSet, sectionSet);
+      if (invalid.length === 0) {
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'info',
+          message: `Suggest validated: ${input.code}`,
+          metrics: {
+            phase: 'map',
+            model: lastModel,
+            code: input.code,
+            completion: parsed,
+            durationMs,
+            ...result.usage,
+            costUsd: estimateCostUsd(lastModel, result.usage),
+            attempts,
+            mcpToolCalls: result.mcp.calls,
+            mcpToolNames: result.mcp.toolNames,
+          },
+        });
+        return {
+          mapping: parsed,
+          attempts,
+          model: lastModel,
+          invalidIds: [],
+          unresolved: false,
+        };
+      }
+
+      cumulativeInvalid = invalid;
+    }
+
+    const durationMs = Date.now() - started;
+    if (!lastMapping) {
+      throw new Error('All attempts produced unparseable output');
+    }
+    await logEvent({
+      runId: input.runId,
+      stage: input.stage,
+      level: 'warn',
+      message: `Suggest unresolved after ${attempts} attempts: ${input.code} · ${cumulativeInvalid.length} invalid IDs`,
       metrics: {
         phase: 'map',
         model: lastModel,

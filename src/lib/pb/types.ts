@@ -36,6 +36,12 @@ export interface SpecialtyRecord extends PbRecord {
   milestones?: string;
   region?: string;
   language?: string;
+  /** When true the specialty runs coverage mapping only — consolidation,
+   *  suggestions, backlog and drift are hidden, and the map-codes prompt
+   *  drops the suggestion portion of its chain-of-thought. Reversible via
+   *  the header toggle; flipping it off surfaces the separate
+   *  "Generate suggestions" backfill stage. */
+  mappingOnly?: boolean;
   /** Per-tab manual "mark step complete" override, keyed by tab segment
    *  (e.g. `''` for Overview, `'mapping'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */
@@ -68,6 +74,11 @@ export interface CodeRecord extends PbRecord {
    *  code changed value. Drives per-bucket staleness; see
    *  `deriveBucketStaleness` in `src/lib/workflows/consolidation/buckets.ts`. */
   consolidationInputChangedAt?: number;
+  /** ms since epoch — stamped once this code has been processed for
+   *  suggestions (by the combined full-mode map write or the separate
+   *  "Generate suggestions" backfill). Unset means suggestions were never
+   *  generated (vs. generated-but-empty), which the backfill stage targets. */
+  suggestionsGeneratedAt?: number;
   articlesWhereCoverageIs?: CoveredSection[];
   notes?: string;
   gaps?: string;

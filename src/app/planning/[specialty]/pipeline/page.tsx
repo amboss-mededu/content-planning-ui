@@ -8,7 +8,11 @@ import {
 import { listConsolidatedArticles } from '@/lib/data/articles';
 import { listCategoryOrchestration } from '@/lib/data/categories';
 import { listCodeSources } from '@/lib/data/code-sources';
-import { listCodeCount, listUnmappedCodeCount } from '@/lib/data/codes';
+import {
+  countMappedWithoutSuggestions,
+  listCodeCount,
+  listUnmappedCodeCount,
+} from '@/lib/data/codes';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import { getCurrentPipelineRun, getLatestStageContexts } from '@/lib/data/pipeline';
 import { listConsolidatedSections } from '@/lib/data/sections';
@@ -81,6 +85,7 @@ async function PipelineData({ slug }: { slug: string }) {
     sourcesByKey,
     stageStates,
     orchestration,
+    mappedWithoutSuggestionsCount,
   ] = await Promise.all([
     getCurrentPipelineRun(slug),
     listCodeSources(),
@@ -97,14 +102,17 @@ async function PipelineData({ slug }: { slug: string }) {
     listArticleSourcesByArticleKey(slug),
     getPipelineStageStates(slug),
     listCategoryOrchestration(slug),
+    countMappedWithoutSuggestions(slug),
   ]);
 
   const staleBucketCount = orchestration.filter((o) => o.isStale).length;
+  const mappingOnly = specialty?.mappingOnly ?? false;
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
     extract_milestones: stageCtxs.extract_milestones ?? null,
     map_codes: stageCtxs.map_codes ?? null,
+    map_suggestions: stageCtxs.map_suggestions ?? null,
     consolidate_primary: stageCtxs.consolidate_primary ?? null,
     consolidate_articles: stageCtxs.consolidate_articles ?? null,
     consolidate_sections: stageCtxs.consolidate_sections ?? null,
@@ -178,6 +186,8 @@ async function PipelineData({ slug }: { slug: string }) {
     extract_codes: codeCount > 0,
     extract_milestones: milestonesText,
     map_codes: mappedCount > 0,
+    // Output exists once at least one mapped code has been given suggestions.
+    map_suggestions: mappedCount > mappedWithoutSuggestionsCount,
     consolidate_primary: consolidationsOutput,
     consolidate_articles: true,
     consolidate_sections: true,
@@ -199,6 +209,8 @@ async function PipelineData({ slug }: { slug: string }) {
       stageHasOutput={stageHasOutput}
       stageStates={stageStates}
       staleBucketCount={staleBucketCount}
+      mappingOnly={mappingOnly}
+      mappedWithoutSuggestionsCount={mappedWithoutSuggestionsCount}
     />
   );
 }

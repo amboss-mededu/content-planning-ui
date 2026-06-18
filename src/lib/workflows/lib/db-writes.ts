@@ -17,6 +17,7 @@ import {
   listUnmappedCodesAsAdmin,
   markCodesInFlightAsAdmin,
   writeCodeMappingAsAdmin,
+  writeCodeSuggestionsAsAdmin,
 } from '@/lib/data/codes';
 import {
   createPipelineRunAsAdmin,
@@ -48,6 +49,7 @@ export type StageName =
   | 'extract_codes'
   | 'extract_milestones'
   | 'map_codes'
+  | 'map_suggestions'
   | 'consolidate_primary'
   | 'consolidate_articles'
   | 'consolidate_sections'
@@ -365,8 +367,9 @@ export async function writeCodeMapping(
   specialtySlug: string,
   code: string,
   mapping: MappingOutput,
+  includeSuggestions = true,
 ): Promise<void> {
-  log('pipeline').info('writeCodeMapping', { specialtySlug, code });
+  log('pipeline').info('writeCodeMapping', { specialtySlug, code, includeSuggestions });
   const coverageScore =
     typeof mapping.coverage.coverageScore === 'number'
       ? mapping.coverage.coverageScore
@@ -381,12 +384,40 @@ export async function writeCodeMapping(
     depthOfCoverage: coverageScore,
     notes: mapping.coverage.generalNotes || undefined,
     gaps: mapping.coverage.gaps || undefined,
-    improvements: mapping.suggestion.improvement || undefined,
     articlesWhereCoverageIs: mapping.coverage.coveredSections
       ? normaliseCoveredSections(mapping.coverage.coveredSections)
       : undefined,
-    existingArticleUpdates: mapping.suggestion.sectionUpdates ?? undefined,
-    newArticlesNeeded: mapping.suggestion.newArticlesNeeded ?? undefined,
+    // Coverage-only (mapping-only) writes persist NO suggestions and leave
+    // `suggestionsGeneratedAt` at 0, so the backfill stage can find the code.
+    improvements: includeSuggestions
+      ? mapping.suggestion.improvement || undefined
+      : undefined,
+    existingArticleUpdates: includeSuggestions
+      ? (mapping.suggestion.sectionUpdates ?? undefined)
+      : [],
+    newArticlesNeeded: includeSuggestions
+      ? (mapping.suggestion.newArticlesNeeded ?? undefined)
+      : [],
+    suggestionsGeneratedAt: includeSuggestions ? Date.now() : 0,
+  });
+}
+
+/**
+ * Persist just the suggestion fields produced by the "Generate suggestions"
+ * backfill pass — coverage and `mappedAt` are preserved.
+ */
+export async function writeCodeSuggestions(
+  specialtySlug: string,
+  code: string,
+  suggestion: MappingOutput['suggestion'],
+): Promise<void> {
+  log('pipeline').info('writeCodeSuggestions', { specialtySlug, code });
+  await writeCodeSuggestionsAsAdmin({
+    slug: specialtySlug,
+    code,
+    improvements: suggestion.improvement || undefined,
+    existingArticleUpdates: suggestion.sectionUpdates ?? [],
+    newArticlesNeeded: suggestion.newArticlesNeeded ?? [],
   });
 }
 

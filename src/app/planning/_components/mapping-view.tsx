@@ -45,6 +45,7 @@ export function MappingView({
   codeSources,
   codeCount,
   extractionState,
+  mappingOnly = false,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
@@ -59,11 +60,16 @@ export function MappingView({
     runId: string | null;
     hasDownstream: boolean;
   };
+  /** Mapping-only specialties have no consolidation, so the consolidation
+   *  bucket view and the suggestion columns are dropped. */
+  mappingOnly?: boolean;
 }) {
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<MappingMode>(() =>
-    initialMode(searchParams?.get('view') ?? null),
-  );
+  const [mode, setMode] = useState<MappingMode>(() => {
+    const seeded = initialMode(searchParams?.get('view') ?? null);
+    // Never land on the consolidation view for a mapping-only specialty.
+    return mappingOnly && seeded === 'consolidation' ? 'codes' : seeded;
+  });
   // One refresh loop for the whole tab — keeps every view live while an
   // extraction is in flight without each sub-view polling independently.
   useRefreshWhileRunning(extractionState?.running ?? false);
@@ -78,11 +84,15 @@ export function MappingView({
           onChange={(v) => setMode(v === 'consolidation' || v === 'source' ? v : 'codes')}
           options={[
             { name: 'mapping-view', value: 'codes', label: 'Codes' },
-            {
-              name: 'mapping-view',
-              value: 'consolidation',
-              label: 'Consolidation buckets',
-            },
+            ...(mappingOnly
+              ? []
+              : [
+                  {
+                    name: 'mapping-view',
+                    value: 'consolidation',
+                    label: 'Consolidation buckets',
+                  },
+                ]),
             { name: 'mapping-view', value: 'source', label: 'Source categories' },
           ]}
         />
@@ -98,9 +108,10 @@ export function MappingView({
           slug={slug}
           initialCodes={initialCodes}
           initialHasMore={initialHasMore}
+          mappingOnly={mappingOnly}
         />
       </div>
-      {mode === 'consolidation' ? (
+      {mode === 'consolidation' && !mappingOnly ? (
         <ConsolidationBucketsView rows={rows} slug={slug} />
       ) : null}
       {mode === 'source' ? <SourceCategoriesTable rows={sourceRows} slug={slug} /> : null}
