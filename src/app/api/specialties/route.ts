@@ -1,6 +1,20 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
-import { createSpecialty, setSpecialtyMappingOnly } from '@/lib/data/specialties';
+import {
+  createSpecialty,
+  setSpecialtyMappingOnly,
+  setSpecialtyMappingSource,
+} from '@/lib/data/specialties';
+import type { MappingSource } from '@/lib/types';
+
+const MAPPING_SOURCES: readonly MappingSource[] = ['amboss', 'guidelines', 'both'];
+
+function parseMappingSource(value: unknown): MappingSource | undefined {
+  return typeof value === 'string' &&
+    (MAPPING_SOURCES as readonly string[]).includes(value)
+    ? (value as MappingSource)
+    : undefined;
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await requireUserResponse();
@@ -34,14 +48,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     region: typeof args.region === 'string' ? args.region : undefined,
     language: typeof args.language === 'string' ? args.language : undefined,
     mappingOnly: typeof args.mappingOnly === 'boolean' ? args.mappingOnly : undefined,
+    mappingSource: parseMappingSource(args.mappingSource),
   });
   return NextResponse.json({ id });
 }
 
 /**
- * Update mutable specialty settings. Currently only the `mappingOnly` mode,
- * flipped from the specialty-header toggle.
- *   body: { slug: string; mappingOnly: boolean }
+ * Update mutable specialty settings, flipped from the specialty-header
+ * controls. Accepts either field (or both):
+ *   body: { slug: string; mappingOnly?: boolean; mappingSource?: 'amboss'|'guidelines'|'both' }
  */
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const guard = await requireUserResponse();
@@ -61,12 +76,24 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!slug) {
     return NextResponse.json({ error: 'slug is required' }, { status: 400 });
   }
-  if (typeof args.mappingOnly !== 'boolean') {
+
+  const hasMappingOnly = typeof args.mappingOnly === 'boolean';
+  const mappingSource =
+    args.mappingSource !== undefined ? parseMappingSource(args.mappingSource) : undefined;
+  if (args.mappingSource !== undefined && !mappingSource) {
     return NextResponse.json(
-      { error: 'mappingOnly (boolean) is required' },
+      { error: 'mappingSource must be one of: amboss, guidelines, both' },
       { status: 400 },
     );
   }
-  await setSpecialtyMappingOnly(slug, args.mappingOnly);
+  if (!hasMappingOnly && !mappingSource) {
+    return NextResponse.json(
+      { error: 'mappingOnly (boolean) or mappingSource is required' },
+      { status: 400 },
+    );
+  }
+
+  if (hasMappingOnly) await setSpecialtyMappingOnly(slug, args.mappingOnly as boolean);
+  if (mappingSource) await setSpecialtyMappingSource(slug, mappingSource);
   return NextResponse.json({ ok: true });
 }

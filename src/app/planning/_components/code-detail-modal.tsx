@@ -57,6 +57,31 @@ type NewArticleSuggestion = {
   importance?: number;
 };
 
+type GuidelineCoverageItem = {
+  guidelineTitle?: string;
+  guidelineId?: string;
+  organization?: string;
+  year?: number;
+  recommendations?:
+    | Record<string, string>
+    | Array<{ recommendationTitle?: string; recommendationId?: string }>;
+};
+
+function flattenRecommendations(
+  block: GuidelineCoverageItem['recommendations'],
+): Array<{ title: string; id: string }> {
+  if (!block) return [];
+  if (Array.isArray(block)) {
+    return block
+      .map((r) => ({
+        title: r.recommendationTitle ?? '(unnamed)',
+        id: r.recommendationId ?? '',
+      }))
+      .filter((r) => r.title || r.id);
+  }
+  return Object.entries(block).map(([title, id]) => ({ title, id }));
+}
+
 function flattenSections(
   block: CoveredSection['sections'],
 ): Array<{ title: string; id: string }> {
@@ -80,6 +105,7 @@ export type DetailTarget =
   | 'suggestion-improvements'
   | 'suggestion-updates'
   | 'suggestion-new-articles'
+  | 'guideline-coverage'
   | 'metadata';
 
 const TAB_ORDER: DetailTarget[] = [
@@ -88,8 +114,13 @@ const TAB_ORDER: DetailTarget[] = [
   'suggestion-improvements',
   'suggestion-updates',
   'suggestion-new-articles',
+  'guideline-coverage',
   'metadata',
 ];
+
+// Index of the metadata tab — its events load lazily and it can't be edited.
+const METADATA_TAB_INDEX = 6;
+const GUIDELINE_TAB_INDEX = 5;
 
 function targetToIndex(target: DetailTarget | undefined): number {
   if (!target) return 0;
@@ -202,7 +233,7 @@ export function CodeDetailModal({
   // cleanup would flip `cancelled = true` on the in-flight fetch — leaving
   // state stuck at 'loading'. Re-runs on row/tab change cancel cleanly.
   useEffect(() => {
-    if (activeTab !== 5 || !rowKey) return;
+    if (activeTab !== METADATA_TAB_INDEX || !rowKey) return;
     let cancelled = false;
     setMetadataState('loading');
     setMetadataError(null);
@@ -330,6 +361,8 @@ export function CodeDetailModal({
   const updates = (detailRow.existingArticleUpdates ?? []) as unknown as SectionUpdate[];
   const newArticles = (detailRow.newArticlesNeeded ??
     []) as unknown as NewArticleSuggestion[];
+  const coveredGuidelines = (detailRow.guidelinesWhereCoverageIs ??
+    []) as unknown as GuidelineCoverageItem[];
   const inAmboss = detailRow.isInAMBOSS;
   const specialty = detailRow.specialty ?? '';
   const category = detailRow.category ?? '';
@@ -406,6 +439,30 @@ export function CodeDetailModal({
             ) : null}
           </Inline>
 
+          {detailRow.isInGuidelines !== undefined ||
+          detailRow.guidelineCoverageLevel ||
+          detailRow.overallCoverageLevel ? (
+            <Inline space="s" vAlignItems="center">
+              {detailRow.isInGuidelines === true ? (
+                <Badge text="In guidelines" color="green" />
+              ) : detailRow.isInGuidelines === false ? (
+                <Badge text="Not in guidelines" color="red" />
+              ) : null}
+              {detailRow.guidelineCoverageLevel ? (
+                <CoverageBadge level={detailRow.guidelineCoverageLevel} />
+              ) : null}
+              {typeof detailRow.guidelineDepthOfCoverage === 'number' ? (
+                <DepthBadge
+                  depth={detailRow.guidelineDepthOfCoverage}
+                  level={detailRow.guidelineCoverageLevel}
+                />
+              ) : null}
+              {detailRow.overallCoverageLevel ? (
+                <Badge text={`Overall: ${detailRow.overallCoverageLevel}`} color="blue" />
+              ) : null}
+            </Inline>
+          ) : null}
+
           {error ? (
             <Text size="s" color="error">
               {error}
@@ -436,6 +493,7 @@ export function CodeDetailModal({
               { label: 'Improvements' },
               { label: 'Article Updates' },
               { label: 'New Articles' },
+              { label: 'Guidelines' },
               { label: 'Metadata' },
             ]}
           >
@@ -451,7 +509,7 @@ export function CodeDetailModal({
                   </Button>
                 </Inline>
               ) : null}
-              {detailLoading && activeTab !== 5 ? (
+              {detailLoading && activeTab !== METADATA_TAB_INDEX ? (
                 <Text size="s" color="tertiary">
                   Loading code details…
                 </Text>
@@ -509,6 +567,12 @@ export function CodeDetailModal({
                 <SuggestionUpdatesPanel updates={updates} />
               ) : activeTab === 4 ? (
                 <SuggestionNewArticlesPanel newArticles={newArticles} />
+              ) : activeTab === GUIDELINE_TAB_INDEX ? (
+                <GuidelineCoveragePanel
+                  guidelines={coveredGuidelines}
+                  notes={detailRow.guidelineNotes ?? null}
+                  gaps={detailRow.guidelineGaps ?? null}
+                />
               ) : (
                 <MetadataPanel
                   state={metadataState}
@@ -574,6 +638,71 @@ function CoverageArticlesPanel({ covered }: { covered: CoveredSection[] }) {
           </div>
         );
       })}
+    </Stack>
+  );
+}
+
+function GuidelineCoveragePanel({
+  guidelines,
+  notes,
+  gaps,
+}: {
+  guidelines: GuidelineCoverageItem[];
+  notes: string | null;
+  gaps: string | null;
+}) {
+  if (guidelines.length === 0 && !notes && !gaps) {
+    return (
+      <Text size="s" color="tertiary">
+        No guideline coverage.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="m">
+      {guidelines.length > 0 ? (
+        <Stack space="s">
+          {guidelines.map((g) => {
+            const recs = flattenRecommendations(g.recommendations);
+            return (
+              <div
+                key={g.guidelineId ?? g.guidelineTitle ?? 'guideline'}
+                style={{ borderLeft: '2px solid rgb(56, 132, 168)', paddingLeft: 10 }}
+              >
+                <Inline space="xxs" vAlignItems="center">
+                  <Text weight="bold">{g.guidelineTitle ?? '(untitled)'}</Text>
+                  {g.organization ? <Badge text={g.organization} color="blue" /> : null}
+                  {typeof g.year === 'number' ? (
+                    <Text size="s" color="tertiary">
+                      {g.year}
+                    </Text>
+                  ) : null}
+                  {g.guidelineId ? (
+                    <Text size="xs" color="tertiary">
+                      {g.guidelineId}
+                    </Text>
+                  ) : null}
+                </Inline>
+                {recs.length > 0 ? (
+                  <Stack space="xxs">
+                    {recs.map((r) => (
+                      <Inline key={r.id || r.title} space="xs" vAlignItems="center">
+                        <Text size="s">{r.title}</Text>
+                        {r.id ? (
+                          <Text size="xs" color="tertiary">
+                            {r.id}
+                          </Text>
+                        ) : null}
+                      </Inline>
+                    ))}
+                  </Stack>
+                ) : null}
+              </div>
+            );
+          })}
+        </Stack>
+      ) : null}
+      {notes || gaps ? <CoverageNotesPanel notes={notes} gaps={gaps} /> : null}
     </Stack>
   );
 }

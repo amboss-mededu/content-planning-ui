@@ -25,11 +25,25 @@ export const GROUP_STYLES: Record<
     stripe: 'rgba(15, 23, 42, 0.035)',
   },
   coverage: {
-    label: 'Coverage',
+    label: 'AMBOSS coverage',
     bg: 'rgb(228, 241, 234)',
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
     stripe: 'rgba(34, 139, 80, 0.06)',
+  },
+  guideline: {
+    label: 'Guideline coverage',
+    bg: 'rgb(224, 238, 246)',
+    fg: 'rgb(20, 80, 110)',
+    border: 'rgb(56, 132, 168)',
+    stripe: 'rgba(56, 132, 168, 0.06)',
+  },
+  overall: {
+    label: 'Overall',
+    bg: 'rgb(238, 232, 247)',
+    fg: 'rgb(80, 50, 130)',
+    border: 'rgb(124, 92, 184)',
+    stripe: 'rgba(124, 92, 184, 0.06)',
   },
   consolidation: {
     label: 'Consolidation',

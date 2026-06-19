@@ -24,6 +24,8 @@ describe('deriveCodeTableCounts', () => {
       coverageSectionCount: 3,
       existingArticleUpdateCount: 1,
       newArticleSuggestionCount: 1,
+      guidelineCount: 0,
+      guidelineRecommendationCount: 0,
     });
   });
 
@@ -47,6 +49,8 @@ describe('deriveCodeTableCounts', () => {
       coverageSectionCount: 2,
       existingArticleUpdateCount: 2,
       newArticleSuggestionCount: 0,
+      guidelineCount: 0,
+      guidelineRecommendationCount: 0,
     });
   });
 
@@ -63,6 +67,31 @@ describe('deriveCodeTableCounts', () => {
       coverageSectionCount: 7,
       existingArticleUpdateCount: 2,
       newArticleSuggestionCount: 1,
+      guidelineCount: 0,
+      guidelineRecommendationCount: 0,
     });
+  });
+
+  it('counts guidelines and their recommendations', () => {
+    const counts = deriveCodeTableCounts({
+      guidelinesWhereCoverageIs: [
+        {
+          guidelineTitle: 'G1',
+          recommendations: [{ recommendationTitle: 'R1' }, { recommendationTitle: 'R2' }],
+        },
+        { guidelineTitle: 'G2', recommendations: [{ recommendationTitle: 'R3' }] },
+      ],
+    });
+    expect(counts.guidelineCount).toBe(2);
+    expect(counts.guidelineRecommendationCount).toBe(3);
+  });
+
+  it('falls back to stored guideline counts when the array is unavailable', () => {
+    const counts = deriveCodeTableCounts({
+      guidelineCount: 5,
+      guidelineRecommendationCount: 9,
+    });
+    expect(counts.guidelineCount).toBe(5);
+    expect(counts.guidelineRecommendationCount).toBe(9);
   });
 });

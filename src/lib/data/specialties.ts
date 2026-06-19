@@ -11,7 +11,7 @@ import {
   type PipelineCardState,
   type PipelineStageStates,
 } from '@/lib/pipeline-stage-state';
-import type { Specialty } from '@/lib/types';
+import type { MappingSource, Specialty } from '@/lib/types';
 
 // Specialties live in PocketBase. RSC pages call these helpers and get a
 // snapshot via the cookie-authed PB client. Client components that need
@@ -33,7 +33,14 @@ function toSpecialty(row: SpecialtyRecord): Specialty {
     sheetId: row.sheetId,
     xlsxPath: row.xlsxPath,
     mappingOnly: row.mappingOnly ?? false,
+    mappingSource: normalizeMappingSource(row.mappingSource),
   };
+}
+
+/** Narrow the stored text to the union; empty/unknown → 'amboss' (today's
+ *  behaviour) so existing specialties keep mapping against AMBOSS only. */
+function normalizeMappingSource(value: string | undefined): MappingSource {
+  return value === 'guidelines' || value === 'both' ? value : 'amboss';
 }
 
 async function userClient(): Promise<PocketBase> {
@@ -105,6 +112,7 @@ export async function createSpecialty(args: {
   region?: string;
   language?: string;
   mappingOnly?: boolean;
+  mappingSource?: MappingSource;
 }): Promise<string> {
   const pb = await userClient();
   const collection = pb.collection<SpecialtyRecord>('specialties');
@@ -179,6 +187,23 @@ export async function setSpecialtyMappingOnly(
     .collection<SpecialtyRecord>('specialties')
     .getFirstListItem(`slug = "${slug}"`);
   await pb.collection('specialties').update(row.id, { mappingOnly: value });
+}
+
+/**
+ * Set the mapping source ('amboss' | 'guidelines' | 'both') on a specialty.
+ * Backs the header control (PATCH /api/specialties). Existing coverage data is
+ * left untouched — the setting only changes which source(s) future mapping
+ * runs query.
+ */
+export async function setSpecialtyMappingSource(
+  slug: string,
+  value: MappingSource,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  await pb.collection('specialties').update(row.id, { mappingSource: value });
 }
 
 /**

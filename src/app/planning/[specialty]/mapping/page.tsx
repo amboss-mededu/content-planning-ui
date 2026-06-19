@@ -47,6 +47,7 @@ async function MappingData({ slug }: { slug: string }) {
       codeCount={codeCount}
       extractionState={extraction.extract_codes}
       mappingOnly={specialty?.mappingOnly ?? false}
+      mappingSource={specialty?.mappingSource ?? 'amboss'}
     />
   );
 }

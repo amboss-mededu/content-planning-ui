@@ -33,8 +33,15 @@ import {
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
 import { log } from '@/lib/log';
+import type { GuidelineCoverage, GuidelineRecommendationRef } from '@/lib/pb/types';
+import type { MappingSource } from '@/lib/types';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
+import {
+  type CoverageVerdict,
+  coerceScore,
+  type GuidelineCoverageBlock,
+} from './guidelines-mcp';
 
 export type PipelineRunStatus =
   | 'running'
@@ -279,6 +286,8 @@ export type SpecialtyMappingContext = {
   region: string | null;
   language: string | null;
   milestones: string | null;
+  /** Which content source(s) to map against. Empty/unknown → 'amboss'. */
+  mappingSource: MappingSource;
 };
 
 /**
@@ -290,10 +299,12 @@ export async function loadSpecialtyForMapping(
 ): Promise<SpecialtyMappingContext> {
   log('pipeline').info('loadSpecialtyForMapping', { specialtySlug });
   const row = await getSpecialtyRecordAsAdmin(specialtySlug);
+  const src = row?.mappingSource;
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,
     milestones: row?.milestones ?? null,
+    mappingSource: src === 'guidelines' || src === 'both' ? src : 'amboss',
   };
 }
 
@@ -363,19 +374,69 @@ function normaliseCoveredSections(
   });
 }
 
+/**
+ * Coerce a guideline agent's `coveredGuidelines` block into the stored
+ * `GuidelineCoverage[]` shape. Mirrors {@link normaliseCoveredSections} — the
+ * `recommendations` field may arrive as a `record<title, id>` or an array.
+ */
+function normaliseGuidelineCoverage(
+  blocks: GuidelineCoverageBlock['coveredGuidelines'],
+): GuidelineCoverage[] {
+  return (blocks ?? []).map((b) => {
+    const r = b.recommendations;
+    let recommendations: GuidelineRecommendationRef[] | undefined;
+    if (Array.isArray(r)) {
+      recommendations = r.map((row) => ({
+        recommendationTitle: row.recommendationTitle,
+        recommendationId: row.recommendationId,
+      }));
+    } else if (r && typeof r === 'object') {
+      recommendations = Object.entries(r).map(
+        ([recommendationTitle, recommendationId]) => ({
+          recommendationTitle,
+          recommendationId:
+            typeof recommendationId === 'string' ? recommendationId : undefined,
+        }),
+      );
+    }
+    const year =
+      typeof b.year === 'number'
+        ? b.year
+        : typeof b.year === 'string'
+          ? Number.parseInt(b.year, 10) || undefined
+          : undefined;
+    return {
+      guidelineTitle: b.guidelineTitle,
+      guidelineId: b.guidelineId,
+      organization: b.organization,
+      year,
+      recommendations,
+    };
+  });
+}
+
 export async function writeCodeMapping(
   specialtySlug: string,
   code: string,
   mapping: MappingOutput,
   includeSuggestions = true,
+  extra?: {
+    /** Guideline coverage block (source includes 'guidelines'). */
+    guideline?: GuidelineCoverageBlock | null;
+    /** Synthesized/active overall verdict. */
+    overall?: CoverageVerdict | null;
+    /** Which source(s) produced this row. Defaults to 'amboss'. */
+    mappingSourceUsed?: MappingSource;
+  },
 ): Promise<void> {
-  log('pipeline').info('writeCodeMapping', { specialtySlug, code, includeSuggestions });
-  const coverageScore =
-    typeof mapping.coverage.coverageScore === 'number'
-      ? mapping.coverage.coverageScore
-      : typeof mapping.coverage.coverageScore === 'string'
-        ? Number.parseInt(mapping.coverage.coverageScore, 10) || undefined
-        : undefined;
+  log('pipeline').info('writeCodeMapping', {
+    specialtySlug,
+    code,
+    includeSuggestions,
+    mappingSourceUsed: extra?.mappingSourceUsed,
+  });
+  const coverageScore = coerceScore(mapping.coverage.coverageScore);
+  const g = extra?.guideline ?? null;
   await writeCodeMappingAsAdmin({
     slug: specialtySlug,
     code,
@@ -387,6 +448,19 @@ export async function writeCodeMapping(
     articlesWhereCoverageIs: mapping.coverage.coveredSections
       ? normaliseCoveredSections(mapping.coverage.coveredSections)
       : undefined,
+    // --- Guideline coverage track ------------------------------------------
+    isInGuidelines: g ? (g.inGuidelines ?? undefined) : undefined,
+    guidelineCoverageLevel: g ? g.coverageLevel || undefined : undefined,
+    guidelineDepthOfCoverage: g ? coerceScore(g.coverageScore) : undefined,
+    guidelineNotes: g ? g.generalNotes || undefined : undefined,
+    guidelineGaps: g ? g.gaps || undefined : undefined,
+    guidelinesWhereCoverageIs: g
+      ? normaliseGuidelineCoverage(g.coveredGuidelines)
+      : undefined,
+    // --- Overall coverage track + provenance -------------------------------
+    overallCoverageLevel: extra?.overall?.coverageLevel || undefined,
+    overallDepthOfCoverage: extra?.overall?.coverageScore,
+    mappingSourceUsed: extra?.mappingSourceUsed ?? 'amboss',
     // Coverage-only (mapping-only) writes persist NO suggestions and leave
     // `suggestionsGeneratedAt` at 0, so the backfill stage can find the code.
     improvements: includeSuggestions

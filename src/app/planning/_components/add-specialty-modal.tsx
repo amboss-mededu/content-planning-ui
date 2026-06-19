@@ -3,6 +3,7 @@
 import { Callout, Checkbox, Input, Modal, Select, Stack } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import type { MappingSource } from '@/lib/types';
 
 function autoSlug(name: string): string {
   return name
@@ -29,6 +30,7 @@ export function AddSpecialtyModal({
   const [region, setRegion] = useState('');
   const [language, setLanguage] = useState('');
   const [mappingOnly, setMappingOnly] = useState(false);
+  const [mappingSource, setMappingSource] = useState<MappingSource>('amboss');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +46,7 @@ export function AddSpecialtyModal({
     setRegion('');
     setLanguage('');
     setMappingOnly(false);
+    setMappingSource('amboss');
     setError(null);
     setSubmitting(false);
   };
@@ -68,6 +71,7 @@ export function AddSpecialtyModal({
           region: region || undefined,
           language: language || undefined,
           mappingOnly: mappingOnly || undefined,
+          mappingSource,
         }),
       });
       if (!res.ok) {
@@ -138,6 +142,18 @@ export function AddSpecialtyModal({
             placeholder="en"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
+          />
+          <Select
+            name="specialty-mappingSource"
+            label="Mapping source"
+            labelHint="Which content to assess coverage against."
+            value={mappingSource}
+            onChange={(e) => setMappingSource(e.target.value as MappingSource)}
+            options={[
+              { value: 'amboss', label: 'AMBOSS' },
+              { value: 'guidelines', label: 'Guidelines' },
+              { value: 'both', label: 'Both' },
+            ]}
           />
           <Checkbox
             name="specialty-mappingOnly"

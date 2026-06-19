@@ -32,8 +32,15 @@ export type EventMetrics = {
   source?: string;
   category?: string;
   /** Which sub-step produced the event — so the UI can split completions
-   *  into "Identify modules" / "Extract codes" / "Milestones" / "Map" buckets. */
-  phase?: 'identify' | 'extract' | 'milestones' | 'map';
+   *  into "Identify modules" / "Extract codes" / "Milestones" / "Map" /
+   *  "Map (guidelines)" / "Overall synthesis" buckets. */
+  phase?:
+    | 'identify'
+    | 'extract'
+    | 'milestones'
+    | 'map'
+    | 'map_guidelines'
+    | 'synthesize_overall';
   /** Raw parsed LLM output for this call. */
   completion?: unknown;
   /** True when the call used a stricter retry after malformed JSON. */

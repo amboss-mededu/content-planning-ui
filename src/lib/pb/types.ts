@@ -42,6 +42,10 @@ export interface SpecialtyRecord extends PbRecord {
    *  the header toggle; flipping it off surfaces the separate
    *  "Generate suggestions" backfill stage. */
   mappingOnly?: boolean;
+  /** Which content source(s) coverage mapping runs against:
+   *  `'amboss'` (default), `'guidelines'`, or `'both'`. Empty/absent reads as
+   *  `'amboss'` at the data layer. See `mapCodesWorkflow` dispatch. */
+  mappingSource?: string;
   /** Per-tab manual "mark step complete" override, keyed by tab segment
    *  (e.g. `''` for Overview, `'mapping'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */
@@ -91,6 +95,26 @@ export interface CodeRecord extends PbRecord {
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   improvements?: string;
+  // --- Guideline coverage track (source includes 'guidelines') -------------
+  // Mirror of the AMBOSS coverage columns above, populated by the guidelines
+  // mapping agent. Null/unset for amboss-only rows.
+  isInGuidelines?: boolean;
+  guidelineCoverageLevel?: string;
+  guidelineDepthOfCoverage?: number;
+  guidelineNotes?: string;
+  guidelineGaps?: string;
+  guidelinesWhereCoverageIs?: GuidelineCoverage[];
+  guidelineCount?: number;
+  guidelineRecommendationCount?: number;
+  // --- Overall coverage track + provenance ---------------------------------
+  /** Synthesized overall coverage when source='both'; equals the active
+   *  source's level/score for single-source rows. Stats/overview read these
+   *  with a `?? coverageLevel/depthOfCoverage` fallback. */
+  overallCoverageLevel?: string;
+  overallDepthOfCoverage?: number;
+  /** Which source(s) produced this row's mapping: 'amboss' | 'guidelines' |
+   *  'both'. Stamped at write time so the UI renders the right columns. */
+  mappingSourceUsed?: string;
 }
 
 // --- Collection: codeCategories --------------------------------------------
@@ -697,6 +721,23 @@ export interface CoveredSection {
   articleTitle?: string;
   articleId?: string;
   sections?: SectionRef[];
+}
+
+/** A single recommendation/statement within a guideline the agent cited. */
+export interface GuidelineRecommendationRef {
+  recommendationTitle?: string;
+  recommendationId?: string;
+}
+
+/** Guideline-coverage analog of {@link CoveredSection}. Shape is modelled
+ *  defensively against the `get_guidelines` tool output — confirm/refine via
+ *  `scripts/probe-guidelines.ts`. */
+export interface GuidelineCoverage {
+  guidelineTitle?: string;
+  guidelineId?: string;
+  organization?: string;
+  year?: number;
+  recommendations?: GuidelineRecommendationRef[];
 }
 
 export interface SectionUpdate {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import type { MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
-import type { Code } from '@/lib/types';
+import type { Code, MappingSource } from '@/lib/types';
 import { CodesView } from './codes-view';
 
 const PER_PAGE = 200;
@@ -29,11 +29,13 @@ export function CodesViewClient({
   initialCodes,
   initialHasMore,
   mappingOnly = false,
+  mappingSource = 'amboss',
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   mappingOnly?: boolean;
+  mappingSource?: MappingSource;
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -264,6 +266,7 @@ export function CodesViewClient({
       loadState={loadState}
       onPatchRow={patchRow}
       mappingOnly={mappingOnly}
+      mappingSource={mappingSource}
     />
   );
 }

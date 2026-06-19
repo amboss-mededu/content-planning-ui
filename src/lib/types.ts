@@ -22,6 +22,8 @@ export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 
 // --- Specialty -------------------------------------------------------------
 
+export type MappingSource = 'amboss' | 'guidelines' | 'both';
+
 export type Specialty = {
   slug: string;
   name: string;
@@ -30,6 +32,9 @@ export type Specialty = {
   xlsxPath?: string;
   /** Coverage-mapping-only mode — see `SpecialtyRecord.mappingOnly`. */
   mappingOnly?: boolean;
+  /** Which content source(s) mapping runs against — see
+   *  `SpecialtyRecord.mappingSource`. Defaults to `'amboss'`. */
+  mappingSource?: MappingSource;
 };
 
 // --- Code ------------------------------------------------------------------
@@ -55,6 +60,20 @@ export type NewArticleRef = {
   [key: string]: unknown;
 };
 
+export type GuidelineRecommendationRef = {
+  recommendationTitle?: string;
+  recommendationId?: string;
+};
+
+export type GuidelineCoverageRef = {
+  guidelineTitle?: string;
+  guidelineId?: string;
+  organization?: string;
+  year?: number;
+  recommendations?: GuidelineRecommendationRef[];
+  [key: string]: unknown;
+};
+
 export type Code = {
   index?: string;
   specialty?: string;
@@ -77,6 +96,19 @@ export type Code = {
   existingArticleUpdates?: ArticleUpdate[];
   newArticlesNeeded?: NewArticleRef[];
   improvements?: string;
+  // --- Guideline coverage track ---------------------------------------------
+  isInGuidelines?: boolean;
+  guidelineCoverageLevel?: CoverageLevel;
+  guidelineDepthOfCoverage?: number;
+  guidelineNotes?: string;
+  guidelineGaps?: string;
+  guidelinesWhereCoverageIs?: GuidelineCoverageRef[];
+  guidelineCount?: number;
+  guidelineRecommendationCount?: number;
+  // --- Overall coverage track + provenance ----------------------------------
+  overallCoverageLevel?: CoverageLevel;
+  overallDepthOfCoverage?: number;
+  mappingSourceUsed?: MappingSource;
   metadata?: unknown;
   fullJsonOutput?: unknown;
 };

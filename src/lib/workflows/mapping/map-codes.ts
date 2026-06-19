@@ -13,7 +13,8 @@
 
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
-import { mapAndValidateCode } from '../lib/amboss-mcp';
+import type { MappingSource } from '@/lib/types';
+import { type MappingOutput, mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
   getPipelineRunStatus,
@@ -28,6 +29,7 @@ import {
   writeCodeMapping,
 } from '../lib/db-writes';
 import { aggregateStageMetrics, logEvent } from '../lib/events';
+import { mapGuidelinesForCode, synthesizeOverallCoverage } from '../lib/guidelines-mcp';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import { chunk } from '../lib/util';
@@ -83,10 +85,31 @@ function deriveLanguage(language: string | null): string {
   return language || 'en';
 }
 
+/** Empty AMBOSS coverage, used when a code is mapped against guidelines only
+ *  so the AMBOSS columns stay blank (no AMBOSS run happened). */
+function emptyAmbossMapping(code: string, description: string): MappingOutput {
+  return {
+    code,
+    description,
+    coverage: {
+      inAMBOSS: false,
+      coveredSections: [],
+      generalNotes: '',
+      gaps: '',
+      coverageLevel: '',
+      coverageScore: undefined,
+    },
+    suggestion: { improvement: '', sectionUpdates: [], newArticlesNeeded: [] },
+  };
+}
+
 /**
  * Single step that wraps "map this code + persist the result" as one atomic
  * unit in the event log. On crash, the workflow replays completed codes as
  * cache hits and re-executes only whichever code was in flight.
+ *
+ * Dispatches per the specialty's `mappingSource`: AMBOSS agent, guidelines
+ * agent, or both (run concurrently, then reconciled into an overall verdict).
  */
 async function mapAndWriteOne(input: {
   runId: string;
@@ -101,42 +124,97 @@ async function mapAndWriteOne(input: {
   additionalInstructions?: string;
   checkAgainstLibrary: boolean;
   includeSuggestions: boolean;
+  mappingSource: MappingSource;
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
 }): Promise<{ code: string; attempts: number; model: string; unresolved: boolean }> {
-  const result = await mapAndValidateCode({
-    code: input.code,
-    description: input.description,
-    category: input.category,
-    specialty: input.specialty,
-    contentBase: input.contentBase,
-    language: input.language,
-    milestones: input.milestones,
-    additionalInstructions: input.additionalInstructions,
-    checkAgainstLibrary: input.checkAgainstLibrary,
-    includeSuggestions: input.includeSuggestions,
-    runId: input.runId,
-    stage: 'map_codes',
-    primaryModel: input.primaryModel,
-    backupModel: input.backupModel,
-    apiKeys: input.apiKeys,
-  });
-  // Cooperative cancellation: agent call took 10–60s; if the editor reset
+  const source = input.mappingSource;
+  const runAmboss = source === 'amboss' || source === 'both';
+  const runGuidelines = source === 'guidelines' || source === 'both';
+
+  const [ambossResult, guidelineResult] = await Promise.all([
+    runAmboss
+      ? mapAndValidateCode({
+          code: input.code,
+          description: input.description,
+          category: input.category,
+          specialty: input.specialty,
+          contentBase: input.contentBase,
+          language: input.language,
+          milestones: input.milestones,
+          additionalInstructions: input.additionalInstructions,
+          checkAgainstLibrary: input.checkAgainstLibrary,
+          includeSuggestions: input.includeSuggestions,
+          runId: input.runId,
+          stage: 'map_codes',
+          primaryModel: input.primaryModel,
+          backupModel: input.backupModel,
+          apiKeys: input.apiKeys,
+        })
+      : Promise.resolve(null),
+    runGuidelines
+      ? mapGuidelinesForCode({
+          code: input.code,
+          description: input.description,
+          category: input.category,
+          specialty: input.specialty,
+          contentBase: input.contentBase,
+          language: input.language,
+          milestones: input.milestones,
+          additionalInstructions: input.additionalInstructions,
+          runId: input.runId,
+          stage: 'map_codes',
+          primaryModel: input.primaryModel,
+          backupModel: input.backupModel,
+          apiKeys: input.apiKeys,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  // Cooperative cancellation: agent calls took 10–60s; if the editor reset
   // the stage mid-call we must not stamp mappedAt over the cleared row.
   const status = await getPipelineRunStatus(input.runId);
   if (shouldAbort(status)) throw new RunCancelledError(status);
+
+  // Reconcile into an overall verdict. Short-circuits without an LLM call for
+  // single-source runs; only `both` makes the synthesis call.
+  const overall = await synthesizeOverallCoverage({
+    ambossCoverage: ambossResult
+      ? {
+          inAMBOSS: ambossResult.mapping.coverage.inAMBOSS,
+          coverageLevel: ambossResult.mapping.coverage.coverageLevel,
+          coverageScore: ambossResult.mapping.coverage.coverageScore,
+          generalNotes: ambossResult.mapping.coverage.generalNotes,
+          gaps: ambossResult.mapping.coverage.gaps,
+        }
+      : null,
+    guidelineCoverage: guidelineResult ? guidelineResult.mapping.coverage : null,
+    milestones: input.milestones,
+    runId: input.runId,
+    stage: 'map_codes',
+    model: input.primaryModel,
+    apiKeys: input.apiKeys,
+  });
+
   await writeCodeMapping(
     input.specialtySlug,
     input.code,
-    result.mapping,
-    input.includeSuggestions,
+    ambossResult?.mapping ?? emptyAmbossMapping(input.code, input.description),
+    // Suggestions are an AMBOSS-only concept — never on a guidelines-only run.
+    runAmboss ? input.includeSuggestions : false,
+    {
+      guideline: guidelineResult?.mapping.coverage ?? null,
+      overall,
+      mappingSourceUsed: source,
+    },
   );
+
   return {
     code: input.code,
-    attempts: result.attempts,
-    model: result.model,
-    unresolved: result.unresolved,
+    attempts: (ambossResult?.attempts ?? 0) + (guidelineResult?.attempts ?? 0),
+    model: ambossResult?.model ?? guidelineResult?.model ?? 'none',
+    unresolved: Boolean(ambossResult?.unresolved) || Boolean(guidelineResult?.unresolved),
   };
 }
 
@@ -157,12 +235,14 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
     const contentBase = input.contentBase || deriveContentBase(spec.region);
     const language = input.language || deriveLanguage(spec.language);
     const milestones = spec.milestones ?? '';
+    // Source is a per-specialty setting — read from the specialty, not the run.
+    const mappingSource = spec.mappingSource;
 
     await logEvent({
       runId: input.runId,
       stage: 'map_codes',
       level: 'info',
-      message: `Run started for ${unmapped.length} unmapped code(s) · ${contentBase} · lang=${language}`,
+      message: `Run started for ${unmapped.length} unmapped code(s) · ${contentBase} · lang=${language} · source=${mappingSource}`,
       metrics: {
         model: 'mapper-ladder',
       },
@@ -204,6 +284,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               additionalInstructions: input.additionalInstructions,
               checkAgainstLibrary: input.checkAgainstLibrary,
               includeSuggestions: input.includeSuggestions ?? true,
+              mappingSource,
               primaryModel: input.primaryModel,
               backupModel: input.backupModel,
               apiKeys: input.apiKeys,

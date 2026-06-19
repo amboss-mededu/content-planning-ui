@@ -117,9 +117,16 @@ function isMapped(c: CodeRecord): boolean {
   return (c.mappedAt ?? 0) > 0;
 }
 
-/** Coverage score clamped to 0–5; unset treated as 0. */
+/** Coverage score clamped to 0–5; unset treated as 0. Prefers the overall
+ *  (synthesized / active-source) score, falling back to the AMBOSS score for
+ *  rows mapped before the guidelines feature (no `overallDepthOfCoverage`). */
 function scoreOf(c: CodeRecord): number {
-  const raw = typeof c.depthOfCoverage === 'number' ? c.depthOfCoverage : 0;
+  const raw =
+    typeof c.overallDepthOfCoverage === 'number'
+      ? c.overallDepthOfCoverage
+      : typeof c.depthOfCoverage === 'number'
+        ? c.depthOfCoverage
+        : 0;
   return Math.min(SCORE_MAX, Math.max(SCORE_MIN, Math.round(raw)));
 }
 

@@ -8,6 +8,7 @@ import type {
   SourceCategoryProgress,
 } from '@/lib/data/categories';
 import type { CodeTableRow } from '@/lib/data/codes';
+import type { MappingSource } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
 import { CodesActionsToolbar } from './codes-actions-toolbar';
@@ -46,6 +47,7 @@ export function MappingView({
   codeCount,
   extractionState,
   mappingOnly = false,
+  mappingSource = 'amboss',
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
@@ -63,6 +65,9 @@ export function MappingView({
   /** Mapping-only specialties have no consolidation, so the consolidation
    *  bucket view and the suggestion columns are dropped. */
   mappingOnly?: boolean;
+  /** Which content source(s) this specialty maps against — drives the codes
+   *  table coverage columns. */
+  mappingSource?: MappingSource;
 }) {
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<MappingMode>(() => {
@@ -109,6 +114,7 @@ export function MappingView({
           initialCodes={initialCodes}
           initialHasMore={initialHasMore}
           mappingOnly={mappingOnly}
+          mappingSource={mappingSource}
         />
       </div>
       {mode === 'consolidation' && !mappingOnly ? (

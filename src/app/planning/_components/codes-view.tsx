@@ -3,7 +3,7 @@
 import { Badge, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
-import { COVERAGE_LEVELS, type Code } from '@/lib/types';
+import { COVERAGE_LEVELS, type Code, type MappingSource } from '@/lib/types';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
@@ -71,6 +71,7 @@ export function CodesView({
   loadState,
   onPatchRow,
   mappingOnly = false,
+  mappingSource = 'amboss',
 }: {
   codes: Code[];
   specialtySlug: string;
@@ -86,6 +87,9 @@ export function CodesView({
   /** Mapping-only specialties hide the suggestion columns (Updates /
    *  New articles) and the Consolidation-category column. */
   mappingOnly?: boolean;
+  /** Which content source(s) this specialty maps against. Drives which
+   *  coverage column groups (AMBOSS / Guideline / Overall) are shown. */
+  mappingSource?: MappingSource;
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
 
@@ -406,13 +410,191 @@ export function CodesView({
         group: 'suggestions',
       },
     ];
+
+    // --- Guideline coverage columns (source includes guidelines) -----------
+    const guidelineCols: Column<Code>[] = [
+      {
+        key: 'inGuidelines',
+        label: 'In guidelines',
+        description: 'Whether this code is addressed by a clinical guideline',
+        width: 120,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (mapped && r.isInGuidelines === true)
+            return <Badge text="Yes" color="green" />;
+          if (mapped && r.isInGuidelines === false)
+            return <Badge text="No" color="red" />;
+          return <EmptyChip />;
+        },
+        accessor: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return null;
+          return r.isInGuidelines === true ? 1 : 0;
+        },
+        type: 'boolean',
+        filterable: true,
+        filterValue: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return undefined;
+          return r.isInGuidelines === true ? 'yes' : 'no';
+        },
+        filterOptions: IN_AMBOSS_FILTER_OPTIONS,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelineCoverage',
+        label: 'Guideline coverage',
+        description:
+          'Audience level this code is covered for by clinical guidelines (none → … → specialist)',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          if (!r.guidelineCoverageLevel) return <EmptyChip />;
+          return <CoverageBadge level={r.guidelineCoverageLevel} />;
+        },
+        width: 160,
+        align: 'center',
+        accessor: (r) =>
+          r.guidelineCoverageLevel
+            ? (COVERAGE_RANK[r.guidelineCoverageLevel] ?? -1)
+            : null,
+        type: 'number',
+        filterable: true,
+        filterValue: (r) => r.guidelineCoverageLevel ?? undefined,
+        filterOptions: COVERAGE_FILTER_OPTIONS,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelineDepth',
+        label: 'Guideline score',
+        description: 'Numeric depth-of-coverage score from clinical guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped || r.guidelineDepthOfCoverage == null) return <EmptyChip />;
+          return (
+            <DepthBadge
+              depth={r.guidelineDepthOfCoverage}
+              level={r.guidelineCoverageLevel}
+            />
+          );
+        },
+        width: 120,
+        align: 'center',
+        accessor: (r) =>
+          (r.mappedAt ?? 0) > 0 ? (r.guidelineDepthOfCoverage ?? null) : null,
+        type: 'number',
+        filterable: true,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelinesWhereCoverageIs',
+        label: 'Guidelines',
+        description: 'Clinical guidelines (and recommendations) that cover this code',
+        width: 180,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const guidelines = r.guidelineCount ?? r.guidelinesWhereCoverageIs?.length ?? 0;
+          const recs = r.guidelineRecommendationCount ?? 0;
+          if (guidelines === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={
+                recs > 0
+                  ? `${guidelines} guideline${guidelines === 1 ? '' : 's'} · ${recs} rec${recs === 1 ? '' : 's'}`
+                  : `${guidelines} guideline${guidelines === 1 ? '' : 's'}`
+              }
+              tone="guideline"
+              onClick={() => onOpenDetail(r, 'guideline-coverage')}
+            />
+          );
+        },
+        accessor: (r) => r.guidelineCount ?? r.guidelinesWhereCoverageIs?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        group: 'guideline',
+      },
+    ];
+
+    // --- Overall coverage columns (source = 'both') ------------------------
+    const overallCols: Column<Code>[] = [
+      {
+        key: 'overallCoverage',
+        label: 'Overall coverage',
+        description: 'Combined coverage level across AMBOSS and guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          if (!r.overallCoverageLevel) return <EmptyChip />;
+          return <CoverageBadge level={r.overallCoverageLevel} />;
+        },
+        width: 160,
+        align: 'center',
+        accessor: (r) =>
+          r.overallCoverageLevel ? (COVERAGE_RANK[r.overallCoverageLevel] ?? -1) : null,
+        type: 'number',
+        filterable: true,
+        filterValue: (r) => r.overallCoverageLevel ?? undefined,
+        filterOptions: COVERAGE_FILTER_OPTIONS,
+        group: 'overall',
+      },
+      {
+        key: 'overallDepth',
+        label: 'Overall score',
+        description: 'Combined depth-of-coverage score across AMBOSS and guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped || r.overallDepthOfCoverage == null) return <EmptyChip />;
+          return (
+            <DepthBadge depth={r.overallDepthOfCoverage} level={r.overallCoverageLevel} />
+          );
+        },
+        width: 120,
+        align: 'center',
+        accessor: (r) =>
+          (r.mappedAt ?? 0) > 0 ? (r.overallDepthOfCoverage ?? null) : null,
+        type: 'number',
+        filterable: true,
+        group: 'overall',
+      },
+    ];
+
+    // Compose the column set by source. AMBOSS coverage columns are dropped
+    // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
+    // guideline + overall columns slot in between AMBOSS coverage and the
+    // suggestion columns.
+    let result: Column<Code>[];
+    if (mappingSource === 'guidelines') {
+      result = [...cols.filter((c) => c.group === 'metadata'), ...guidelineCols];
+    } else if (mappingSource === 'both') {
+      const metaAndCoverage = cols.filter(
+        (c) => c.group === 'metadata' || c.group === 'coverage',
+      );
+      const suggestionCols = cols.filter((c) => c.group === 'suggestions');
+      result = [...metaAndCoverage, ...guidelineCols, ...overallCols, ...suggestionCols];
+    } else {
+      result = cols; // amboss (default)
+    }
+
     // Mapping-only specialties have no suggestions or consolidation buckets,
     // so drop those columns entirely.
-    if (!mappingOnly) return cols;
-    return cols.filter(
-      (c) => c.group !== 'suggestions' && c.key !== 'consolidationCategory',
-    );
-  }, [onOpenDetail, inFlightSet, editingEnabled, onPatchRow, sourceOptions, mappingOnly]);
+    if (mappingOnly) {
+      result = result.filter(
+        (c) => c.group !== 'suggestions' && c.key !== 'consolidationCategory',
+      );
+    }
+    return result;
+  }, [
+    onOpenDetail,
+    inFlightSet,
+    editingEnabled,
+    onPatchRow,
+    sourceOptions,
+    mappingOnly,
+    mappingSource,
+  ]);
 
   return (
     <Stack space="m">
@@ -469,13 +651,18 @@ function getLoadStatusText(
 }
 
 const CHIP_TONES: Record<
-  'coverage' | 'suggestions',
+  'coverage' | 'guideline' | 'suggestions',
   { bg: string; fg: string; border: string }
 > = {
   coverage: {
     bg: 'rgba(34, 139, 80, 0.10)',
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
+  },
+  guideline: {
+    bg: 'rgba(56, 132, 168, 0.12)',
+    fg: 'rgb(20, 80, 110)',
+    border: 'rgb(56, 132, 168)',
   },
   suggestions: {
     bg: 'rgba(217, 119, 6, 0.12)',
@@ -490,7 +677,7 @@ function ChipButton({
   onClick,
 }: {
   label: string;
-  tone: 'coverage' | 'suggestions';
+  tone: 'coverage' | 'guideline' | 'suggestions';
   onClick: () => void;
 }) {
   const c = CHIP_TONES[tone];
