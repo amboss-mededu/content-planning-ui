@@ -26,7 +26,6 @@ export function SpecialtyHeader({
     <Stack space="l">
       <Breadcrumbs
         crumbs={[
-          { label: 'Home', href: '/' },
           { label: 'Specialty Dashboard', href: '/planning' },
           { label: specialty.name },
         ]}
@@ -57,7 +56,6 @@ export function NotConfiguredView({ slug }: { slug: string }) {
     <Stack space="l">
       <Breadcrumbs
         crumbs={[
-          { label: 'Home', href: '/' },
           { label: 'Specialty Dashboard', href: '/planning' },
           { label: slug },
         ]}

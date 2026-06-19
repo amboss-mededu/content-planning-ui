@@ -1,42 +1,43 @@
 'use client';
 
-import { Callout, H1, Stack, Text } from '@amboss/design-system';
-import { useEffect, useState } from 'react';
+import { H1, H2, Inline, Stack, Text } from '@amboss/design-system';
 import type { Specialty } from '@/lib/types';
-import { SpecialtyEntry } from './specialty-entry';
-
-const STORAGE_KEY = 'lastSpecialty';
+import { AddSpecialtyButton } from './add-specialty-button';
 
 export function DashboardEntryView({
   specialties,
   specialtiesGrid,
+  overview,
 }: {
   specialties: Specialty[];
   specialtiesGrid: React.ReactNode;
+  overview: React.ReactNode;
 }) {
-  const [lastSlug, setLastSlug] = useState<string>('');
-
-  useEffect(() => {
-    const last = window.localStorage.getItem(STORAGE_KEY) ?? '';
-    if (last && specialties.some((s) => s.slug === last)) setLastSlug(last);
-  }, [specialties]);
+  const hasSpecialties = specialties.length > 0;
 
   return (
     <Stack space="xl">
       <Stack space="s">
         <H1>Specialty Dashboard</H1>
         <Text color="secondary">
-          {lastSlug
-            ? 'Pick a specialty to switch, or open the last one you viewed.'
-            : 'Pick a specialty to view its content plan.'}
+          Review coverage, mapped codes, and consolidation suggestions per specialty.
         </Text>
       </Stack>
-      {specialties.length === 0 ? (
-        <Callout type="info" text="No specialties registered." />
-      ) : (
-        <SpecialtyEntry specialties={specialties} initialSlug={lastSlug} />
-      )}
-      {specialtiesGrid}
+
+      <Stack space="m">
+        <Inline alignItems="spaceBetween" vAlignItems="center">
+          <H2>Specialties</H2>
+          <AddSpecialtyButton />
+        </Inline>
+        {specialtiesGrid}
+      </Stack>
+
+      {hasSpecialties ? (
+        <Stack space="m">
+          <H2>Specialty comparison</H2>
+          {overview}
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
