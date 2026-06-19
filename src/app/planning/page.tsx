@@ -3,11 +3,16 @@ import {
   listSpecialties,
   listSpecialtyPipelineStageStates,
 } from '@/lib/data/specialties';
+import { listSpecialtiesOverview } from '@/lib/data/specialties-overview';
 import { DashboardEntryView } from './_components/dashboard-entry-view';
 import {
   SpecialtiesGridSkeleton,
   SpecialtiesGridView,
 } from './_components/specialties-grid';
+import {
+  SpecialtiesOverviewSkeleton,
+  SpecialtiesOverviewView,
+} from './_components/specialties-overview';
 
 export default async function PlanningIndex() {
   const specialties = await listSpecialties();
@@ -17,6 +22,11 @@ export default async function PlanningIndex() {
       specialtiesGrid={
         <Suspense fallback={<SpecialtiesGridSkeleton />}>
           <SpecialtiesGridData />
+        </Suspense>
+      }
+      overview={
+        <Suspense fallback={<SpecialtiesOverviewSkeleton />}>
+          <AllSpecialtiesOverviewData />
         </Suspense>
       }
     />
@@ -34,4 +44,9 @@ async function SpecialtiesGridData() {
       stageStatesBySlug={stageStatesBySlug}
     />
   );
+}
+
+async function AllSpecialtiesOverviewData() {
+  const rows = await listSpecialtiesOverview();
+  return <SpecialtiesOverviewView rows={rows} />;
 }

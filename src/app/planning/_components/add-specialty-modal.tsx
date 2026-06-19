@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  Button,
-  Callout,
-  Checkbox,
-  Inline,
-  Input,
-  Select,
-  Stack,
-} from '@amboss/design-system';
+import { Callout, Checkbox, Input, Modal, Select, Stack } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -20,7 +12,16 @@ function autoSlug(name: string): string {
     .replace(/[^a-z0-9_-]/g, '');
 }
 
-export function AddSpecialtyForm() {
+/** Register a new specialty. Mirrors the old inline AddSpecialtyForm (same
+ *  `/api/specialties` POST + auto-slug), relocated into a DS Modal opened from
+ *  the dashboard's "Add specialty" button. */
+export function AddSpecialtyModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -31,11 +32,28 @@ export function AddSpecialtyForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (!open) return null;
+
   const displayedSlug = slugTouched ? slug : autoSlug(name);
   const canSubmit = !submitting && name.trim().length > 0 && displayedSlug.length > 0;
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const reset = () => {
+    setName('');
+    setSlug('');
+    setSlugTouched(false);
+    setRegion('');
+    setLanguage('');
+    setMappingOnly(false);
+    setError(null);
+    setSubmitting(false);
+  };
+
+  const close = () => {
+    reset();
+    onClose();
+  };
+
+  const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
@@ -56,12 +74,8 @@ export function AddSpecialtyForm() {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Add failed (${res.status})`);
       }
-      setName('');
-      setSlug('');
-      setSlugTouched(false);
-      setRegion('');
-      setLanguage('');
-      setMappingOnly(false);
+      reset();
+      onClose();
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add specialty.');
@@ -71,18 +85,33 @@ export function AddSpecialtyForm() {
   };
 
   return (
-    <form onSubmit={onSubmit}>
-      <Stack space="s">
-        <Inline space="s" vAlignItems="bottom">
+    <Modal
+      header="Add specialty"
+      subHeader="Only identity is needed here. Provide the PDF URLs when you start a code or milestone extraction run."
+      size="m"
+      isDismissible
+      onAction={close}
+      actionButton={{
+        text: submitting ? 'Adding…' : 'Add specialty',
+        onClick: submit,
+        disabled: !canSubmit,
+      }}
+      secondaryButton={{
+        text: 'Cancel',
+        onClick: close,
+      }}
+    >
+      <Modal.Stack>
+        <Stack space="s">
           <Input
-            name="name"
+            name="specialty-name"
             label="Name"
             placeholder="Dermatology"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
           <Input
-            name="slug"
+            name="specialty-slug"
             label="Slug"
             placeholder="dermatology"
             value={displayedSlug}
@@ -92,7 +121,7 @@ export function AddSpecialtyForm() {
             }}
           />
           <Select
-            name="region"
+            name="specialty-region"
             label="Region"
             placeholder="Any"
             value={region}
@@ -104,25 +133,22 @@ export function AddSpecialtyForm() {
             ]}
           />
           <Input
-            name="language"
+            name="specialty-language"
             label="Language"
             placeholder="en"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
           />
-          <Button type="submit" disabled={!canSubmit}>
-            {submitting ? 'Adding…' : 'Add specialty'}
-          </Button>
-        </Inline>
-        <Checkbox
-          name="mappingOnly"
-          label="Mapping only"
-          labelHint="Skip consolidation & suggestions — run coverage mapping only."
-          checked={mappingOnly}
-          onChange={(e) => setMappingOnly(e.target.checked)}
-        />
-        {error ? <Callout type="error" text={error} /> : null}
-      </Stack>
-    </form>
+          <Checkbox
+            name="specialty-mappingOnly"
+            label="Mapping only"
+            labelHint="Skip consolidation & suggestions — run coverage mapping only."
+            checked={mappingOnly}
+            onChange={(e) => setMappingOnly(e.target.checked)}
+          />
+          {error ? <Callout type="error" text={error} /> : null}
+        </Stack>
+      </Modal.Stack>
+    </Modal>
   );
 }

@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { CurrentUser } from '@/lib/auth';
 
 const NAV_ITEMS = [
-  { label: 'Home', href: '/' },
   { label: 'Specialty Dashboard', href: '/planning' },
   { label: 'My Backlog', href: '/my-backlog' },
 ];

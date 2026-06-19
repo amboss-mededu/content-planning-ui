@@ -14,7 +14,12 @@ export function SpecialtiesGridView({
   stageStatesBySlug: Record<string, PipelineStageStates>;
 }) {
   if (specialties.length === 0) {
-    return <Callout type="info" text="No specialties registered yet. Add one below." />;
+    return (
+      <Callout
+        type="info"
+        text="No specialties registered yet. Use “Add specialty” to create one."
+      />
+    );
   }
   return (
     <Columns gap="m" vAlignItems="stretch">
