@@ -24,16 +24,32 @@ export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 
 export type MappingSource = 'amboss' | 'guidelines' | 'both';
 
+/**
+ * Which end-to-end workflow a specialty runs, chosen at initialization:
+ * - `'full'`         — map → suggestions → consolidate → articles (today's default).
+ * - `'mapping-only'` — coverage mapping only; nothing downstream.
+ * - `'rag-corpus'`   — map against guidelines, then per-topic literature search
+ *                      to build a reference corpus (no suggestions / consolidation
+ *                      / drafting).
+ * The data layer derives the legacy `mappingOnly` flag as `pipelineMode !== 'full'`,
+ * so every existing `mappingOnly` consumer keeps working unchanged.
+ */
+export type PipelineMode = 'full' | 'mapping-only' | 'rag-corpus';
+
 export type Specialty = {
   slug: string;
   name: string;
   source: 'sheets' | 'xlsx' | 'manual' | 'board' | (string & {});
   sheetId?: string;
   xlsxPath?: string;
-  /** Coverage-mapping-only mode — see `SpecialtyRecord.mappingOnly`. */
+  /** Coverage-mapping-only mode. Derived from `pipelineMode !== 'full'`. */
   mappingOnly?: boolean;
+  /** Which end-to-end workflow this specialty runs — see `PipelineMode`.
+   *  Source of truth; `mappingOnly` is derived from it. Defaults to `'full'`. */
+  pipelineMode?: PipelineMode;
   /** Which content source(s) mapping runs against — see
-   *  `SpecialtyRecord.mappingSource`. Defaults to `'amboss'`. */
+   *  `SpecialtyRecord.mappingSource`. Defaults to `'amboss'`; forced to
+   *  `'guidelines'` for `'rag-corpus'` specialties. */
   mappingSource?: MappingSource;
 };
 
@@ -75,6 +91,9 @@ export type GuidelineCoverageRef = {
 };
 
 export type Code = {
+  /** PocketBase record id. Present on rows sourced from the codes table
+   *  (`CodeTableRow`); used to scope per-code literature search / sources. */
+  id?: string;
   index?: string;
   specialty?: string;
   source?: string;
@@ -109,6 +128,10 @@ export type Code = {
   overallCoverageLevel?: CoverageLevel;
   overallDepthOfCoverage?: number;
   mappingSourceUsed?: MappingSource;
+  // --- RAG-corpus literature search (denormalized) --------------------------
+  litSearchStatus?: string;
+  litSearchSourceCount?: number;
+  litSearchedAt?: number;
   metadata?: unknown;
   fullJsonOutput?: unknown;
 };

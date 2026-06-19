@@ -7,6 +7,7 @@ import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
 import type {
+  CodeLitSourceRecord,
   CoveredSection as CoveredSectionRow,
   NewArticle as NewArticleRow,
   SectionUpdate as SectionUpdateRow,
@@ -106,6 +107,7 @@ export type DetailTarget =
   | 'suggestion-updates'
   | 'suggestion-new-articles'
   | 'guideline-coverage'
+  | 'literature'
   | 'metadata';
 
 const TAB_ORDER: DetailTarget[] = [
@@ -115,12 +117,14 @@ const TAB_ORDER: DetailTarget[] = [
   'suggestion-updates',
   'suggestion-new-articles',
   'guideline-coverage',
+  'literature',
   'metadata',
 ];
 
 // Index of the metadata tab — its events load lazily and it can't be edited.
-const METADATA_TAB_INDEX = 6;
+const METADATA_TAB_INDEX = 7;
 const GUIDELINE_TAB_INDEX = 5;
+const LITERATURE_TAB_INDEX = 6;
 
 function targetToIndex(target: DetailTarget | undefined): number {
   if (!target) return 0;
@@ -494,6 +498,7 @@ export function CodeDetailModal({
               { label: 'Article Updates' },
               { label: 'New Articles' },
               { label: 'Guidelines' },
+              { label: 'Literature' },
               { label: 'Metadata' },
             ]}
           >
@@ -572,6 +577,12 @@ export function CodeDetailModal({
                   guidelines={coveredGuidelines}
                   notes={detailRow.guidelineNotes ?? null}
                   gaps={detailRow.guidelineGaps ?? null}
+                />
+              ) : activeTab === LITERATURE_TAB_INDEX ? (
+                <LiteratureCodePanel
+                  specialtySlug={specialtySlug}
+                  codeId={detailRow.id ?? null}
+                  active={activeTab === LITERATURE_TAB_INDEX}
                 />
               ) : (
                 <MetadataPanel
@@ -703,6 +714,123 @@ function GuidelineCoveragePanel({
         </Stack>
       ) : null}
       {notes || gaps ? <CoverageNotesPanel notes={notes} gaps={gaps} /> : null}
+    </Stack>
+  );
+}
+
+/**
+ * RAG-corpus Literature tab — the reference corpus gathered for this code.
+ * Sources aren't carried on the table row (potentially many per code), so they
+ * are fetched on demand when the tab is shown.
+ */
+function LiteratureCodePanel({
+  specialtySlug,
+  codeId,
+  active,
+}: {
+  specialtySlug: string;
+  codeId: string | null;
+  active: boolean;
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const [sources, setSources] = useState<CodeLitSourceRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active || !codeId) return;
+    let cancelled = false;
+    setState('loading');
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/code-lit-sources?specialtySlug=${encodeURIComponent(specialtySlug)}&codeId=${encodeURIComponent(codeId)}`,
+          { cache: 'no-store' },
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body?.error ?? `HTTP ${res.status}`);
+          setState('error');
+          return;
+        }
+        const json = (await res.json()) as { sources: CodeLitSourceRecord[] };
+        if (cancelled) return;
+        setSources(json.sources ?? []);
+        setState('loaded');
+      } catch (e) {
+        if (cancelled) return;
+        setError(errorMessage(e));
+        setState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, codeId, specialtySlug]);
+
+  if (!codeId) {
+    return (
+      <Text size="s" color="tertiary">
+        No literature gathered for this topic yet.
+      </Text>
+    );
+  }
+  if (state === 'loading' || state === 'idle') {
+    return (
+      <Text size="s" color="tertiary">
+        Loading sources…
+      </Text>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <Text size="s" color="error">
+        {error ?? 'Failed to load sources.'}
+      </Text>
+    );
+  }
+  if (sources.length === 0) {
+    return (
+      <Text size="s" color="tertiary">
+        No literature gathered for this topic yet.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="s">
+      {sources.map((s) => {
+        const href = s.url || (s.doi ? `https://doi.org/${s.doi}` : null);
+        return (
+          <div
+            key={s.id}
+            style={{ borderLeft: '2px solid rgb(124, 58, 237)', paddingLeft: 10 }}
+          >
+            <Inline space="xxs" vAlignItems="center">
+              <Text weight="bold">{s.title}</Text>
+              {typeof s.rank === 'number' ? (
+                <Badge text={`#${s.rank}`} color="purple" />
+              ) : null}
+              {s.sourceType ? (
+                <Badge text={s.sourceType.replace(/_/g, ' ')} color="gray" />
+              ) : null}
+            </Inline>
+            <Inline space="xs" vAlignItems="center">
+              {s.journal ? (
+                <Text size="s" color="secondary">
+                  {s.journal}
+                </Text>
+              ) : null}
+              {href ? (
+                <a href={href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                  {s.doi ? s.doi : 'Link'}
+                </a>
+              ) : null}
+            </Inline>
+            {s.llmSummary ? <Text size="s">{s.llmSummary}</Text> : null}
+          </div>
+        );
+      })}
     </Stack>
   );
 }

@@ -1,3 +1,4 @@
+import type { PipelineMode } from '@/lib/types';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 export const PIPELINE_STAGE_NAMES = [
@@ -12,13 +13,19 @@ export const PIPELINE_STAGE_NAMES = [
 ] as const satisfies readonly StageName[];
 
 /**
- * Stages shown in the high-level Overview strip. `map_suggestions` is a
- * conditional backfill stage (surfaced only on the pipeline dashboard when a
- * specialty has codes mapped without suggestions), so it's excluded here.
- * Mapping-only specialties additionally drop everything downstream of mapping.
+ * Stages shown in the high-level Overview strip, by workflow mode.
+ * `map_suggestions` is a conditional backfill stage (surfaced only on the
+ * pipeline dashboard), so it's excluded here.
+ * - `mapping-only` → preprocessing + mapping, nothing downstream.
+ * - `rag-corpus`   → preprocessing + mapping + literature search (the corpus).
+ * - `full`         → everything except the conditional `map_suggestions`.
  */
-export function visiblePipelineStages(mappingOnly: boolean): readonly StageName[] {
-  if (mappingOnly) return ['extract_codes', 'extract_milestones', 'map_codes'];
+export function visiblePipelineStages(mode: PipelineMode): readonly StageName[] {
+  if (mode === 'mapping-only')
+    return ['extract_codes', 'extract_milestones', 'map_codes'];
+  if (mode === 'rag-corpus') {
+    return ['extract_codes', 'extract_milestones', 'map_codes', 'literature_search'];
+  }
   return PIPELINE_STAGE_NAMES.filter((s) => s !== 'map_suggestions');
 }
 

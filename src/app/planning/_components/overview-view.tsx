@@ -4,6 +4,7 @@ import { Card, CardBox, Stack } from '@amboss/design-system';
 import type { BacklogStats as BacklogStatsData } from '@/lib/data/backlog-stats-compute';
 import type { CoverageStats as CoverageStatsData } from '@/lib/data/coverage-stats-compute';
 import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
+import type { PipelineMode } from '@/lib/types';
 import { CoverageStatistics } from './coverage-statistics';
 import { CoverageStats, type StatItem } from './coverage-stats';
 import { NewContentStatistics } from './new-content-statistics';
@@ -14,20 +15,20 @@ export function OverviewView({
   coverageStats,
   backlogStats,
   stageStates,
-  mappingOnly = false,
+  pipelineMode = 'full',
 }: {
   stats: StatItem[];
   coverageStats: CoverageStatsData;
   backlogStats: BacklogStatsData;
   stageStates?: PipelineStageStates;
-  mappingOnly?: boolean;
+  pipelineMode?: PipelineMode;
 }) {
   return (
     <Stack space="l">
       {stageStates ? (
         <Card outlined>
           <CardBox>
-            <PipelineStageStrip stageStates={stageStates} mappingOnly={mappingOnly} />
+            <PipelineStageStrip stageStates={stageStates} pipelineMode={pipelineMode} />
           </CardBox>
         </Card>
       ) : null}

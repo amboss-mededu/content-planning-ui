@@ -15,15 +15,21 @@ import type { MappingSource } from '@/lib/types';
 export function MappingSourceControl({
   slug,
   mappingSource,
+  disabled = false,
 }: {
   slug: string;
   mappingSource: MappingSource;
+  /** Locked (rag-corpus pins the source to guidelines). Shows guidelines and
+   *  blocks edits. */
+  disabled?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = useState<MappingSource>(mappingSource);
   const [saving, setSaving] = useState(false);
+  const shown = disabled ? 'guidelines' : value;
 
   const onChange = async (next: string) => {
+    if (disabled) return;
     const source: MappingSource =
       next === 'guidelines' || next === 'both' ? next : 'amboss';
     if (source === value) return;
@@ -53,17 +59,27 @@ export function MappingSourceControl({
       label="Mapping source"
       isLabelHidden
       size="s"
-      value={value}
+      value={shown}
       onChange={onChange}
       options={[
-        { name: 'mappingSource', value: 'amboss', label: 'AMBOSS', disabled: saving },
+        {
+          name: 'mappingSource',
+          value: 'amboss',
+          label: 'AMBOSS',
+          disabled: saving || disabled,
+        },
         {
           name: 'mappingSource',
           value: 'guidelines',
           label: 'Guidelines',
-          disabled: saving,
+          disabled: saving || disabled,
         },
-        { name: 'mappingSource', value: 'both', label: 'Both', disabled: saving },
+        {
+          name: 'mappingSource',
+          value: 'both',
+          label: 'Both',
+          disabled: saving || disabled,
+        },
       ]}
     />
   );

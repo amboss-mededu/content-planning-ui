@@ -6,6 +6,7 @@ import {
   type PipelineStageStates,
   visiblePipelineStages,
 } from '@/lib/pipeline-stage-state';
+import type { PipelineMode } from '@/lib/types';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 const STATE_COLOR: Record<PipelineCardState, 'gray' | 'blue' | 'green'> = {
@@ -28,14 +29,14 @@ const STAGE_LABEL: Record<StageName, string> = {
 
 export function PipelineStageStrip({
   stageStates,
-  mappingOnly = false,
+  pipelineMode = 'full',
 }: {
   stageStates?: PipelineStageStates;
-  mappingOnly?: boolean;
+  pipelineMode?: PipelineMode;
 }) {
   return (
     <Inline space="xxs">
-      {visiblePipelineStages(mappingOnly).map((stageName) => {
+      {visiblePipelineStages(pipelineMode).map((stageName) => {
         const state = stageStates?.[stageName] ?? 'not_started';
         const badge = (
           <Badge

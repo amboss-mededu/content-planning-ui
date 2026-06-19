@@ -36,7 +36,7 @@ export function SpecialtyHeader({
         <RefreshButton slug={specialty.slug} />
         <SpecialtySettingsButton
           slug={specialty.slug}
-          mappingOnly={specialty.mappingOnly ?? false}
+          pipelineMode={specialty.pipelineMode ?? 'full'}
           mappingSource={specialty.mappingSource ?? 'amboss'}
         />
       </Inline>

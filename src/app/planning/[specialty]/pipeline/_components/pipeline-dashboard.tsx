@@ -1,6 +1,15 @@
 'use client';
 
-import { Callout, Card, CardBox, H2, Inline, Stack, Text } from '@amboss/design-system';
+import {
+  Button,
+  Callout,
+  Card,
+  CardBox,
+  H2,
+  Inline,
+  Stack,
+  Text,
+} from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import type { PipelineRunRow, StageContext } from '@/lib/data/pipeline';
@@ -8,6 +17,7 @@ import {
   isStageRunningFresh,
   type PipelineStageStates,
 } from '@/lib/pipeline-stage-state';
+import type { PipelineMode } from '@/lib/types';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { BulkDraftArticlesButton } from './bulk-draft-card';
@@ -44,6 +54,7 @@ export function PipelineDashboard({
   stageStates,
   staleBucketCount,
   mappingOnly = false,
+  pipelineMode = 'full',
   mappedWithoutSuggestionsCount = 0,
 }: {
   specialtySlug: string;
@@ -72,6 +83,9 @@ export function PipelineDashboard({
   /** Coverage-mapping-only specialty — hide the suggestion-consolidation and
    *  article-drafting groups. */
   mappingOnly?: boolean;
+  /** Workflow mode. `'rag-corpus'` shows a code-level Literature search card
+   *  (run from the Mapping sheet) instead of the article-drafting groups. */
+  pipelineMode?: PipelineMode;
   /** Codes mapped without suggestions — drives the "Generate suggestions"
    *  backfill card's visibility and count. */
   mappedWithoutSuggestionsCount?: number;
@@ -206,6 +220,32 @@ export function PipelineDashboard({
           ) : null}
         </Stack>
       </PhaseGroup>
+
+      {pipelineMode === 'rag-corpus' ? (
+        <>
+          <H2>Literature corpus</H2>
+          <Stack space="m">
+            <StageCard
+              title="Literature search"
+              description="Build a reference corpus per mapped topic via PubMed/guideline search. Run it from the Mapping sheet (it has the coverage-scope toggle and approval step); progress and results show there and here."
+              stage={stages.literature_search?.stage ?? null}
+              specialtySlug={specialtySlug}
+              stageName="literature_search"
+              events={stages.literature_search?.events ?? []}
+              hasOutput={stageHasOutput.literature_search ?? false}
+              manualState={stageState(stageStates, 'literature_search')}
+            >
+              <Button
+                variant="secondary"
+                size="s"
+                onClick={() => router.push(`/planning/${specialtySlug}/mapping`)}
+              >
+                Open Mapping sheet
+              </Button>
+            </StageCard>
+          </Stack>
+        </>
+      ) : null}
 
       {!mappingOnly ? (
         <>

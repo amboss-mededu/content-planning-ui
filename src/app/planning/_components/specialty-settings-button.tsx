@@ -2,26 +2,29 @@
 
 import { Button, Modal, Stack, Text } from '@amboss/design-system';
 import { useState } from 'react';
-import type { MappingSource } from '@/lib/types';
-import { MappingOnlyToggle } from './mapping-only-toggle';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 import { MappingSourceControl } from './mapping-source-control';
+import { PipelineModeControl } from './pipeline-mode-control';
 
 /**
- * Header "Settings" button → modal holding the per-specialty mapping controls
- * (mapping source + mapping-only mode). Both controls persist on change via
- * their own PATCH handlers, so the modal needs no save button — closing it
- * just dismisses.
+ * Header "Settings" button → modal holding the per-specialty workflow controls
+ * (workflow mode + mapping source). Both controls persist on change via their
+ * own PATCH handlers, so the modal needs no save button — closing it just
+ * dismisses. RAG-corpus pins the source to guidelines, so the source control is
+ * disabled while that mode is selected.
  */
 export function SpecialtySettingsButton({
   slug,
-  mappingOnly,
+  pipelineMode,
   mappingSource,
 }: {
   slug: string;
-  mappingOnly: boolean;
+  pipelineMode: PipelineMode;
   mappingSource: MappingSource;
 }) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<PipelineMode>(pipelineMode);
+  const sourceLocked = mode === 'rag-corpus';
   return (
     <>
       <Button
@@ -44,19 +47,29 @@ export function SpecialtySettingsButton({
           <Modal.Stack>
             <Stack space="l">
               <Stack space="xs">
-                <Text weight="bold">Mapping source</Text>
+                <Text weight="bold">Workflow</Text>
                 <Text size="s" color="secondary">
-                  Which content this specialty's coverage is assessed against — AMBOSS
-                  articles, clinical guidelines, or both.
+                  Mapping only, RAG corpus expansion (mapping → literature search), or
+                  full content pipeline (mapping → articles).
                 </Text>
-                <MappingSourceControl slug={slug} mappingSource={mappingSource} />
+                <PipelineModeControl
+                  slug={slug}
+                  pipelineMode={pipelineMode}
+                  onChange={setMode}
+                />
               </Stack>
               <Stack space="xs">
-                <Text weight="bold">Mapping only</Text>
+                <Text weight="bold">Mapping source</Text>
                 <Text size="s" color="secondary">
-                  Skip consolidation &amp; suggestions — run coverage mapping only.
+                  {sourceLocked
+                    ? 'RAG corpus always assesses coverage against clinical guidelines.'
+                    : "Which content this specialty's coverage is assessed against — AMBOSS articles, clinical guidelines, or both."}
                 </Text>
-                <MappingOnlyToggle slug={slug} mappingOnly={mappingOnly} />
+                <MappingSourceControl
+                  slug={slug}
+                  mappingSource={mappingSource}
+                  disabled={sourceLocked}
+                />
               </Stack>
             </Stack>
           </Modal.Stack>

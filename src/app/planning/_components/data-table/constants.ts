@@ -45,6 +45,13 @@ export const GROUP_STYLES: Record<
     border: 'rgb(124, 92, 184)',
     stripe: 'rgba(124, 92, 184, 0.06)',
   },
+  literature: {
+    label: 'Literature',
+    bg: 'rgb(238, 232, 247)',
+    fg: 'rgb(91, 33, 182)',
+    border: 'rgb(124, 58, 237)',
+    stripe: 'rgba(124, 58, 237, 0.06)',
+  },
   consolidation: {
     label: 'Consolidation',
     bg: 'rgb(231, 235, 247)',

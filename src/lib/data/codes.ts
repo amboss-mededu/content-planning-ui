@@ -53,6 +53,9 @@ export type CodeTableRow = Pick<
   | 'overallCoverageLevel'
   | 'overallDepthOfCoverage'
   | 'mappingSourceUsed'
+  | 'litSearchStatus'
+  | 'litSearchSourceCount'
+  | 'litSearchedAt'
 >;
 
 type CodeTableRowSource = CodeTableRow &
@@ -94,6 +97,9 @@ const CODE_TABLE_FIELDS = [
   'overallCoverageLevel',
   'overallDepthOfCoverage',
   'mappingSourceUsed',
+  'litSearchStatus',
+  'litSearchSourceCount',
+  'litSearchedAt',
   'articlesWhereCoverageIs',
   'existingArticleUpdates',
   'newArticlesNeeded',

@@ -30,11 +30,12 @@ import {
 } from '@/lib/data/pipeline';
 import {
   getSpecialtyRecordAsAdmin,
+  resolvePipelineMode,
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
 import { log } from '@/lib/log';
 import type { GuidelineCoverage, GuidelineRecommendationRef } from '@/lib/pb/types';
-import type { MappingSource } from '@/lib/types';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
 import {
@@ -286,8 +287,11 @@ export type SpecialtyMappingContext = {
   region: string | null;
   language: string | null;
   milestones: string | null;
-  /** Which content source(s) to map against. Empty/unknown → 'amboss'. */
+  /** Which content source(s) to map against. Empty/unknown → 'amboss'.
+   *  Forced to 'guidelines' for rag-corpus specialties. */
   mappingSource: MappingSource;
+  /** The specialty's run mode. */
+  pipelineMode: PipelineMode;
 };
 
 /**
@@ -299,12 +303,17 @@ export async function loadSpecialtyForMapping(
 ): Promise<SpecialtyMappingContext> {
   log('pipeline').info('loadSpecialtyForMapping', { specialtySlug });
   const row = await getSpecialtyRecordAsAdmin(specialtySlug);
+  const pipelineMode = resolvePipelineMode(row);
   const src = row?.mappingSource;
+  const storedSource: MappingSource =
+    src === 'guidelines' || src === 'both' ? src : 'amboss';
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,
     milestones: row?.milestones ?? null,
-    mappingSource: src === 'guidelines' || src === 'both' ? src : 'amboss',
+    // rag-corpus always maps against guidelines.
+    mappingSource: pipelineMode === 'rag-corpus' ? 'guidelines' : storedSource,
+    pipelineMode,
   };
 }
 

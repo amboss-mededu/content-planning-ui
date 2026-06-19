@@ -8,7 +8,8 @@ import type {
   SourceCategoryProgress,
 } from '@/lib/data/categories';
 import type { CodeTableRow } from '@/lib/data/codes';
-import type { MappingSource } from '@/lib/types';
+import type { CodeLitSearchRunRecord } from '@/lib/pb/types';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
 import { CodesActionsToolbar } from './codes-actions-toolbar';
@@ -48,6 +49,8 @@ export function MappingView({
   extractionState,
   mappingOnly = false,
   mappingSource = 'amboss',
+  pipelineMode = 'full',
+  initialLitSearchRuns,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
@@ -68,6 +71,10 @@ export function MappingView({
   /** Which content source(s) this specialty maps against — drives the codes
    *  table coverage columns. */
   mappingSource?: MappingSource;
+  /** The specialty's workflow mode — `'rag-corpus'` adds the Literature column. */
+  pipelineMode?: PipelineMode;
+  /** Initial per-code literature-search runs (rag-corpus), for live progress. */
+  initialLitSearchRuns?: CodeLitSearchRunRecord[];
 }) {
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<MappingMode>(() => {
@@ -115,6 +122,8 @@ export function MappingView({
           initialHasMore={initialHasMore}
           mappingOnly={mappingOnly}
           mappingSource={mappingSource}
+          pipelineMode={pipelineMode}
+          initialLitSearchRuns={initialLitSearchRuns}
         />
       </div>
       {mode === 'consolidation' && !mappingOnly ? (

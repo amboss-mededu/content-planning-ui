@@ -46,6 +46,11 @@ export interface SpecialtyRecord extends PbRecord {
    *  `'amboss'` (default), `'guidelines'`, or `'both'`. Empty/absent reads as
    *  `'amboss'` at the data layer. See `mapCodesWorkflow` dispatch. */
   mappingSource?: string;
+  /** Which end-to-end workflow this specialty runs: `'full'` (default),
+   *  `'mapping-only'`, or `'rag-corpus'`. Source of truth for the run mode;
+   *  the data layer derives `mappingOnly` from it (`pipelineMode !== 'full'`).
+   *  Legacy rows without this fall back to the `mappingOnly` boolean above. */
+  pipelineMode?: string;
   /** Per-tab manual "mark step complete" override, keyed by tab segment
    *  (e.g. `''` for Overview, `'mapping'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */
@@ -115,6 +120,16 @@ export interface CodeRecord extends PbRecord {
   /** Which source(s) produced this row's mapping: 'amboss' | 'guidelines' |
    *  'both'. Stamped at write time so the UI renders the right columns. */
   mappingSourceUsed?: string;
+  // --- RAG-corpus literature search (denormalized) -------------------------
+  // The durable per-code state lives in `codeLitSearchRuns`; these mirror the
+  // latest result onto the code row so the mapping sheet can show a source
+  // count / status without a join. Set by the code-lit-search callback.
+  /** '' | 'running' | 'completed' | 'failed'. */
+  litSearchStatus?: string;
+  /** Number of sources gathered on the last completed run. */
+  litSearchSourceCount?: number;
+  /** ms since epoch — when the last successful lit search completed. */
+  litSearchedAt?: number;
 }
 
 // --- Collection: codeCategories --------------------------------------------
@@ -328,6 +343,70 @@ export interface ArticleLitSearchRunRecord extends PbRecord {
   queryCount?: number;
   candidateCount?: number;
   sourcesCount?: number;
+}
+
+// --- Collection: codeLitSearchRuns -----------------------------------------
+// Code/topic-level mirror of articleLitSearchRuns. Drives the RAG-corpus
+// mapping-sheet literature search; keyed by the code's PB id (`codeId`).
+
+export type CodeLitSearchRunStatus = ArticleLitSearchRunStatus;
+
+export interface CodeLitSearchRunRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the `codes` row this run targets. */
+  codeId: string;
+  /** Human code string (e.g. ICD code) — denormalized for display/debugging. */
+  code?: string;
+  runId?: string;
+  status: CodeLitSearchRunStatus;
+  /** ms since epoch */
+  startedAt?: number;
+  /** ms since epoch */
+  finishedAt?: number;
+  errorMessage?: string;
+  queryCount?: number;
+  candidateCount?: number;
+  sourcesCount?: number;
+}
+
+// --- Collection: codeLitSources --------------------------------------------
+// Code/topic-level mirror of articleSources — the reference corpus gathered
+// per code by the RAG-corpus literature search. Keyed by the code's PB id.
+// (Named `codeLitSources` to avoid colliding with the unrelated `codeSources`
+// registry collection — see `SourceRecord` below.)
+
+export interface CodeLitSourceRecord extends PbRecord {
+  specialtySlug: string;
+  /** PB id of the `codes` row this source is attached to. */
+  codeId: string;
+  /** Human code string — denormalized for display/debugging. */
+  code?: string;
+  ribosomId?: string;
+  title: string;
+  doi?: string;
+  url?: string;
+  journal?: string;
+  journalNlm?: string;
+  sourceType?: ArticleSourceType;
+  predatoryJournalRisk?: PredatoryJournalRisk;
+  totalCitations?: number;
+  impactFactor?: number;
+  rank?: number;
+  subtopics?: string;
+  llmSummary?: string;
+  justification?: string;
+  superseded?: boolean;
+  priority?: number;
+  originalFilename?: string;
+  geminiFilename?: string;
+  uri?: string;
+  mimeType?: string;
+  cortexSourceId?: string;
+  reviewStatus?: SourceReviewStatus;
+  reviewerEmail?: string;
+  /** ms since epoch */
+  reviewedAt?: number;
+  notes?: string;
 }
 
 // --- Collection: articleDraftRuns ------------------------------------------

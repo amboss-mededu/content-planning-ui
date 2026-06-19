@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
-import type { MappingInFlightRecord } from '@/lib/pb/types';
+import type { CodeLitSearchRunRecord, MappingInFlightRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
-import type { Code, MappingSource } from '@/lib/types';
+import type { Code, MappingSource, PipelineMode } from '@/lib/types';
 import { CodesView } from './codes-view';
+import { useCodeLitSearchState } from './use-running-code-lit-search';
+
+const EMPTY_LIT_RUNS: CodeLitSearchRunRecord[] = [];
 
 const PER_PAGE = 200;
 const EMPTY_IN_FLIGHT: MappingInFlightRecord[] = [];
@@ -30,12 +33,16 @@ export function CodesViewClient({
   initialHasMore,
   mappingOnly = false,
   mappingSource = 'amboss',
+  pipelineMode = 'full',
+  initialLitSearchRuns = EMPTY_LIT_RUNS,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   mappingOnly?: boolean;
   mappingSource?: MappingSource;
+  pipelineMode?: PipelineMode;
+  initialLitSearchRuns?: CodeLitSearchRunRecord[];
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -97,6 +104,9 @@ export function CodesViewClient({
     EMPTY_IN_FLIGHT,
     { filter: `specialtySlug = "${slug}"` },
   );
+
+  // Live per-code literature-search run state (rag-corpus mapping sheet).
+  const litSearch = useCodeLitSearchState(slug, initialLitSearchRuns);
 
   const inFlightCodes = useMemo(() => {
     const live = new Set(inFlightRows.map((r) => r.code));
@@ -267,6 +277,8 @@ export function CodesViewClient({
       onPatchRow={patchRow}
       mappingOnly={mappingOnly}
       mappingSource={mappingSource}
+      pipelineMode={pipelineMode}
+      litSearch={litSearch}
     />
   );
 }
