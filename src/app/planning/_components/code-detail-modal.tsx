@@ -2,7 +2,7 @@
 
 import { Badge, Button, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
@@ -12,7 +12,7 @@ import type {
   NewArticle as NewArticleRow,
   SectionUpdate as SectionUpdateRow,
 } from '@/lib/pb/types';
-import type { Code } from '@/lib/types';
+import type { Code, MappingSource, PipelineMode } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
@@ -110,32 +110,69 @@ export type DetailTarget =
   | 'literature'
   | 'metadata';
 
-const TAB_ORDER: DetailTarget[] = [
+type TabDef = { target: DetailTarget; label: string };
+
+/**
+ * The tabs shown depend on the specialty's `mappingSource` + `pipelineMode`,
+ * mirroring the column gating in {@link codes-view}. We build the visible list
+ * up front and switch panels on the active *target* (not a magic index) so the
+ * set can vary without index drift.
+ * - AMBOSS coverage / suggestions are only meaningful when the source includes
+ *   AMBOSS (suggestions additionally require the full pipeline — they're an
+ *   AMBOSS-only concept never produced on guideline-only / non-full runs).
+ * - Guideline-only specialties surface guideline coverage *in* the Coverage tab
+ *   (no separate Guidelines tab); `both` keeps Coverage = articles + a dedicated
+ *   Guidelines tab.
+ * - Literature is the rag-corpus reference corpus.
+ */
+function buildVisibleTabs(opts: {
+  showAmboss: boolean;
+  showGuidelines: boolean;
+  showSuggestions: boolean;
+  showLiterature: boolean;
+}): TabDef[] {
+  const tabs: TabDef[] = [
+    { target: 'coverage-articles', label: 'Coverage' },
+    { target: 'coverage-notes', label: 'Coverage Notes & Gaps' },
+  ];
+  if (opts.showSuggestions) {
+    tabs.push(
+      { target: 'suggestion-improvements', label: 'Improvements' },
+      { target: 'suggestion-updates', label: 'Article Updates' },
+      { target: 'suggestion-new-articles', label: 'New Articles' },
+    );
+  }
+  if (opts.showGuidelines && opts.showAmboss) {
+    tabs.push({ target: 'guideline-coverage', label: 'Guidelines' });
+  }
+  if (opts.showLiterature) {
+    tabs.push({ target: 'literature', label: 'Literature' });
+  }
+  tabs.push({ target: 'metadata', label: 'Metadata' });
+  return tabs;
+}
+
+function targetToIndex(tabs: TabDef[], target: DetailTarget | undefined): number {
+  if (!target) return 0;
+  const i = tabs.findIndex((t) => t.target === target);
+  return i === -1 ? 0 : i;
+}
+
+// Which targets carry an inline editor (full-array / notes replacement).
+const EDITABLE_TARGETS = new Set<DetailTarget>([
   'coverage-articles',
   'coverage-notes',
   'suggestion-improvements',
   'suggestion-updates',
   'suggestion-new-articles',
-  'guideline-coverage',
-  'literature',
-  'metadata',
-];
-
-// Index of the metadata tab — its events load lazily and it can't be edited.
-const METADATA_TAB_INDEX = 7;
-const GUIDELINE_TAB_INDEX = 5;
-const LITERATURE_TAB_INDEX = 6;
-
-function targetToIndex(target: DetailTarget | undefined): number {
-  if (!target) return 0;
-  const i = TAB_ORDER.indexOf(target);
-  return i === -1 ? 0 : i;
-}
+]);
 
 export function CodeDetailModal({
   row,
   target,
   specialtySlug,
+  mappingSource,
+  pipelineMode,
   canEdit,
   lockStatus,
   supportReady = true,
@@ -146,6 +183,8 @@ export function CodeDetailModal({
   row: Code | null;
   target?: DetailTarget;
   specialtySlug: string;
+  mappingSource: MappingSource;
+  pipelineMode: PipelineMode;
   canEdit: boolean;
   lockStatus: string | null;
   supportReady?: boolean;
@@ -156,7 +195,22 @@ export function CodeDetailModal({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState(targetToIndex(target));
+
+  // Source/mode-derived visibility — mirrors the table's column gating so the
+  // modal never shows AMBOSS surfaces for a guidelines-only specialty (or vice
+  // versa) or empty suggestion tabs for non-full / guideline-only runs.
+  const showAmboss = mappingSource !== 'guidelines';
+  const showGuidelines = mappingSource !== 'amboss';
+  const guidelineOnly = mappingSource === 'guidelines';
+  const showSuggestions = pipelineMode === 'full' && showAmboss;
+  const showLiterature = pipelineMode === 'rag-corpus';
+  const visibleTabs = useMemo(
+    () =>
+      buildVisibleTabs({ showAmboss, showGuidelines, showSuggestions, showLiterature }),
+    [showAmboss, showGuidelines, showSuggestions, showLiterature],
+  );
+
+  const [activeTab, setActiveTab] = useState(targetToIndex(visibleTabs, target));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [missingKey, setMissingKey] = useState<ProviderId | null>(null);
@@ -183,7 +237,7 @@ export function CodeDetailModal({
   useEffect(() => {
     // rowKey is read here so a row change with an unchanged target still fires
     void rowKey;
-    setActiveTab(targetToIndex(target));
+    setActiveTab(targetToIndex(visibleTabs, target));
     setError(null);
     setSubmitting(false);
     setMetadata(null);
@@ -193,7 +247,7 @@ export function CodeDetailModal({
     setDetailState(rowKey ? 'loading' : 'idle');
     setDetailError(null);
     setEditingTab(null);
-  }, [target, rowKey]);
+  }, [target, rowKey, visibleTabs]);
 
   useEffect(() => {
     if (!rowKey) return;
@@ -236,8 +290,10 @@ export function CodeDetailModal({
   // effect would otherwise re-trigger the effect, and the previous run's
   // cleanup would flip `cancelled = true` on the in-flight fetch — leaving
   // state stuck at 'loading'. Re-runs on row/tab change cancel cleanly.
+  const activeTarget = visibleTabs[activeTab]?.target ?? 'coverage-articles';
+
   useEffect(() => {
-    if (activeTab !== METADATA_TAB_INDEX || !rowKey) return;
+    if (activeTarget !== 'metadata' || !rowKey) return;
     let cancelled = false;
     setMetadataState('loading');
     setMetadataError(null);
@@ -270,7 +326,7 @@ export function CodeDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, rowKey, specialtySlug]);
+  }, [activeTarget, rowKey, specialtySlug]);
 
   if (!row) return null;
 
@@ -381,9 +437,16 @@ export function CodeDetailModal({
   };
 
   // Edit affordances are offered on the array/notes tabs once the lock is open,
-  // the parent supplied a PATCH handler, and the detail has loaded.
+  // the parent supplied a PATCH handler, and the detail has loaded. For a
+  // guideline-only specialty the Coverage tab shows (read-only) guideline
+  // coverage and the Notes tab shows guideline notes/gaps — neither has an
+  // editor (matching today's read-only Guidelines tab), so they're excluded.
+  const targetEditable =
+    EDITABLE_TARGETS.has(activeTarget) &&
+    (activeTarget !== 'coverage-articles' || showAmboss) &&
+    (activeTarget !== 'coverage-notes' || !guidelineOnly);
   const canEditPanel =
-    canEdit && !!onPatchRow && detailState === 'loaded' && activeTab <= 4;
+    canEdit && !!onPatchRow && detailState === 'loaded' && targetEditable;
   const isEditingPanel = editingTab === activeTab;
 
   return (
@@ -424,48 +487,58 @@ export function CodeDetailModal({
             ) : null}
           </Inline>
 
-          <Inline space="s" vAlignItems="center">
-            {inAmboss === true ? (
-              <Badge text="In AMBOSS" color="green" />
-            ) : inAmboss === false ? (
-              <Badge text="Not in AMBOSS" color="red" />
-            ) : (
-              <Badge text="Unmapped" color="gray" />
-            )}
-            {detailRow.coverageLevel ? (
-              <CoverageBadge level={detailRow.coverageLevel} />
-            ) : null}
-            {typeof detailRow.depthOfCoverage === 'number' ? (
-              <DepthBadge
-                depth={detailRow.depthOfCoverage}
-                level={detailRow.coverageLevel}
-              />
-            ) : null}
-          </Inline>
-
-          {detailRow.isInGuidelines !== undefined ||
-          detailRow.guidelineCoverageLevel ||
-          detailRow.overallCoverageLevel ? (
+          {isUnmapped ? (
             <Inline space="s" vAlignItems="center">
-              {detailRow.isInGuidelines === true ? (
-                <Badge text="In guidelines" color="green" />
-              ) : detailRow.isInGuidelines === false ? (
-                <Badge text="Not in guidelines" color="red" />
-              ) : null}
-              {detailRow.guidelineCoverageLevel ? (
-                <CoverageBadge level={detailRow.guidelineCoverageLevel} />
-              ) : null}
-              {typeof detailRow.guidelineDepthOfCoverage === 'number' ? (
-                <DepthBadge
-                  depth={detailRow.guidelineDepthOfCoverage}
-                  level={detailRow.guidelineCoverageLevel}
-                />
-              ) : null}
-              {detailRow.overallCoverageLevel ? (
-                <Badge text={`Overall: ${detailRow.overallCoverageLevel}`} color="blue" />
-              ) : null}
+              <Badge text="Unmapped" color="gray" />
             </Inline>
-          ) : null}
+          ) : (
+            <>
+              {showAmboss ? (
+                <Inline space="s" vAlignItems="center">
+                  {inAmboss === true ? (
+                    <Badge text="In AMBOSS" color="green" />
+                  ) : (
+                    <Badge text="Not in AMBOSS" color="red" />
+                  )}
+                  {detailRow.coverageLevel ? (
+                    <CoverageBadge level={detailRow.coverageLevel} />
+                  ) : null}
+                  {typeof detailRow.depthOfCoverage === 'number' ? (
+                    <DepthBadge
+                      depth={detailRow.depthOfCoverage}
+                      level={detailRow.coverageLevel}
+                    />
+                  ) : null}
+                </Inline>
+              ) : null}
+              {showGuidelines ? (
+                <Inline space="s" vAlignItems="center">
+                  {detailRow.isInGuidelines === true ? (
+                    <Badge text="In guidelines" color="green" />
+                  ) : detailRow.isInGuidelines === false ? (
+                    <Badge text="Not in guidelines" color="red" />
+                  ) : null}
+                  {detailRow.guidelineCoverageLevel ? (
+                    <CoverageBadge level={detailRow.guidelineCoverageLevel} />
+                  ) : null}
+                  {typeof detailRow.guidelineDepthOfCoverage === 'number' ? (
+                    <DepthBadge
+                      depth={detailRow.guidelineDepthOfCoverage}
+                      level={detailRow.guidelineCoverageLevel}
+                    />
+                  ) : null}
+                </Inline>
+              ) : null}
+              {showAmboss && showGuidelines && detailRow.overallCoverageLevel ? (
+                <Inline space="s" vAlignItems="center">
+                  <Badge
+                    text={`Overall: ${detailRow.overallCoverageLevel}`}
+                    color="blue"
+                  />
+                </Inline>
+              ) : null}
+            </>
+          )}
 
           {error ? (
             <Text size="s" color="error">
@@ -491,16 +564,7 @@ export function CodeDetailModal({
               setActiveTab(i);
               setEditingTab(null);
             }}
-            tabs={[
-              { label: 'Coverage' },
-              { label: 'Coverage Notes & Gaps' },
-              { label: 'Improvements' },
-              { label: 'Article Updates' },
-              { label: 'New Articles' },
-              { label: 'Guidelines' },
-              { label: 'Literature' },
-              { label: 'Metadata' },
-            ]}
+            tabs={visibleTabs.map((t) => ({ label: t.label }))}
           >
             <div>
               {canEditPanel && !isEditingPanel ? (
@@ -514,17 +578,17 @@ export function CodeDetailModal({
                   </Button>
                 </Inline>
               ) : null}
-              {detailLoading && activeTab !== METADATA_TAB_INDEX ? (
+              {detailLoading && activeTarget !== 'metadata' ? (
                 <Text size="s" color="tertiary">
                   Loading code details…
                 </Text>
-              ) : isEditingPanel && activeTab === 0 ? (
+              ) : isEditingPanel && activeTarget === 'coverage-articles' ? (
                 <CoverageArticlesEditor
                   initial={covered as unknown as CoveredSectionRow[]}
                   save={(next) => patchAndReload({ articlesWhereCoverageIs: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 1 ? (
+              ) : isEditingPanel && activeTarget === 'coverage-notes' ? (
                 <TextFieldsEditor
                   fields={[
                     { key: 'notes', label: 'Notes', value: detailRow.notes ?? '' },
@@ -533,7 +597,7 @@ export function CodeDetailModal({
                   save={(next) => patchAndReload({ notes: next.notes, gaps: next.gaps })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 2 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-improvements' ? (
                 <TextFieldsEditor
                   fields={[
                     {
@@ -545,44 +609,58 @@ export function CodeDetailModal({
                   save={(next) => patchAndReload({ improvements: next.improvements })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 3 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-updates' ? (
                 <ArticleUpdatesEditor
                   initial={updates as unknown as SectionUpdateRow[]}
                   save={(next) => patchAndReload({ existingArticleUpdates: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 4 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-new-articles' ? (
                 <NewArticlesEditor
                   initial={newArticles as unknown as NewArticleRow[]}
                   save={(next) => patchAndReload({ newArticlesNeeded: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : activeTab === 0 ? (
-                <CoverageArticlesPanel covered={covered} />
-              ) : activeTab === 1 ? (
+              ) : activeTarget === 'coverage-articles' ? (
+                // Guideline-only specialties have no AMBOSS coverage — show the
+                // guideline coverage here instead of the (empty) article list.
+                guidelineOnly ? (
+                  <GuidelineCoveragePanel
+                    guidelines={coveredGuidelines}
+                    notes={detailRow.guidelineNotes ?? null}
+                    gaps={detailRow.guidelineGaps ?? null}
+                  />
+                ) : (
+                  <CoverageArticlesPanel covered={covered} />
+                )
+              ) : activeTarget === 'coverage-notes' ? (
                 <CoverageNotesPanel
-                  notes={detailRow.notes ?? null}
-                  gaps={detailRow.gaps ?? null}
+                  notes={
+                    (guidelineOnly ? detailRow.guidelineNotes : detailRow.notes) ?? null
+                  }
+                  gaps={
+                    (guidelineOnly ? detailRow.guidelineGaps : detailRow.gaps) ?? null
+                  }
                 />
-              ) : activeTab === 2 ? (
+              ) : activeTarget === 'suggestion-improvements' ? (
                 <SuggestionImprovementsPanel
                   improvements={detailRow.improvements ?? null}
                 />
-              ) : activeTab === 3 ? (
+              ) : activeTarget === 'suggestion-updates' ? (
                 <SuggestionUpdatesPanel updates={updates} />
-              ) : activeTab === 4 ? (
+              ) : activeTarget === 'suggestion-new-articles' ? (
                 <SuggestionNewArticlesPanel newArticles={newArticles} />
-              ) : activeTab === GUIDELINE_TAB_INDEX ? (
+              ) : activeTarget === 'guideline-coverage' ? (
                 <GuidelineCoveragePanel
                   guidelines={coveredGuidelines}
                   notes={detailRow.guidelineNotes ?? null}
                   gaps={detailRow.guidelineGaps ?? null}
                 />
-              ) : activeTab === LITERATURE_TAB_INDEX ? (
+              ) : activeTarget === 'literature' ? (
                 <LiteratureCodePanel
                   specialtySlug={specialtySlug}
                   codeId={detailRow.id ?? null}
-                  active={activeTab === LITERATURE_TAB_INDEX}
+                  active={activeTarget === 'literature'}
                 />
               ) : (
                 <MetadataPanel

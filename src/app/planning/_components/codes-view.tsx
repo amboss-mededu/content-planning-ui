@@ -733,6 +733,8 @@ export function CodesView({
         row={selected?.row ?? null}
         target={selected?.target}
         specialtySlug={specialtySlug}
+        mappingSource={mappingSource}
+        pipelineMode={pipelineMode}
         canEdit={canEdit}
         lockStatus={lockStatus}
         supportReady={supportReady}
