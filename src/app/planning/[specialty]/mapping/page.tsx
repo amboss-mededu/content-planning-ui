@@ -5,7 +5,11 @@ import {
 } from '@/lib/data/categories';
 import { listCodeLitSearchRuns } from '@/lib/data/code-lit-search-runs';
 import { listCodeSources } from '@/lib/data/code-sources';
-import { listCodeCount, listCodeTableRowsPage } from '@/lib/data/codes';
+import {
+  listCodeCount,
+  listCodeTableRowsPage,
+  listInFlightCodes,
+} from '@/lib/data/codes';
 import { getExtractionState } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { MappingView } from '../../_components/mapping-view';
@@ -35,6 +39,7 @@ async function MappingData({ slug }: { slug: string }) {
     extraction,
     specialty,
     litSearchRuns,
+    inFlightCodes,
   ] = await Promise.all([
     listCodeTableRowsPage(slug, 1, 200),
     listCategoryOrchestration(slug),
@@ -44,6 +49,7 @@ async function MappingData({ slug }: { slug: string }) {
     getExtractionState(slug),
     getSpecialty(slug),
     listCodeLitSearchRuns(slug),
+    listInFlightCodes(slug),
   ]);
 
   return (
@@ -60,6 +66,7 @@ async function MappingData({ slug }: { slug: string }) {
       mappingSource={specialty?.mappingSource ?? 'amboss'}
       pipelineMode={specialty?.pipelineMode ?? 'full'}
       initialLitSearchRuns={litSearchRuns}
+      initialInFlightCodes={inFlightCodes}
     />
   );
 }

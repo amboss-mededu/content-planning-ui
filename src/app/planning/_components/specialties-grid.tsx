@@ -1,10 +1,44 @@
 'use client';
 
-import { Callout, Card, CardBox, Column, Columns, Stack } from '@amboss/design-system';
+import {
+  Callout,
+  Card,
+  CardBox,
+  Column,
+  Columns,
+  H3,
+  Stack,
+} from '@amboss/design-system';
 import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
-import type { Specialty } from '@/lib/types';
+import type { PipelineMode, Specialty } from '@/lib/types';
 import { SkeletonLine } from './skeleton';
 import { SpecialtyCard } from './specialty-card';
+
+/** Card-grid groupings, in display order. Specialties bucket on `pipelineMode`
+ *  (legacy/undefined → `full`). */
+const GROUPS: { mode: PipelineMode; label: string }[] = [
+  { mode: 'full', label: 'Full pipeline' },
+  { mode: 'rag-corpus', label: 'RAG corpus' },
+  { mode: 'mapping-only', label: 'Mapping only' },
+];
+
+function CardGrid({
+  specialties,
+  stageStatesBySlug,
+}: {
+  specialties: Specialty[];
+  stageStatesBySlug: Record<string, PipelineStageStates>;
+}) {
+  return (
+    <Columns gap="m" vAlignItems="stretch">
+      {specialties.map((s) => (
+        <Column key={s.slug} size={[12, 6, 4]}>
+          <SpecialtyCard specialty={s} stageStates={stageStatesBySlug[s.slug]} />
+        </Column>
+      ))}
+    </Columns>
+  );
+}
 
 export function SpecialtiesGridView({
   specialties,
@@ -21,14 +55,26 @@ export function SpecialtiesGridView({
       />
     );
   }
+
+  const groups = GROUPS.map((g) => ({
+    ...g,
+    items: specialties.filter((s) => (s.pipelineMode ?? 'full') === g.mode),
+  })).filter((g) => g.items.length > 0);
+
+  // Single mode in play → keep the flat grid (no redundant heading).
+  if (groups.length <= 1) {
+    return <CardGrid specialties={specialties} stageStatesBySlug={stageStatesBySlug} />;
+  }
+
   return (
-    <Columns gap="m" vAlignItems="stretch">
-      {specialties.map((s) => (
-        <Column key={s.slug} size={[12, 6, 4]}>
-          <SpecialtyCard specialty={s} stageStates={stageStatesBySlug[s.slug]} />
-        </Column>
+    <Stack space="l">
+      {groups.map((g) => (
+        <Stack key={g.mode} space="s">
+          <H3>{g.label}</H3>
+          <CardGrid specialties={g.items} stageStatesBySlug={stageStatesBySlug} />
+        </Stack>
       ))}
-    </Columns>
+    </Stack>
   );
 }
 
