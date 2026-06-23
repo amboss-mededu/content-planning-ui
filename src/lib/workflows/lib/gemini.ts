@@ -19,22 +19,37 @@ import { generateText, stepCountIs } from 'ai';
 import { z } from 'zod';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { CurriculumMeta } from '@/lib/types';
+import { normalizeCurriculumMeta } from './curriculum-meta';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
 import { estimateCostUsd } from './pricing';
 import {
+  DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT,
+  DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_EXTRACT_SYSTEM_PROMPT,
   DEFAULT_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_MILESTONES_SYSTEM_PROMPT,
+  DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT,
 } from './prompts';
 import type { ContentInput } from './sources';
 
 export {
+  DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT,
+  DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_EXTRACT_SYSTEM_PROMPT,
   DEFAULT_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_MILESTONES_SYSTEM_PROMPT,
+  DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT,
 };
+
+/**
+ * Which prompt family the extraction steps use. `'curriculum'` swaps in the
+ * curriculum-mapping prompts (year→phase→block hierarchy, time dimension,
+ * student milestones); `'default'` keeps the clinical content-outline prompts.
+ */
+export type ExtractionVariant = 'default' | 'curriculum';
 
 // --- shared schemas ---------------------------------------------------------
 
@@ -45,6 +60,9 @@ export const ExtractedCodeSchema = z.object({
   description: z.string().optional(),
   source: z.string().optional(),
   metadata: z.unknown().optional(),
+  // Curriculum-mapping time dimension; normalized upstream by
+  // `normalizeCurriculumMeta` before it reaches here. Absent for other modes.
+  curriculumMeta: z.custom<CurriculumMeta>().optional(),
 });
 
 export type RawExtractedCode = z.infer<typeof ExtractedCodeSchema>;
@@ -56,6 +74,29 @@ const IdentifyModulesElementSchema = z.object({ category: z.string() });
 const ExtractCodesElementSchema = z.object({
   category: z.string(),
   description: z.string(),
+});
+
+// Curriculum-mapping extract element: codes carry a loosely-typed `curriculum`
+// timing object. Every timing field is permissive (the model may emit numbers
+// as strings) and `normalizeCurriculumMeta` does the real coercion. The whole
+// `curriculum` object is `.catch(undefined)` so a malformed timing blob falls
+// back to "no timing" rather than dropping the entire batch's array parse.
+const CurriculumExtractElementSchema = z.object({
+  category: z.string(),
+  description: z.string(),
+  curriculum: z
+    .object({
+      year: z.union([z.number(), z.string()]).nullish(),
+      phase: z.string().nullish(),
+      startMonth: z.union([z.string(), z.number()]).nullish(),
+      endMonth: z.union([z.string(), z.number()]).nullish(),
+      durationWeeks: z.union([z.number(), z.string()]).nullish(),
+      durationLabel: z.string().nullish(),
+      cadence: z.string().nullish(),
+    })
+    .passthrough()
+    .nullish()
+    .catch(undefined),
 });
 
 /**
@@ -192,19 +233,31 @@ export async function identifyModulesForUrl(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  variant?: ExtractionVariant;
 }): Promise<{ category: string }[]> {
   log('pipeline').info('identifyModulesForUrl', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_IDENTIFY_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT
+      : DEFAULT_IDENTIFY_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = `
+  const userMessage = isCurriculum
+    ? `
+Please load and analyze the curriculum outline at the following URL(s):
+${input.url}
+
+Identify the curriculum hierarchy (Academic Year → Phase → Course/Block) and return exclusively a JSON array of chunks, with no other text.
+`.trim()
+    : `
 Please load and analyze the content at the following URL(s):
 ${input.url}
 
@@ -296,20 +349,39 @@ export async function extractCodesForCategory(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
-}): Promise<{ category: string; description: string }[]> {
+  variant?: ExtractionVariant;
+}): Promise<
+  { category: string; description: string; curriculumMeta?: CurriculumMeta }[]
+> {
   log('pipeline').info('extractCodesForCategory', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
     category: input.category,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_EXTRACT_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT
+      : DEFAULT_EXTRACT_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = `
+  const userMessage = isCurriculum
+    ? `
+You are extracting curriculum blocks for the medical curriculum: ${input.specialtySlug}.
+
+Please load and analyze the curriculum outline at the following URL(s):
+${input.url}
+
+Extract only the courses / blocks / rotations / longitudinal threads in this chunk, with their time dimension, and do not invent anything not explicitly shown:
+${input.category}
+
+Return exclusively a JSON array, with no other text.
+`.trim()
+    : `
 You are extracting medical items for the medical specialty: ${input.specialtySlug}.
 
 Please load and analyze the content at the following URL(s):
@@ -350,7 +422,17 @@ Extract all medical items from the document and return exclusively an output in 
       temperature: 1,
     });
 
-    const codes = parseJsonArray(result.text, ExtractCodesElementSchema);
+    const codes: {
+      category: string;
+      description: string;
+      curriculumMeta?: CurriculumMeta;
+    }[] = isCurriculum
+      ? parseJsonArray(result.text, CurriculumExtractElementSchema).map((el) => ({
+          category: el.category,
+          description: el.description,
+          curriculumMeta: normalizeCurriculumMeta(el.curriculum),
+        }))
+      : parseJsonArray(result.text, ExtractCodesElementSchema);
     const durationMs = Date.now() - started;
     const usage = {
       inputTokens: result.usage?.inputTokens,
@@ -413,19 +495,33 @@ export async function extractMilestonesForInputs(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  variant?: ExtractionVariant;
 }): Promise<string> {
   log('pipeline').info('extractMilestonesForInputs', {
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_MILESTONES_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT
+      : DEFAULT_MILESTONES_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
   const urlList = input.inputs.map((i) => `- ${i.url} (source: ${i.source})`).join('\n');
-  const userMessage = `
+  const userMessage = isCurriculum
+    ? `
+You are extracting medical-student milestones for the curriculum: ${input.specialtySlug}.
+
+Please load and analyze the content at the following URL(s):
+${urlList}
+
+Extract the medical-student entrustable professional activities / competencies from the document and return them as the structured nested JSON described.
+`.trim()
+    : `
 You are extracting milestones for the medical specialty: ${input.specialtySlug}.
 
 Please load and analyze the content at the following URL(s):

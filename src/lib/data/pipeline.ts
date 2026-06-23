@@ -16,6 +16,7 @@ import type {
 } from '@/lib/pb/types';
 import { derivePhase, type Phase } from '@/lib/phase';
 import { isStageRunningFresh } from '@/lib/pipeline-stage-state';
+import type { CurriculumMeta } from '@/lib/types';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 // Pipeline runs/stages/events live in PocketBase. RSC pages and route
@@ -768,6 +769,7 @@ export type ExtractedCodeInput = {
   description?: string;
   source?: string;
   metadata?: unknown;
+  curriculumMeta?: CurriculumMeta;
 };
 
 export async function writeExtractedCodesAsAdmin(args: {
@@ -809,6 +811,7 @@ export type ExtractedCodeRow = {
   description?: string;
   source?: string;
   metadata?: unknown;
+  curriculumMeta?: CurriculumMeta;
 };
 
 export async function listExtractedCodesForRunAsAdmin(
@@ -828,6 +831,7 @@ export async function listExtractedCodesForRunAsAdmin(
     description: r.description,
     source: r.source,
     metadata: r.metadata,
+    curriculumMeta: r.curriculumMeta,
   }));
 }
 

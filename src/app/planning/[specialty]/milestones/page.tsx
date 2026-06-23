@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { listMilestoneSources } from '@/lib/data/milestone-sources';
 import { getExtractionState } from '@/lib/data/pipeline';
-import { getMilestones } from '@/lib/data/specialties';
+import { getMilestones, getSpecialty } from '@/lib/data/specialties';
 import { MilestonesView } from '../../_components/milestones-view';
 import { SkeletonLine } from '../../_components/skeleton';
 
@@ -19,10 +19,11 @@ export default async function MilestonesPage({
 }
 
 async function MilestonesData({ slug }: { slug: string }) {
-  const [milestones, milestoneSources, extraction] = await Promise.all([
+  const [milestones, milestoneSources, extraction, specialty] = await Promise.all([
     getMilestones(slug),
     listMilestoneSources(),
     getExtractionState(slug),
+    getSpecialty(slug),
   ]);
   return (
     <MilestonesView
@@ -30,6 +31,7 @@ async function MilestonesData({ slug }: { slug: string }) {
       specialtySlug={slug}
       sources={milestoneSources.map((s) => ({ slug: s.slug, name: s.name }))}
       extractionState={extraction.extract_milestones}
+      pipelineMode={specialty?.pipelineMode}
     />
   );
 }

@@ -223,6 +223,7 @@ export async function writeExtractedCodes(
     description: c.description,
     source: c.source,
     metadata: c.metadata,
+    curriculumMeta: c.curriculumMeta,
   }));
   // PocketBase has no per-call write limits the way Convex does, but inserts
   // run sequentially per row. Chunking keeps progress visible in logs.
@@ -240,8 +241,8 @@ export async function writeExtractedCodes(
 /**
  * Promote approved rows from the extracted_codes staging table into the
  * canonical `codes` collection. Mapping-specific fields stay unset so the
- * mapping stage can fill them in. metadata is dropped — the codes schema
- * doesn't carry it.
+ * mapping stage can fill them in. `metadata` is dropped — the codes schema
+ * doesn't carry it — but `curriculumMeta` (the time dimension) is promoted.
  */
 export async function promoteExtractedCodesToCodes(
   runId: string,
@@ -256,6 +257,7 @@ export async function promoteExtractedCodesToCodes(
     consolidationCategory: s.consolidationCategory ?? undefined,
     description: s.description ?? undefined,
     source: s.source ?? undefined,
+    curriculumMeta: s.curriculumMeta ?? undefined,
   }));
   const chunkSize = 25;
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -288,7 +290,8 @@ export type SpecialtyMappingContext = {
   language: string | null;
   milestones: string | null;
   /** Which content source(s) to map against. Empty/unknown → 'amboss'.
-   *  Forced to 'guidelines' for rag-corpus specialties. */
+   *  Forced to 'guidelines' for rag-corpus and to 'amboss' for
+   *  curriculum-mapping specialties. */
   mappingSource: MappingSource;
   /** The specialty's run mode. */
   pipelineMode: PipelineMode;
@@ -307,12 +310,19 @@ export async function loadSpecialtyForMapping(
   const src = row?.mappingSource;
   const storedSource: MappingSource =
     src === 'guidelines' || src === 'both' ? src : 'amboss';
+  // Modes that pin the mapping source override whatever is stored:
+  // rag-corpus → guidelines, curriculum-mapping → amboss.
+  const mappingSource: MappingSource =
+    pipelineMode === 'rag-corpus'
+      ? 'guidelines'
+      : pipelineMode === 'curriculum-mapping'
+        ? 'amboss'
+        : storedSource;
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,
     milestones: row?.milestones ?? null,
-    // rag-corpus always maps against guidelines.
-    mappingSource: pipelineMode === 'rag-corpus' ? 'guidelines' : storedSource,
+    mappingSource,
     pipelineMode,
   };
 }

@@ -56,6 +56,7 @@ export type CodeTableRow = Pick<
   | 'litSearchStatus'
   | 'litSearchSourceCount'
   | 'litSearchedAt'
+  | 'curriculumMeta'
 >;
 
 type CodeTableRowSource = CodeTableRow &
@@ -100,6 +101,7 @@ const CODE_TABLE_FIELDS = [
   'litSearchStatus',
   'litSearchSourceCount',
   'litSearchedAt',
+  'curriculumMeta',
   'articlesWhereCoverageIs',
   'existingArticleUpdates',
   'newArticlesNeeded',

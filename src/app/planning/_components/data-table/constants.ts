@@ -24,6 +24,13 @@ export const GROUP_STYLES: Record<
     border: 'rgba(15, 23, 42, 0.25)',
     stripe: 'rgba(15, 23, 42, 0.035)',
   },
+  curriculum: {
+    label: 'Curriculum',
+    bg: 'rgb(247, 240, 228)',
+    fg: 'rgb(120, 80, 20)',
+    border: 'rgb(180, 130, 50)',
+    stripe: 'rgba(180, 130, 50, 0.06)',
+  },
   coverage: {
     label: 'AMBOSS coverage',
     bg: 'rgb(228, 241, 234)',

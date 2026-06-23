@@ -19,6 +19,7 @@ import { SpecialtyCard } from './specialty-card';
 const GROUPS: { mode: PipelineMode; label: string }[] = [
   { mode: 'full', label: 'Full pipeline' },
   { mode: 'rag-corpus', label: 'RAG corpus' },
+  { mode: 'curriculum-mapping', label: 'Curriculum mapping' },
   { mode: 'mapping-only', label: 'Mapping only' },
 ];
 

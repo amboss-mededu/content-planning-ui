@@ -20,21 +20,54 @@ export const COVERAGE_LEVELS = [
 ] as const;
 export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 
+/**
+ * Year-based coverage scale for `curriculum-mapping` specialties — how deeply
+ * AMBOSS covers a curriculum topic relative to the medical-school year a
+ * student reaches it. Parallel to {@link COVERAGE_LEVELS}; the curriculum
+ * mapping agent emits one of these (score 0–5: none→year-1…→residency-ready).
+ */
+export const CURRICULUM_COVERAGE_LEVELS = [
+  'none',
+  'year-1',
+  'year-2',
+  'year-3',
+  'year-4',
+  'residency-ready',
+] as const;
+export type CurriculumCoverageLevel = (typeof CURRICULUM_COVERAGE_LEVELS)[number];
+
+/** Every coverage-level string any mode can produce — for validators/lookups
+ *  that must accept a level from any pipeline mode. */
+export const ALL_COVERAGE_LEVELS = [
+  ...COVERAGE_LEVELS,
+  'year-1',
+  'year-2',
+  'year-3',
+  'year-4',
+  'residency-ready',
+] as const;
+export type AnyCoverageLevel = (typeof ALL_COVERAGE_LEVELS)[number];
+
 // --- Specialty -------------------------------------------------------------
 
 export type MappingSource = 'amboss' | 'guidelines' | 'both';
 
 /**
  * Which end-to-end workflow a specialty runs, chosen at initialization:
- * - `'full'`         — map → suggestions → consolidate → articles (today's default).
- * - `'mapping-only'` — coverage mapping only; nothing downstream.
- * - `'rag-corpus'`   — map against guidelines, then per-topic literature search
- *                      to build a reference corpus (no suggestions / consolidation
- *                      / drafting).
+ * - `'full'`              — map → suggestions → consolidate → articles (today's default).
+ * - `'mapping-only'`      — coverage mapping only; nothing downstream.
+ * - `'rag-corpus'`        — map against guidelines, then per-topic literature search
+ *                           to build a reference corpus (no suggestions / consolidation
+ *                           / drafting).
+ * - `'curriculum-mapping'`— extract curriculum blocks (with a time dimension) from a
+ *                           curriculum outline/PDF and map their coverage against
+ *                           AMBOSS only; milestones target medical students. Like
+ *                           `mapping-only`, nothing downstream (no suggestions /
+ *                           consolidation / drafting).
  * The data layer derives the legacy `mappingOnly` flag as `pipelineMode !== 'full'`,
  * so every existing `mappingOnly` consumer keeps working unchanged.
  */
-export type PipelineMode = 'full' | 'mapping-only' | 'rag-corpus';
+export type PipelineMode = 'full' | 'mapping-only' | 'rag-corpus' | 'curriculum-mapping';
 
 export type Specialty = {
   slug: string;
@@ -49,8 +82,36 @@ export type Specialty = {
   pipelineMode?: PipelineMode;
   /** Which content source(s) mapping runs against — see
    *  `SpecialtyRecord.mappingSource`. Defaults to `'amboss'`; forced to
-   *  `'guidelines'` for `'rag-corpus'` specialties. */
+   *  `'guidelines'` for `'rag-corpus'` and to `'amboss'` for
+   *  `'curriculum-mapping'` specialties. */
   mappingSource?: MappingSource;
+};
+
+// --- Curriculum mapping ----------------------------------------------------
+
+export type CurriculumCadence = 'weekly' | 'monthly' | 'longitudinal';
+
+/**
+ * Time dimension for one curriculum block / course / longitudinal item,
+ * extracted from a curriculum outline. Curricula vary, so timing is captured
+ * in priority order — calendar start/end month → duration → cadence — and
+ * every field is optional. The extractor records whatever the source provides
+ * and never synthesizes missing values.
+ */
+export type CurriculumMeta = {
+  /** Program/academic year when stated (1, 2, 3, 4 …). */
+  year?: number;
+  /** Phase/stage label: 'Pre-Clerkship' | 'Clerkship' | 'Post-Clerkship' | source label. */
+  phase?: string;
+  /** Calendar month when the source places the block on a timeline, e.g. 'Sep' / '2026-09'. */
+  startMonth?: string;
+  endMonth?: string;
+  /** Numeric duration in weeks when stated. */
+  durationWeeks?: number;
+  /** Verbatim timeframe text: '15 wks', 'Month 1–6', '6 months'. */
+  durationLabel?: string;
+  /** Longitudinal recurring items (start/end usually absent). */
+  cadence?: CurriculumCadence;
 };
 
 // --- Code ------------------------------------------------------------------
@@ -106,7 +167,9 @@ export type Code = {
   articlesWhereCoverageIs?: ArticleCoverageRef[];
   notes?: string;
   gaps?: string;
-  coverageLevel?: CoverageLevel;
+  /** Clinician scale (none→specialist) for most modes; year-based
+   *  (none→residency-ready) for `curriculum-mapping`. */
+  coverageLevel?: AnyCoverageLevel;
   depthOfCoverage?: number;
   coverageArticleCount?: number;
   coverageSectionCount?: number;
@@ -125,13 +188,15 @@ export type Code = {
   guidelineCount?: number;
   guidelineRecommendationCount?: number;
   // --- Overall coverage track + provenance ----------------------------------
-  overallCoverageLevel?: CoverageLevel;
+  overallCoverageLevel?: AnyCoverageLevel;
   overallDepthOfCoverage?: number;
   mappingSourceUsed?: MappingSource;
   // --- RAG-corpus literature search (denormalized) --------------------------
   litSearchStatus?: string;
   litSearchSourceCount?: number;
   litSearchedAt?: number;
+  // --- Curriculum-mapping time dimension ------------------------------------
+  curriculumMeta?: CurriculumMeta;
   metadata?: unknown;
   fullJsonOutput?: unknown;
 };

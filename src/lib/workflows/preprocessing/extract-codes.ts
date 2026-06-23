@@ -20,6 +20,7 @@ import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { CurriculumMeta, PipelineMode } from '@/lib/types';
 import {
   markStageCompleted,
   markStageFailed,
@@ -29,7 +30,11 @@ import {
   writeExtractedCodes,
 } from '../lib/db-writes';
 import { aggregateStageMetrics, logEvent } from '../lib/events';
-import { extractCodesForCategory, identifyModulesForUrl } from '../lib/gemini';
+import {
+  type ExtractionVariant,
+  extractCodesForCategory,
+  identifyModulesForUrl,
+} from '../lib/gemini';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import type { ContentInput } from '../lib/sources';
@@ -46,6 +51,9 @@ export type ExtractCodesInput = {
   extractInstructions?: string;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  /** Specialty run mode. `'curriculum-mapping'` swaps in the curriculum
+   *  extraction prompts and captures a per-block time dimension. */
+  pipelineMode?: PipelineMode;
 };
 
 export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void> {
@@ -54,6 +62,9 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
   });
+
+  const variant: ExtractionVariant =
+    input.pipelineMode === 'curriculum-mapping' ? 'curriculum' : 'default';
 
   try {
     await markStageRunning(input.runId, 'extract_codes');
@@ -78,6 +89,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             stage: 'extract_codes',
             model: input.model,
             apiKeys: input.apiKeys,
+            variant,
           }),
         ),
       );
@@ -103,6 +115,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       description: string;
       source: string;
       consolidationCategory: string;
+      curriculumMeta?: CurriculumMeta;
     }[] = [];
     for (const batch of chunk(perUrlCategories, CATEGORY_CONCURRENCY)) {
       const results = await Promise.all(
@@ -117,6 +130,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             stage: 'extract_codes',
             model: input.model,
             apiKeys: input.apiKeys,
+            variant,
           }),
         ),
       );
@@ -137,6 +151,8 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
         consolidationCategory: c.consolidationCategory,
         description: c.description,
         source: c.source,
+        // Only curriculum runs populate this; default extraction leaves it unset.
+        curriculumMeta: c.curriculumMeta,
       };
     });
 

@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { COVERAGE_LEVELS } from '@/lib/types';
+import { ALL_COVERAGE_LEVELS } from '@/lib/types';
 
 const SectionRefSchema = z
   .object({
@@ -68,7 +68,7 @@ export const CodePatchBody = z
     category: z.string().optional(),
     consolidationCategory: z.string().optional(),
     isInAMBOSS: z.boolean().optional(),
-    coverageLevel: z.enum(COVERAGE_LEVELS).optional(),
+    coverageLevel: z.enum(ALL_COVERAGE_LEVELS).optional(),
     depthOfCoverage: z.number().min(0).optional(),
     notes: z.string().optional(),
     gaps: z.string().optional(),

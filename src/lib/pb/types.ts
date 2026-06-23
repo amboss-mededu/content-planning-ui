@@ -6,6 +6,10 @@
 // Record envelope: every PocketBase record has these system fields in
 // addition to the user-defined ones.
 
+// `curriculumMeta` is stored verbatim as JSON (no storage/UI transform), so
+// both the record and the UI `Code` share the one `CurriculumMeta` shape.
+import type { CurriculumMeta } from '@/lib/types';
+
 export interface PbRecord {
   id: string;
   created: string; // ISO 8601
@@ -130,6 +134,10 @@ export interface CodeRecord extends PbRecord {
   litSearchSourceCount?: number;
   /** ms since epoch — when the last successful lit search completed. */
   litSearchedAt?: number;
+  // --- Curriculum-mapping time dimension -----------------------------------
+  // Populated only for `curriculum-mapping` specialties; the curriculum
+  // extractor records year/phase/timing for each block. JSON field.
+  curriculumMeta?: CurriculumMeta;
 }
 
 // --- Collection: codeCategories --------------------------------------------
@@ -702,6 +710,8 @@ export interface ExtractedCodeRecord extends PbRecord {
   description?: string;
   source?: string;
   metadata?: unknown;
+  /** Curriculum block timing — staged here, promoted to `codes.curriculumMeta`. */
+  curriculumMeta?: CurriculumMeta;
   createdAt: number;
 }
 

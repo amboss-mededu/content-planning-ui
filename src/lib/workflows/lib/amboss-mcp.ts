@@ -25,12 +25,14 @@ import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-li
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { CoveredSection } from '@/lib/pb/types';
+import type { PipelineMode } from '@/lib/types';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
 import { estimateCostUsd } from './pricing';
 import {
   applySuggestionVisibility,
+  DEFAULT_CURRICULUM_MAPPING_SYSTEM_PROMPT,
   DEFAULT_MAPPING_SYSTEM_PROMPT,
   DEFAULT_MAPPING_USER_MESSAGE_TEMPLATE,
   DEFAULT_SUGGESTIONS_ONLY_SYSTEM_PROMPT,
@@ -207,13 +209,22 @@ function composeSystem(
   milestones: string,
   additional?: string,
   includeSuggestions = true,
+  pipelineMode?: PipelineMode,
 ): string {
+  // Curriculum-mapping specialties score AMBOSS coverage on the year-based
+  // student scale, so they use a dedicated prompt (no suggestion block); every
+  // other mode uses the clinician none→specialist prompt.
+  const template =
+    pipelineMode === 'curriculum-mapping'
+      ? DEFAULT_CURRICULUM_MAPPING_SYSTEM_PROMPT
+      : DEFAULT_MAPPING_SYSTEM_PROMPT;
   // The system-prompt source contains a literal `${milestones}` placeholder
   // we substitute at runtime — the string on the next line is deliberate. The
   // suggestion-specific spans are then kept or dropped per `includeSuggestions`
-  // (mapping-only specialties run coverage only).
+  // (mapping-only specialties run coverage only; the curriculum prompt has no
+  // such spans, so `applySuggestionVisibility` is a no-op tidy there).
   const base = applySuggestionVisibility(
-    DEFAULT_MAPPING_SYSTEM_PROMPT.replace(
+    template.replace(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional placeholder
       '${milestones}',
       milestones || 'N/A',
@@ -414,6 +425,9 @@ export async function mapAndValidateCode(input: {
   /** When false (mapping-only specialties) the suggestion portion of the
    *  prompt is dropped, so the model returns coverage only. */
   includeSuggestions?: boolean;
+  /** Selects the mapping prompt variant. `'curriculum-mapping'` scores coverage
+   *  on the year-based student scale; everything else uses the clinician scale. */
+  pipelineMode?: PipelineMode;
   checkAgainstLibrary: boolean;
   runId: string;
   stage: StageName;
@@ -504,6 +518,7 @@ export async function mapAndValidateCode(input: {
     input.milestones,
     input.additionalInstructions,
     input.includeSuggestions ?? true,
+    input.pipelineMode,
   );
   const userBase = composeUser({
     specialty: input.specialty,

@@ -6,9 +6,14 @@ import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import {
   COVERAGE_LEVELS,
   type Code,
+  CURRICULUM_COVERAGE_LEVELS,
   type MappingSource,
   type PipelineMode,
 } from '@/lib/types';
+import {
+  formatDurationOrCadence,
+  formatTimeframe,
+} from '@/lib/workflows/lib/curriculum-meta';
 import { CancelCodeLitSearchButton } from './cancel-code-lit-search-button';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
@@ -46,6 +51,7 @@ function countCoveredSections(items: unknown): number {
 
 // Coverage level has a natural rank (none < student < ... < specialist) that
 // we use for sort ordering, which lines up with how the model scores depth.
+// Includes the curriculum-mapping year scale (disjoint keys) so both modes sort.
 const COVERAGE_RANK: Record<string, number> = {
   none: 0,
   student: 1,
@@ -53,6 +59,12 @@ const COVERAGE_RANK: Record<string, number> = {
   'advanced-resident': 3,
   attending: 4,
   specialist: 5,
+  // curriculum (year-based) scale
+  'year-1': 1,
+  'year-2': 2,
+  'year-3': 3,
+  'year-4': 4,
+  'residency-ready': 5,
 };
 
 // Predefined filter choices for boolean / categorical columns. Numeric columns
@@ -116,6 +128,7 @@ export function CodesView({
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
   const ragCorpus = pipelineMode === 'rag-corpus';
+  const curriculum = pipelineMode === 'curriculum-mapping';
 
   const [selected, setSelected] = useState<{
     row: Code;
@@ -150,6 +163,19 @@ export function CodesView({
     // column renders as plain display and the row-level click opens the modal.
     const edit = (cfg: EditableConfig<Code>): EditableConfig<Code> | undefined =>
       editingEnabled ? cfg : undefined;
+
+    // The AMBOSS coverage column scores on the year scale for curriculum
+    // specialties and the clinician scale otherwise. (Guideline/Overall columns
+    // never appear in curriculum mode, so they keep the clinician options.)
+    const ambossCoverageFilterOptions = curriculum
+      ? CURRICULUM_COVERAGE_LEVELS.map((v) => ({ value: v, label: v }))
+      : COVERAGE_FILTER_OPTIONS;
+    const ambossCoverageEditOptions = curriculum
+      ? [
+          { value: '', label: '—' },
+          ...CURRICULUM_COVERAGE_LEVELS.map((v) => ({ value: v, label: v })),
+        ]
+      : COVERAGE_EDIT_OPTIONS;
 
     const cols: Column<Code>[] = [
       {
@@ -288,8 +314,9 @@ export function CodesView({
       {
         key: 'coverage',
         label: 'Coverage',
-        description:
-          'Audience level this code is covered for in AMBOSS (none → student → … → specialist)',
+        description: curriculum
+          ? 'Year level this topic is covered for in AMBOSS (none → year-1 → … → residency-ready)'
+          : 'Audience level this code is covered for in AMBOSS (none → student → … → specialist)',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (!r.coverageLevel) return <EmptyChip />;
@@ -297,7 +324,7 @@ export function CodesView({
         },
         editable: edit({
           kind: 'select',
-          options: COVERAGE_EDIT_OPTIONS,
+          options: ambossCoverageEditOptions,
           getValue: (r) => r.coverageLevel ?? '',
           onSave: (r, next) =>
             next === '' ? Promise.resolve() : save(r, { coverageLevel: next }),
@@ -310,10 +337,10 @@ export function CodesView({
           r.coverageLevel ? (COVERAGE_RANK[r.coverageLevel] ?? -1) : null,
         type: 'number',
         // For the filter dropdown we want the level *string* (not the rank),
-        // shown as a fixed list of the six levels rather than unique values.
+        // shown as a fixed list of levels rather than unique values.
         filterable: true,
         filterValue: (r) => r.coverageLevel ?? undefined,
-        filterOptions: COVERAGE_FILTER_OPTIONS,
+        filterOptions: ambossCoverageFilterOptions,
         group: 'coverage',
       },
       {
@@ -628,6 +655,64 @@ export function CodesView({
       },
     ];
 
+    // --- Curriculum time-dimension columns (curriculum-mapping only) -------
+    const curriculumCols: Column<Code>[] = [
+      {
+        key: 'curriculumYear',
+        label: 'Year',
+        description: 'Academic/program year this curriculum block belongs to',
+        width: 70,
+        align: 'center',
+        render: (r) =>
+          r.curriculumMeta?.year != null ? (
+            <Badge text={`Y${r.curriculumMeta.year}`} color="blue" />
+          ) : (
+            <EmptyChip />
+          ),
+        accessor: (r) => r.curriculumMeta?.year ?? null,
+        type: 'number',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumPhase',
+        label: 'Phase',
+        description: 'Curriculum phase (e.g. Pre-Clerkship, Clerkship, Post-Clerkship)',
+        width: 150,
+        render: (r) => <span>{r.curriculumMeta?.phase ?? '—'}</span>,
+        accessor: (r) => r.curriculumMeta?.phase ?? null,
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumTimeframe',
+        label: 'Timeframe',
+        description:
+          'Calendar months this block spans, when the curriculum places it on a timeline',
+        width: 120,
+        align: 'center',
+        render: (r) => <span>{formatTimeframe(r.curriculumMeta)}</span>,
+        accessor: (r) => formatTimeframe(r.curriculumMeta),
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumDuration',
+        label: 'Duration / cadence',
+        description:
+          'Block duration (weeks) or, for longitudinal threads, how often they recur',
+        width: 140,
+        align: 'center',
+        render: (r) => <span>{formatDurationOrCadence(r.curriculumMeta)}</span>,
+        accessor: (r) => formatDurationOrCadence(r.curriculumMeta),
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+    ];
+
     // Compose the column set by source. AMBOSS coverage columns are dropped
     // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
     // guideline + overall columns slot in between AMBOSS coverage and the
@@ -656,6 +741,14 @@ export function CodesView({
     // RAG-corpus appends the Literature corpus column (source is pinned to
     // guidelines, so AMBOSS columns are already absent via the branch above).
     if (ragCorpus) result = [...result, ...litCols];
+
+    // Curriculum-mapping slots the time-dimension columns in right after the
+    // metadata columns (source is pinned to AMBOSS, so coverage columns remain).
+    if (curriculum) {
+      const metaCols = result.filter((c) => c.group === 'metadata');
+      const rest = result.filter((c) => c.group !== 'metadata');
+      result = [...metaCols, ...curriculumCols, ...rest];
+    }
     return result;
   }, [
     onOpenDetail,
@@ -666,6 +759,7 @@ export function CodesView({
     mappingOnly,
     mappingSource,
     ragCorpus,
+    curriculum,
     litSearch,
     specialtySlug,
   ]);

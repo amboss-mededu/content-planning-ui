@@ -13,7 +13,7 @@
 
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
-import type { MappingSource } from '@/lib/types';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 import { type MappingOutput, mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -125,6 +125,7 @@ async function mapAndWriteOne(input: {
   checkAgainstLibrary: boolean;
   includeSuggestions: boolean;
   mappingSource: MappingSource;
+  pipelineMode: PipelineMode;
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
@@ -146,6 +147,7 @@ async function mapAndWriteOne(input: {
           additionalInstructions: input.additionalInstructions,
           checkAgainstLibrary: input.checkAgainstLibrary,
           includeSuggestions: input.includeSuggestions,
+          pipelineMode: input.pipelineMode,
           runId: input.runId,
           stage: 'map_codes',
           primaryModel: input.primaryModel,
@@ -285,6 +287,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               checkAgainstLibrary: input.checkAgainstLibrary,
               includeSuggestions: input.includeSuggestions ?? true,
               mappingSource,
+              pipelineMode: spec.pipelineMode,
               primaryModel: input.primaryModel,
               backupModel: input.backupModel,
               apiKeys: input.apiKeys,

@@ -23,7 +23,11 @@ import type {
   NewArticle as NewArticleRow,
   SectionUpdate as SectionUpdateRow,
 } from '@/lib/pb/types';
-import type { Code, MappingSource, PipelineMode } from '@/lib/types';
+import type { Code, CurriculumMeta, MappingSource, PipelineMode } from '@/lib/types';
+import {
+  formatDurationOrCadence,
+  formatTimeframe,
+} from '@/lib/workflows/lib/curriculum-meta';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { submitCodeLitSourceReview } from '../[specialty]/actions';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
@@ -121,6 +125,7 @@ export type DetailTarget =
   | 'suggestion-new-articles'
   | 'guideline-coverage'
   | 'literature'
+  | 'curriculum'
   | 'metadata';
 
 type TabDef = { target: DetailTarget; label: string };
@@ -143,6 +148,7 @@ function buildVisibleTabs(opts: {
   showGuidelines: boolean;
   showSuggestions: boolean;
   showLiterature: boolean;
+  showCurriculum: boolean;
 }): TabDef[] {
   const tabs: TabDef[] = [
     { target: 'coverage-articles', label: 'Coverage' },
@@ -160,6 +166,9 @@ function buildVisibleTabs(opts: {
   }
   if (opts.showLiterature) {
     tabs.push({ target: 'literature', label: 'Literature' });
+  }
+  if (opts.showCurriculum) {
+    tabs.push({ target: 'curriculum', label: 'Curriculum' });
   }
   tabs.push({ target: 'metadata', label: 'Metadata' });
   return tabs;
@@ -217,10 +226,17 @@ export function CodeDetailModal({
   const guidelineOnly = mappingSource === 'guidelines';
   const showSuggestions = pipelineMode === 'full' && showAmboss;
   const showLiterature = pipelineMode === 'rag-corpus';
+  const showCurriculum = pipelineMode === 'curriculum-mapping';
   const visibleTabs = useMemo(
     () =>
-      buildVisibleTabs({ showAmboss, showGuidelines, showSuggestions, showLiterature }),
-    [showAmboss, showGuidelines, showSuggestions, showLiterature],
+      buildVisibleTabs({
+        showAmboss,
+        showGuidelines,
+        showSuggestions,
+        showLiterature,
+        showCurriculum,
+      }),
+    [showAmboss, showGuidelines, showSuggestions, showLiterature, showCurriculum],
   );
 
   const [activeTab, setActiveTab] = useState(targetToIndex(visibleTabs, target));
@@ -676,6 +692,8 @@ export function CodeDetailModal({
                   code={detailRow.code ?? ''}
                   active={activeTarget === 'literature'}
                 />
+              ) : activeTarget === 'curriculum' ? (
+                <CurriculumPanel meta={detailRow.curriculumMeta ?? null} />
               ) : (
                 <MetadataPanel
                   state={metadataState}
@@ -693,6 +711,36 @@ export function CodeDetailModal({
         onClose={() => setMissingKey(null)}
       />
     </Modal>
+  );
+}
+
+function CurriculumRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Inline space="s" vAlignItems="center">
+      <div style={{ minWidth: 150 }}>
+        <Text weight="bold">{label}</Text>
+      </div>
+      <Text>{value}</Text>
+    </Inline>
+  );
+}
+
+/** Read-only view of a curriculum block's time dimension (curriculum-mapping). */
+function CurriculumPanel({ meta }: { meta: CurriculumMeta | null }) {
+  if (!meta || Object.keys(meta).length === 0) {
+    return (
+      <Text size="s" color="tertiary">
+        No curriculum timing captured for this block.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="s">
+      <CurriculumRow label="Year" value={meta.year != null ? `Year ${meta.year}` : '—'} />
+      <CurriculumRow label="Phase" value={meta.phase ?? '—'} />
+      <CurriculumRow label="Timeframe" value={formatTimeframe(meta)} />
+      <CurriculumRow label="Duration / cadence" value={formatDurationOrCadence(meta)} />
+    </Stack>
   );
 }
 

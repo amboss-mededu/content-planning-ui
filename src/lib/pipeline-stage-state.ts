@@ -16,12 +16,13 @@ export const PIPELINE_STAGE_NAMES = [
  * Stages shown in the high-level Overview strip, by workflow mode.
  * `map_suggestions` is a conditional backfill stage (surfaced only on the
  * pipeline dashboard), so it's excluded here.
- * - `mapping-only` → preprocessing + mapping, nothing downstream.
- * - `rag-corpus`   → preprocessing + mapping + literature search (the corpus).
- * - `full`         → everything except the conditional `map_suggestions`.
+ * - `mapping-only`       → preprocessing + mapping, nothing downstream.
+ * - `curriculum-mapping` → preprocessing + mapping (AMBOSS only), nothing downstream.
+ * - `rag-corpus`         → preprocessing + mapping + literature search (the corpus).
+ * - `full`               → everything except the conditional `map_suggestions`.
  */
 export function visiblePipelineStages(mode: PipelineMode): readonly StageName[] {
-  if (mode === 'mapping-only')
+  if (mode === 'mapping-only' || mode === 'curriculum-mapping')
     return ['extract_codes', 'extract_milestones', 'map_codes'];
   if (mode === 'rag-corpus') {
     return ['extract_codes', 'extract_milestones', 'map_codes', 'literature_search'];

@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
       extractInstructions: extractInstructions ?? undefined,
       model,
       apiKeys,
+      pipelineMode: spec.pipelineMode,
     }).catch((e) => {
       log('extract').error('Phase1 unhandled rejection', e);
     }),
