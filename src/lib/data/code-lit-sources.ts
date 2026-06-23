@@ -153,6 +153,32 @@ export async function bulkInsertCodeLitSourcesAsAdmin(
 }
 
 /**
+ * Set (or clear) the human review decision on one code-literature source.
+ * Admin-side mirror of {@link setArticleSourceReviewAsAdmin}; `null` clears the
+ * decision (returns the source to the "Searched" pane).
+ */
+export async function setCodeLitSourceReviewAsAdmin(
+  sourceId: string,
+  status: 'approved' | 'rejected' | null,
+  reviewerEmail: string,
+): Promise<void> {
+  const pb = await createAdminClient();
+  if (status === null) {
+    await pb.collection('codeLitSources').update(sourceId, {
+      reviewStatus: '',
+      reviewerEmail: '',
+      reviewedAt: null,
+    });
+    return;
+  }
+  await pb.collection('codeLitSources').update(sourceId, {
+    reviewStatus: status,
+    reviewerEmail,
+    reviewedAt: Date.now(),
+  });
+}
+
+/**
  * Stamp the denormalized lit-search result fields onto the `codes` row so the
  * mapping sheet can show a source count / status without a separate query.
  * Tolerates a missing code row (deleted between dispatch and callback).

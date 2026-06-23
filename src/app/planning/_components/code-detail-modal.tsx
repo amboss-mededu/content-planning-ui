@@ -1,11 +1,22 @@
 'use client';
 
-import { Badge, Button, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Inline,
+  Modal,
+  SegmentedControl,
+  Stack,
+  Tabs,
+  Text,
+} from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
+import { log } from '@/lib/log';
 import type {
   CodeLitSourceRecord,
   CoveredSection as CoveredSectionRow,
@@ -14,6 +25,7 @@ import type {
 } from '@/lib/pb/types';
 import type { Code, MappingSource, PipelineMode } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
+import { submitCodeLitSourceReview } from '../[specialty]/actions';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
 import {
@@ -847,6 +859,45 @@ function LiteratureCodePanel({
     };
   }, [active, codeId, specialtySlug]);
 
+  const [pane, setPane] = useState<'searched' | 'approved'>('searched');
+  const [submittingIds, setSubmittingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  // Human-in-the-loop approval. Optimistically flip the source locally so it
+  // moves panes at once, persist via the server action, and revert on failure
+  // (mirrors SourceDecisionCell in article-manager/sources-table.tsx).
+  const toggleApproval = useCallback(
+    async (source: CodeLitSourceRecord, approve: boolean) => {
+      if (submittingIds.has(source.id)) return;
+      const next = approve ? 'approved' : null;
+      const prev = source.reviewStatus ?? null;
+      setSubmittingIds((s) => new Set(s).add(source.id));
+      setSources((rows) =>
+        rows.map((r) =>
+          r.id === source.id ? { ...r, reviewStatus: next ?? undefined } : r,
+        ),
+      );
+      try {
+        await submitCodeLitSourceReview(specialtySlug, source.id, next);
+      } catch (e) {
+        setSources((rows) =>
+          rows.map((r) =>
+            r.id === source.id ? { ...r, reviewStatus: prev ?? undefined } : r,
+          ),
+        );
+        log('code-lit-source-review').error('submit failed', e);
+      } finally {
+        setSubmittingIds((s) => {
+          const copy = new Set(s);
+          copy.delete(source.id);
+          return copy;
+        });
+      }
+    },
+    [specialtySlug, submittingIds],
+  );
+
   if (!codeId) {
     return (
       <Text size="s" color="tertiary">
@@ -875,40 +926,90 @@ function LiteratureCodePanel({
       </Text>
     );
   }
+  const approved = sources.filter((s) => s.reviewStatus === 'approved');
+  const searched = sources.filter((s) => s.reviewStatus !== 'approved');
+  const list = pane === 'approved' ? approved : searched;
+
+  const renderCard = (s: CodeLitSourceRecord) => {
+    const href = s.url || (s.doi ? `https://doi.org/${s.doi}` : null);
+    const isApproved = s.reviewStatus === 'approved';
+    const reviewerHandle = s.reviewerEmail ? s.reviewerEmail.split('@')[0] : '';
+    const stamp = s.reviewedAt ? new Date(s.reviewedAt).toLocaleString() : '';
+    return (
+      <div
+        key={s.id}
+        style={{ borderLeft: '2px solid rgb(124, 58, 237)', paddingLeft: 10 }}
+      >
+        <Inline space="xs" vAlignItems="center">
+          <Checkbox
+            label={isApproved ? 'Approved' : 'Approve'}
+            size="s"
+            checked={isApproved}
+            disabled={submittingIds.has(s.id)}
+            onChange={(e) => toggleApproval(s, e.target.checked)}
+          />
+          {isApproved && reviewerHandle ? (
+            <Text size="xs" color="tertiary">
+              by {reviewerHandle}
+              {stamp ? ` · ${stamp}` : ''}
+            </Text>
+          ) : null}
+        </Inline>
+        <Inline space="xxs" vAlignItems="center">
+          <Text weight="bold">{s.title}</Text>
+          {typeof s.rank === 'number' ? (
+            <Badge text={`#${s.rank}`} color="purple" />
+          ) : null}
+          {s.sourceType ? (
+            <Badge text={s.sourceType.replace(/_/g, ' ')} color="gray" />
+          ) : null}
+        </Inline>
+        <Inline space="xs" vAlignItems="center">
+          {s.journal ? (
+            <Text size="s" color="secondary">
+              {s.journal}
+            </Text>
+          ) : null}
+          {href ? (
+            <a href={href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+              {s.doi ? s.doi : 'Link'}
+            </a>
+          ) : null}
+        </Inline>
+        {s.llmSummary ? <Text size="s">{s.llmSummary}</Text> : null}
+      </div>
+    );
+  };
+
   return (
     <Stack space="s">
-      {sources.map((s) => {
-        const href = s.url || (s.doi ? `https://doi.org/${s.doi}` : null);
-        return (
-          <div
-            key={s.id}
-            style={{ borderLeft: '2px solid rgb(124, 58, 237)', paddingLeft: 10 }}
-          >
-            <Inline space="xxs" vAlignItems="center">
-              <Text weight="bold">{s.title}</Text>
-              {typeof s.rank === 'number' ? (
-                <Badge text={`#${s.rank}`} color="purple" />
-              ) : null}
-              {s.sourceType ? (
-                <Badge text={s.sourceType.replace(/_/g, ' ')} color="gray" />
-              ) : null}
-            </Inline>
-            <Inline space="xs" vAlignItems="center">
-              {s.journal ? (
-                <Text size="s" color="secondary">
-                  {s.journal}
-                </Text>
-              ) : null}
-              {href ? (
-                <a href={href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
-                  {s.doi ? s.doi : 'Link'}
-                </a>
-              ) : null}
-            </Inline>
-            {s.llmSummary ? <Text size="s">{s.llmSummary}</Text> : null}
-          </div>
-        );
-      })}
+      <SegmentedControl
+        label="Literature review"
+        isLabelHidden
+        value={pane}
+        onChange={(v) => setPane(v === 'approved' ? 'approved' : 'searched')}
+        options={[
+          {
+            name: 'lit-pane',
+            value: 'searched',
+            label: `Searched (${searched.length})`,
+          },
+          {
+            name: 'lit-pane',
+            value: 'approved',
+            label: `Approved (${approved.length})`,
+          },
+        ]}
+      />
+      {list.length === 0 ? (
+        <Text size="s" color="tertiary">
+          {pane === 'approved'
+            ? 'No approved literature yet — approve sources from the Searched tab.'
+            : 'No literature awaiting review.'}
+        </Text>
+      ) : (
+        list.map(renderCard)
+      )}
     </Stack>
   );
 }

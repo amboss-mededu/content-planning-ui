@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Button, Inline, Stack, Text } from '@amboss/design-system';
+import { Badge, Inline, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import {
@@ -11,7 +11,6 @@ import {
 } from '@/lib/types';
 import { CancelCodeLitSearchButton } from './cancel-code-lit-search-button';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
-import { CodeLitSearchRunModal } from './code-lit-search-run-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { RunCodeLitSearchRowButton } from './run-code-lit-search-row-button';
@@ -117,21 +116,6 @@ export function CodesView({
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
   const ragCorpus = pipelineMode === 'rag-corpus';
-  const [runModalOpen, setRunModalOpen] = useState(false);
-
-  // Lit-search scope counts (rag-corpus bulk action). Computed from the loaded
-  // rows for the approval modal; the server recomputes the authoritative set.
-  const litCounts = useMemo(() => {
-    if (!ragCorpus) return { mapped: 0, below: 0 };
-    let mapped = 0;
-    let below = 0;
-    for (const c of codes) {
-      if ((c.mappedAt ?? 0) <= 0) continue;
-      mapped++;
-      if (coverageScore(c) < LIT_SEARCH_THRESHOLD) below++;
-    }
-    return { mapped, below };
-  }, [codes, ragCorpus]);
 
   const [selected, setSelected] = useState<{
     row: Code;
@@ -695,22 +679,6 @@ export function CodesView({
           to a single bucket that's rebuilding are blocked only for that bucket.
         </Text>
       ) : null}
-      {ragCorpus ? (
-        <Inline alignItems="spaceBetween" vAlignItems="center" fullWidth>
-          <Text size="s" color="secondary">
-            {litCounts.below} topic{litCounts.below === 1 ? '' : 's'} below adequate
-            coverage (&lt; {LIT_SEARCH_THRESHOLD}) · {litCounts.mapped} mapped
-          </Text>
-          <Button
-            variant="primary"
-            size="s"
-            onClick={() => setRunModalOpen(true)}
-            disabled={litCounts.mapped === 0}
-          >
-            Run literature search
-          </Button>
-        </Inline>
-      ) : null}
       <DataTable
         rows={codes}
         columns={columns}
@@ -720,12 +688,19 @@ export function CodesView({
         // The whole row opens the detail modal; editable cells and the
         // deep-link chips stop propagation so they don't trip this.
         onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
+        // For rag-corpus, also surface how many mapped topics sit below the
+        // lit-search coverage threshold, folded into the row-count parenthetical.
         countAddendum={(filtered) => {
-          const mapped = filtered.reduce(
-            (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
-            0,
-          );
-          return `${mapped.toLocaleString()} mapped`;
+          let mapped = 0;
+          let below = 0;
+          for (const c of filtered) {
+            if ((c.mappedAt ?? 0) <= 0) continue;
+            mapped++;
+            if (ragCorpus && coverageScore(c) < LIT_SEARCH_THRESHOLD) below++;
+          }
+          return ragCorpus
+            ? `${mapped.toLocaleString()} mapped, ${below.toLocaleString()} < ${LIT_SEARCH_THRESHOLD}`
+            : `${mapped.toLocaleString()} mapped`;
         }}
         storageKey={`codes-table:${specialtySlug}`}
       />
@@ -742,14 +717,6 @@ export function CodesView({
         onPatchRow={onPatchRow}
         onClose={() => setSelected(null)}
       />
-      {ragCorpus && runModalOpen ? (
-        <CodeLitSearchRunModal
-          slug={specialtySlug}
-          belowThresholdCount={litCounts.below}
-          mappedCount={litCounts.mapped}
-          onClose={() => setRunModalOpen(false)}
-        />
-      ) : null}
     </Stack>
   );
 }

@@ -55,6 +55,7 @@ import {
   listCodesForPicker,
   type PickerCode,
 } from '@/lib/data/categories';
+import { setCodeLitSourceReviewAsAdmin } from '@/lib/data/code-lit-sources';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import {
   addReviewComment,
@@ -171,6 +172,21 @@ export async function submitSourceReview(
 ): Promise<void> {
   const user = await getCurrentUser();
   await setArticleSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+/**
+ * Per-source editor decision for a RAG-corpus code-literature source. Pass
+ * `status: null` to clear the decision (returns it to the "Searched" pane).
+ * Reviewer email is taken from the current session.
+ */
+export async function submitCodeLitSourceReview(
+  slug: string,
+  sourceId: string,
+  status: 'approved' | 'rejected' | null,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await setCodeLitSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
   revalidatePath(`/planning/${slug}`, 'layout');
 }
 
