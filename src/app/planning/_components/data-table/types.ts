@@ -31,6 +31,9 @@ export interface EditableConfig<T> {
 export type ColumnGroup =
   | 'metadata'
   | 'coverage'
+  | 'guideline'
+  | 'overall'
+  | 'literature'
   | 'consolidation'
   | 'suggestions'
   | 'actions';

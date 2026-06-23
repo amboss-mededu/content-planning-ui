@@ -497,6 +497,9 @@ function DraftArticleDialog({
             value={fileMetadata}
             resize="vertical"
             rows={6}
+            // The DS Textarea defaults maxLength to 256, which silently
+            // truncates a long priority list. Lift it well past any real list.
+            maxLength={50000}
             onChange={(e) => setFileMetadata(e.target.value)}
           />
           <Stack space="xxs">

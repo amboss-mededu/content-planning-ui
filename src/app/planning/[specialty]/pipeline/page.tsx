@@ -107,6 +107,7 @@ async function PipelineData({ slug }: { slug: string }) {
 
   const staleBucketCount = orchestration.filter((o) => o.isStale).length;
   const mappingOnly = specialty?.mappingOnly ?? false;
+  const pipelineMode = specialty?.pipelineMode ?? 'full';
 
   const stages = {
     extract_codes: stageCtxs.extract_codes ?? null,
@@ -210,6 +211,7 @@ async function PipelineData({ slug }: { slug: string }) {
       stageStates={stageStates}
       staleBucketCount={staleBucketCount}
       mappingOnly={mappingOnly}
+      pipelineMode={pipelineMode}
       mappedWithoutSuggestionsCount={mappedWithoutSuggestionsCount}
     />
   );

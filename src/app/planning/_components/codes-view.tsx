@@ -1,12 +1,28 @@
 'use client';
 
-import { Badge, Stack, Text } from '@amboss/design-system';
+import { Badge, Inline, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
-import { COVERAGE_LEVELS, type Code } from '@/lib/types';
+import {
+  COVERAGE_LEVELS,
+  type Code,
+  type MappingSource,
+  type PipelineMode,
+} from '@/lib/types';
+import { CancelCodeLitSearchButton } from './cancel-code-lit-search-button';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
+import { LitSearchProgressBadge } from './lit-search-progress-badge';
+import { RunCodeLitSearchRowButton } from './run-code-lit-search-row-button';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
+import type { CodeLitSearchSnapshot } from './use-running-code-lit-search';
+
+/** Coverage score (0–5) below which a topic is in the default lit-search scope. */
+const LIT_SEARCH_THRESHOLD = 3;
+
+function coverageScore(r: Code): number {
+  return r.overallDepthOfCoverage ?? r.depthOfCoverage ?? 0;
+}
 
 /** Edit one code via the parent's PATCH handler (table merges the returned
  *  row). Returns void to satisfy the data-table's `EditableConfig.onSave`. */
@@ -71,6 +87,9 @@ export function CodesView({
   loadState,
   onPatchRow,
   mappingOnly = false,
+  mappingSource = 'amboss',
+  pipelineMode = 'full',
+  litSearch,
 }: {
   codes: Code[];
   specialtySlug: string;
@@ -86,8 +105,17 @@ export function CodesView({
   /** Mapping-only specialties hide the suggestion columns (Updates /
    *  New articles) and the Consolidation-category column. */
   mappingOnly?: boolean;
+  /** Which content source(s) this specialty maps against. Drives which
+   *  coverage column groups (AMBOSS / Guideline / Overall) are shown. */
+  mappingSource?: MappingSource;
+  /** The specialty's workflow mode. `'rag-corpus'` adds the Literature column +
+   *  the bulk "Run literature search" action. */
+  pipelineMode?: PipelineMode;
+  /** Live per-code literature-search run state (rag-corpus only). */
+  litSearch?: CodeLitSearchSnapshot;
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
+  const ragCorpus = pipelineMode === 'rag-corpus';
 
   const [selected, setSelected] = useState<{
     row: Code;
@@ -406,13 +434,241 @@ export function CodesView({
         group: 'suggestions',
       },
     ];
+
+    // --- Guideline coverage columns (source includes guidelines) -----------
+    const guidelineCols: Column<Code>[] = [
+      {
+        key: 'inGuidelines',
+        label: 'In guidelines',
+        description: 'Whether this code is addressed by a clinical guideline',
+        width: 120,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (mapped && r.isInGuidelines === true)
+            return <Badge text="Yes" color="green" />;
+          if (mapped && r.isInGuidelines === false)
+            return <Badge text="No" color="red" />;
+          return <EmptyChip />;
+        },
+        accessor: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return null;
+          return r.isInGuidelines === true ? 1 : 0;
+        },
+        type: 'boolean',
+        filterable: true,
+        filterValue: (r) => {
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped) return undefined;
+          return r.isInGuidelines === true ? 'yes' : 'no';
+        },
+        filterOptions: IN_AMBOSS_FILTER_OPTIONS,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelineCoverage',
+        label: 'Guideline coverage',
+        description:
+          'Audience level this code is covered for by clinical guidelines (none → … → specialist)',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          if (!r.guidelineCoverageLevel) return <EmptyChip />;
+          return <CoverageBadge level={r.guidelineCoverageLevel} />;
+        },
+        width: 160,
+        align: 'center',
+        accessor: (r) =>
+          r.guidelineCoverageLevel
+            ? (COVERAGE_RANK[r.guidelineCoverageLevel] ?? -1)
+            : null,
+        type: 'number',
+        filterable: true,
+        filterValue: (r) => r.guidelineCoverageLevel ?? undefined,
+        filterOptions: COVERAGE_FILTER_OPTIONS,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelineDepth',
+        label: 'Guideline score',
+        description: 'Numeric depth-of-coverage score from clinical guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped || r.guidelineDepthOfCoverage == null) return <EmptyChip />;
+          return (
+            <DepthBadge
+              depth={r.guidelineDepthOfCoverage}
+              level={r.guidelineCoverageLevel}
+            />
+          );
+        },
+        width: 120,
+        align: 'center',
+        accessor: (r) =>
+          (r.mappedAt ?? 0) > 0 ? (r.guidelineDepthOfCoverage ?? null) : null,
+        type: 'number',
+        filterable: true,
+        group: 'guideline',
+      },
+      {
+        key: 'guidelinesWhereCoverageIs',
+        label: 'Guidelines',
+        description: 'Clinical guidelines (and recommendations) that cover this code',
+        width: 180,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const guidelines = r.guidelineCount ?? r.guidelinesWhereCoverageIs?.length ?? 0;
+          const recs = r.guidelineRecommendationCount ?? 0;
+          if (guidelines === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={
+                recs > 0
+                  ? `${guidelines} guideline${guidelines === 1 ? '' : 's'} · ${recs} rec${recs === 1 ? '' : 's'}`
+                  : `${guidelines} guideline${guidelines === 1 ? '' : 's'}`
+              }
+              tone="guideline"
+              onClick={() => onOpenDetail(r, 'guideline-coverage')}
+            />
+          );
+        },
+        accessor: (r) => r.guidelineCount ?? r.guidelinesWhereCoverageIs?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        group: 'guideline',
+      },
+    ];
+
+    // --- Overall coverage columns (source = 'both') ------------------------
+    const overallCols: Column<Code>[] = [
+      {
+        key: 'overallCoverage',
+        label: 'Overall coverage',
+        description: 'Combined coverage level across AMBOSS and guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          if (!r.overallCoverageLevel) return <EmptyChip />;
+          return <CoverageBadge level={r.overallCoverageLevel} />;
+        },
+        width: 160,
+        align: 'center',
+        accessor: (r) =>
+          r.overallCoverageLevel ? (COVERAGE_RANK[r.overallCoverageLevel] ?? -1) : null,
+        type: 'number',
+        filterable: true,
+        filterValue: (r) => r.overallCoverageLevel ?? undefined,
+        filterOptions: COVERAGE_FILTER_OPTIONS,
+        group: 'overall',
+      },
+      {
+        key: 'overallDepth',
+        label: 'Overall score',
+        description: 'Combined depth-of-coverage score across AMBOSS and guidelines',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const mapped = (r.mappedAt ?? 0) > 0;
+          if (!mapped || r.overallDepthOfCoverage == null) return <EmptyChip />;
+          return (
+            <DepthBadge depth={r.overallDepthOfCoverage} level={r.overallCoverageLevel} />
+          );
+        },
+        width: 120,
+        align: 'center',
+        accessor: (r) =>
+          (r.mappedAt ?? 0) > 0 ? (r.overallDepthOfCoverage ?? null) : null,
+        type: 'number',
+        filterable: true,
+        group: 'overall',
+      },
+    ];
+
+    // --- Literature corpus column (rag-corpus only) ------------------------
+    const litCols: Column<Code>[] = [
+      {
+        key: 'litSources',
+        label: 'Literature',
+        description:
+          'Reference corpus gathered for this topic via literature search (PubMed/guidelines)',
+        width: 220,
+        align: 'center',
+        render: (r) => {
+          const codeId = r.id ?? '';
+          if ((r.mappedAt ?? 0) <= 0) return <EmptyChip />;
+          if (codeId && litSearch?.inFlight.has(codeId)) {
+            const run = litSearch.latestByCodeId.get(codeId);
+            return (
+              <Inline space="xxs" vAlignItems="center">
+                <LitSearchProgressBadge />
+                {run ? <CancelCodeLitSearchButton runId={run.id} /> : null}
+              </Inline>
+            );
+          }
+          const count = r.litSearchSourceCount ?? 0;
+          if (count > 0) {
+            return (
+              <ChipButton
+                label={`${count} source${count === 1 ? '' : 's'}`}
+                tone="literature"
+                onClick={() => onOpenDetail(r, 'literature')}
+              />
+            );
+          }
+          const err = codeId ? litSearch?.errors.get(codeId) : undefined;
+          return (
+            <RunCodeLitSearchRowButton slug={specialtySlug} codeId={codeId} error={err} />
+          );
+        },
+        accessor: (r) => r.litSearchSourceCount ?? 0,
+        type: 'number',
+        filterable: true,
+        group: 'literature',
+      },
+    ];
+
+    // Compose the column set by source. AMBOSS coverage columns are dropped
+    // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
+    // guideline + overall columns slot in between AMBOSS coverage and the
+    // suggestion columns.
+    let result: Column<Code>[];
+    if (mappingSource === 'guidelines') {
+      result = [...cols.filter((c) => c.group === 'metadata'), ...guidelineCols];
+    } else if (mappingSource === 'both') {
+      const metaAndCoverage = cols.filter(
+        (c) => c.group === 'metadata' || c.group === 'coverage',
+      );
+      const suggestionCols = cols.filter((c) => c.group === 'suggestions');
+      result = [...metaAndCoverage, ...guidelineCols, ...overallCols, ...suggestionCols];
+    } else {
+      result = cols; // amboss (default)
+    }
+
     // Mapping-only specialties have no suggestions or consolidation buckets,
     // so drop those columns entirely.
-    if (!mappingOnly) return cols;
-    return cols.filter(
-      (c) => c.group !== 'suggestions' && c.key !== 'consolidationCategory',
-    );
-  }, [onOpenDetail, inFlightSet, editingEnabled, onPatchRow, sourceOptions, mappingOnly]);
+    if (mappingOnly) {
+      result = result.filter(
+        (c) => c.group !== 'suggestions' && c.key !== 'consolidationCategory',
+      );
+    }
+
+    // RAG-corpus appends the Literature corpus column (source is pinned to
+    // guidelines, so AMBOSS columns are already absent via the branch above).
+    if (ragCorpus) result = [...result, ...litCols];
+    return result;
+  }, [
+    onOpenDetail,
+    inFlightSet,
+    editingEnabled,
+    onPatchRow,
+    sourceOptions,
+    mappingOnly,
+    mappingSource,
+    ragCorpus,
+    litSearch,
+    specialtySlug,
+  ]);
 
   return (
     <Stack space="m">
@@ -432,12 +688,19 @@ export function CodesView({
         // The whole row opens the detail modal; editable cells and the
         // deep-link chips stop propagation so they don't trip this.
         onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
+        // For rag-corpus, also surface how many mapped topics sit below the
+        // lit-search coverage threshold, folded into the row-count parenthetical.
         countAddendum={(filtered) => {
-          const mapped = filtered.reduce(
-            (n, c) => ((c.mappedAt ?? 0) > 0 ? n + 1 : n),
-            0,
-          );
-          return `${mapped.toLocaleString()} mapped`;
+          let mapped = 0;
+          let below = 0;
+          for (const c of filtered) {
+            if ((c.mappedAt ?? 0) <= 0) continue;
+            mapped++;
+            if (ragCorpus && coverageScore(c) < LIT_SEARCH_THRESHOLD) below++;
+          }
+          return ragCorpus
+            ? `${mapped.toLocaleString()} mapped, ${below.toLocaleString()} < ${LIT_SEARCH_THRESHOLD}`
+            : `${mapped.toLocaleString()} mapped`;
         }}
         storageKey={`codes-table:${specialtySlug}`}
       />
@@ -445,6 +708,8 @@ export function CodesView({
         row={selected?.row ?? null}
         target={selected?.target}
         specialtySlug={specialtySlug}
+        mappingSource={mappingSource}
+        pipelineMode={pipelineMode}
         canEdit={canEdit}
         lockStatus={lockStatus}
         supportReady={supportReady}
@@ -469,13 +734,28 @@ function getLoadStatusText(
 }
 
 const CHIP_TONES: Record<
-  'coverage' | 'suggestions',
+  'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions',
   { bg: string; fg: string; border: string }
 > = {
   coverage: {
     bg: 'rgba(34, 139, 80, 0.10)',
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
+  },
+  guideline: {
+    bg: 'rgba(56, 132, 168, 0.12)',
+    fg: 'rgb(20, 80, 110)',
+    border: 'rgb(56, 132, 168)',
+  },
+  overall: {
+    bg: 'rgba(124, 92, 184, 0.12)',
+    fg: 'rgb(80, 50, 130)',
+    border: 'rgb(124, 92, 184)',
+  },
+  literature: {
+    bg: 'rgba(124, 58, 237, 0.12)',
+    fg: 'rgb(91, 33, 182)',
+    border: 'rgb(124, 58, 237)',
   },
   suggestions: {
     bg: 'rgba(217, 119, 6, 0.12)',
@@ -490,7 +770,7 @@ function ChipButton({
   onClick,
 }: {
   label: string;
-  tone: 'coverage' | 'suggestions';
+  tone: 'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions';
   onClick: () => void;
 }) {
   const c = CHIP_TONES[tone];

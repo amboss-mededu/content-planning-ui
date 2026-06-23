@@ -77,6 +77,9 @@ export function RerunConfirmModal({
               hideLabel={false}
               rows={4}
               resize="vertical"
+              // The DS Textarea defaults maxLength to 256, which silently
+              // truncates longer instructions. Lift it past any real note.
+              maxLength={50000}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               errorMessages={errorMessages}

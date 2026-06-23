@@ -1,13 +1,21 @@
-import type { CoveredSection, NewArticle, SectionUpdate } from '@/lib/pb/types';
+import type {
+  CoveredSection,
+  GuidelineCoverage,
+  NewArticle,
+  SectionUpdate,
+} from '@/lib/pb/types';
 
 export type CodeTableCountInput = {
   articlesWhereCoverageIs?: CoveredSection[] | string;
   existingArticleUpdates?: SectionUpdate[] | string;
   newArticlesNeeded?: NewArticle[] | string;
+  guidelinesWhereCoverageIs?: GuidelineCoverage[] | string;
   coverageArticleCount?: number;
   coverageSectionCount?: number;
   existingArticleUpdateCount?: number;
   newArticleSuggestionCount?: number;
+  guidelineCount?: number;
+  guidelineRecommendationCount?: number;
 };
 
 export function deriveCodeTableCounts(input: CodeTableCountInput): {
@@ -15,10 +23,13 @@ export function deriveCodeTableCounts(input: CodeTableCountInput): {
   coverageSectionCount: number;
   existingArticleUpdateCount: number;
   newArticleSuggestionCount: number;
+  guidelineCount: number;
+  guidelineRecommendationCount: number;
 } {
   const coverage = asArray<CoveredSection>(input.articlesWhereCoverageIs);
   const updates = asArray<SectionUpdate>(input.existingArticleUpdates);
   const newArticles = asArray<NewArticle>(input.newArticlesNeeded);
+  const guidelines = asArray<GuidelineCoverage>(input.guidelinesWhereCoverageIs);
   return {
     coverageArticleCount: coverage?.length ?? input.coverageArticleCount ?? 0,
     coverageSectionCount: coverage
@@ -27,7 +38,21 @@ export function deriveCodeTableCounts(input: CodeTableCountInput): {
     existingArticleUpdateCount: updates?.length ?? input.existingArticleUpdateCount ?? 0,
     newArticleSuggestionCount:
       newArticles?.length ?? input.newArticleSuggestionCount ?? 0,
+    guidelineCount: guidelines?.length ?? input.guidelineCount ?? 0,
+    guidelineRecommendationCount: guidelines
+      ? countGuidelineRecommendations(guidelines)
+      : (input.guidelineRecommendationCount ?? 0),
   };
+}
+
+function countGuidelineRecommendations(items: GuidelineCoverage[]): number {
+  let n = 0;
+  for (const item of items) {
+    const recs = item.recommendations;
+    if (Array.isArray(recs)) n += recs.length;
+    else if (recs && typeof recs === 'object') n += Object.keys(recs).length;
+  }
+  return n;
 }
 
 function countCoveredSections(items: CoveredSection[]): number {

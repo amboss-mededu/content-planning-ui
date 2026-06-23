@@ -15,6 +15,7 @@ import { createAdminClient, createServerClient } from '@/lib/pb/server';
 import type {
   CodeRecord,
   CoveredSection,
+  GuidelineCoverage,
   MappingInFlightRecord,
   NewArticle,
   SectionUpdate,
@@ -44,12 +45,26 @@ export type CodeTableRow = Pick<
   | 'coverageSectionCount'
   | 'existingArticleUpdateCount'
   | 'newArticleSuggestionCount'
+  | 'isInGuidelines'
+  | 'guidelineCoverageLevel'
+  | 'guidelineDepthOfCoverage'
+  | 'guidelineCount'
+  | 'guidelineRecommendationCount'
+  | 'overallCoverageLevel'
+  | 'overallDepthOfCoverage'
+  | 'mappingSourceUsed'
+  | 'litSearchStatus'
+  | 'litSearchSourceCount'
+  | 'litSearchedAt'
 >;
 
 type CodeTableRowSource = CodeTableRow &
   Pick<
     CodeRecord,
-    'articlesWhereCoverageIs' | 'existingArticleUpdates' | 'newArticlesNeeded'
+    | 'articlesWhereCoverageIs'
+    | 'existingArticleUpdates'
+    | 'newArticlesNeeded'
+    | 'guidelinesWhereCoverageIs'
   >;
 
 const CODE_TABLE_FIELDS = [
@@ -74,37 +89,60 @@ const CODE_TABLE_FIELDS = [
   'coverageSectionCount',
   'existingArticleUpdateCount',
   'newArticleSuggestionCount',
+  'isInGuidelines',
+  'guidelineCoverageLevel',
+  'guidelineDepthOfCoverage',
+  'guidelineCount',
+  'guidelineRecommendationCount',
+  'overallCoverageLevel',
+  'overallDepthOfCoverage',
+  'mappingSourceUsed',
+  'litSearchStatus',
+  'litSearchSourceCount',
+  'litSearchedAt',
   'articlesWhereCoverageIs',
   'existingArticleUpdates',
   'newArticlesNeeded',
+  'guidelinesWhereCoverageIs',
 ].join(',');
 
 function buildMappingCounts(mapping: {
   articlesWhereCoverageIs?: CoveredSection[];
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
+  guidelinesWhereCoverageIs?: GuidelineCoverage[];
 }): {
   coverageArticleCount: number;
   coverageSectionCount: number;
   existingArticleUpdateCount: number;
   newArticleSuggestionCount: number;
+  guidelineCount: number;
+  guidelineRecommendationCount: number;
 } {
   return deriveCodeTableCounts(mapping);
 }
 
 function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
-  const { articlesWhereCoverageIs, existingArticleUpdates, newArticlesNeeded, ...rest } =
-    row;
+  const {
+    articlesWhereCoverageIs,
+    existingArticleUpdates,
+    newArticlesNeeded,
+    guidelinesWhereCoverageIs,
+    ...rest
+  } = row;
   return {
     ...rest,
     ...deriveCodeTableCounts({
       articlesWhereCoverageIs,
       existingArticleUpdates,
       newArticlesNeeded,
+      guidelinesWhereCoverageIs,
       coverageArticleCount: row.coverageArticleCount,
       coverageSectionCount: row.coverageSectionCount,
       existingArticleUpdateCount: row.existingArticleUpdateCount,
       newArticleSuggestionCount: row.newArticleSuggestionCount,
+      guidelineCount: row.guidelineCount,
+      guidelineRecommendationCount: row.guidelineRecommendationCount,
     }),
   };
 }
@@ -351,6 +389,11 @@ export async function patchCode(
         existingArticleUpdates:
           fields.existingArticleUpdates ?? row.existingArticleUpdates,
         newArticlesNeeded: fields.newArticlesNeeded ?? row.newArticlesNeeded,
+        // The patch route never edits guideline coverage — preserve the
+        // stored guideline counts rather than letting them fall back to 0.
+        guidelinesWhereCoverageIs: row.guidelinesWhereCoverageIs,
+        guidelineCount: row.guidelineCount,
+        guidelineRecommendationCount: row.guidelineRecommendationCount,
       }),
     );
   }
@@ -551,6 +594,17 @@ export type WriteCodeMappingArgs = {
   articlesWhereCoverageIs?: CoveredSection[];
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
+  // --- Guideline coverage track (source includes 'guidelines') -------------
+  isInGuidelines?: boolean;
+  guidelineCoverageLevel?: string;
+  guidelineDepthOfCoverage?: number;
+  guidelineNotes?: string;
+  guidelineGaps?: string;
+  guidelinesWhereCoverageIs?: GuidelineCoverage[];
+  // --- Overall coverage track + provenance ---------------------------------
+  overallCoverageLevel?: string;
+  overallDepthOfCoverage?: number;
+  mappingSourceUsed?: string;
   /** Stamp the suggestion-processed marker (combined full-mode write). Left
    *  unset by coverage-only writes so the backfill stage can find the code. */
   suggestionsGeneratedAt?: number;
@@ -653,6 +707,18 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       existingArticleUpdateCount: 0,
       newArticleSuggestionCount: 0,
       suggestionsGeneratedAt: 0,
+      // Guideline + overall coverage tracks.
+      isInGuidelines: null,
+      guidelineCoverageLevel: null,
+      guidelineDepthOfCoverage: null,
+      guidelineNotes: null,
+      guidelineGaps: null,
+      guidelinesWhereCoverageIs: null,
+      guidelineCount: 0,
+      guidelineRecommendationCount: 0,
+      overallCoverageLevel: null,
+      overallDepthOfCoverage: null,
+      mappingSourceUsed: null,
       // Unmapping removes the code from consolidation input — stale its bucket.
       consolidationInputChangedAt: now,
     });
@@ -721,6 +787,18 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     existingArticleUpdateCount: 0,
     newArticleSuggestionCount: 0,
     suggestionsGeneratedAt: 0,
+    // Guideline + overall coverage tracks.
+    isInGuidelines: null,
+    guidelineCoverageLevel: null,
+    guidelineDepthOfCoverage: null,
+    guidelineNotes: null,
+    guidelineGaps: null,
+    guidelinesWhereCoverageIs: null,
+    guidelineCount: 0,
+    guidelineRecommendationCount: 0,
+    overallCoverageLevel: null,
+    overallDepthOfCoverage: null,
+    mappingSourceUsed: null,
     // Unmapping removes the code from consolidation input — stale its bucket.
     consolidationInputChangedAt: Date.now(),
   });

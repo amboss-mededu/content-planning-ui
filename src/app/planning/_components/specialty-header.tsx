@@ -4,8 +4,8 @@ import { Callout, H1, Inline, Stack, Text } from '@amboss/design-system';
 import type { Specialty } from '@/lib/types';
 import { Breadcrumbs } from './breadcrumbs';
 import { ChangeSpecialtyButton } from './change-specialty-button';
-import { MappingOnlyToggle } from './mapping-only-toggle';
 import { RefreshButton } from './refresh-button';
+import { SpecialtySettingsButton } from './specialty-settings-button';
 import { SpecialtyTabs } from './specialty-tabs';
 
 // Tabs hidden for a mapping-only specialty — the consolidation parent and
@@ -34,9 +34,10 @@ export function SpecialtyHeader({
         <H1>{specialty.name}</H1>
         <ChangeSpecialtyButton />
         <RefreshButton slug={specialty.slug} />
-        <MappingOnlyToggle
+        <SpecialtySettingsButton
           slug={specialty.slug}
-          mappingOnly={specialty.mappingOnly ?? false}
+          pipelineMode={specialty.pipelineMode ?? 'full'}
+          mappingSource={specialty.mappingSource ?? 'amboss'}
         />
       </Inline>
       <Text color="secondary">
@@ -55,10 +56,7 @@ export function NotConfiguredView({ slug }: { slug: string }) {
   return (
     <Stack space="l">
       <Breadcrumbs
-        crumbs={[
-          { label: 'Specialty Dashboard', href: '/planning' },
-          { label: slug },
-        ]}
+        crumbs={[{ label: 'Specialty Dashboard', href: '/planning' }, { label: slug }]}
       />
       <H1>{slug}</H1>
       <Callout

@@ -148,7 +148,7 @@ export function hasMappingCreds(): boolean {
 // fences or prepends prose. Strip fences and trim to the outermost braces.
 // ---------------------------------------------------------------------------
 
-function parseAgentJson(raw: string): unknown {
+export function parseAgentJson(raw: string): unknown {
   const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   const text = (fenceMatch ? fenceMatch[1] : raw).trim();
   const first = text.indexOf('{');
@@ -322,7 +322,7 @@ function correctionMessage(invalidIds: string[]): string {
 // Single model call. Isolated so the attempt loop just swaps model IDs.
 // ---------------------------------------------------------------------------
 
-async function runAgentAttempt(params: {
+export async function runAgentAttempt(params: {
   spec: ModelSpec;
   apiKeys: ProviderApiKeys;
   system: string;
@@ -362,7 +362,7 @@ async function runAgentAttempt(params: {
  * guaranteed to be stable across versions and we'd rather drop the metric
  * than crash the workflow.
  */
-function pickMcp(result: unknown): { calls: number; toolNames: string[] } {
+export function pickMcp(result: unknown): { calls: number; toolNames: string[] } {
   try {
     const steps = (
       result as { steps?: Array<{ toolCalls?: Array<{ toolName?: string }> }> }
@@ -380,7 +380,7 @@ function pickMcp(result: unknown): { calls: number; toolNames: string[] } {
   }
 }
 
-function pickUsage(
+export function pickUsage(
   u:
     | {
         inputTokens?: number;

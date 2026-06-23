@@ -1,18 +1,31 @@
 'use client';
 
-import { Badge, Button, Inline, Modal, Stack, Tabs, Text } from '@amboss/design-system';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Inline,
+  Modal,
+  SegmentedControl,
+  Stack,
+  Tabs,
+  Text,
+} from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
+import { log } from '@/lib/log';
 import type {
+  CodeLitSourceRecord,
   CoveredSection as CoveredSectionRow,
   NewArticle as NewArticleRow,
   SectionUpdate as SectionUpdateRow,
 } from '@/lib/pb/types';
-import type { Code } from '@/lib/types';
+import type { Code, MappingSource, PipelineMode } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
+import { submitCodeLitSourceReview } from '../[specialty]/actions';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
 import {
@@ -21,6 +34,7 @@ import {
   readSpec,
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
+import { AddCodeLitSourceModal } from './add-code-lit-source-modal';
 import {
   ArticleUpdatesEditor,
   CoverageArticlesEditor,
@@ -57,6 +71,31 @@ type NewArticleSuggestion = {
   importance?: number;
 };
 
+type GuidelineCoverageItem = {
+  guidelineTitle?: string;
+  guidelineId?: string;
+  organization?: string;
+  year?: number;
+  recommendations?:
+    | Record<string, string>
+    | Array<{ recommendationTitle?: string; recommendationId?: string }>;
+};
+
+function flattenRecommendations(
+  block: GuidelineCoverageItem['recommendations'],
+): Array<{ title: string; id: string }> {
+  if (!block) return [];
+  if (Array.isArray(block)) {
+    return block
+      .map((r) => ({
+        title: r.recommendationTitle ?? '(unnamed)',
+        id: r.recommendationId ?? '',
+      }))
+      .filter((r) => r.title || r.id);
+  }
+  return Object.entries(block).map(([title, id]) => ({ title, id }));
+}
+
 function flattenSections(
   block: CoveredSection['sections'],
 ): Array<{ title: string; id: string }> {
@@ -80,27 +119,73 @@ export type DetailTarget =
   | 'suggestion-improvements'
   | 'suggestion-updates'
   | 'suggestion-new-articles'
+  | 'guideline-coverage'
+  | 'literature'
   | 'metadata';
 
-const TAB_ORDER: DetailTarget[] = [
+type TabDef = { target: DetailTarget; label: string };
+
+/**
+ * The tabs shown depend on the specialty's `mappingSource` + `pipelineMode`,
+ * mirroring the column gating in {@link codes-view}. We build the visible list
+ * up front and switch panels on the active *target* (not a magic index) so the
+ * set can vary without index drift.
+ * - AMBOSS coverage / suggestions are only meaningful when the source includes
+ *   AMBOSS (suggestions additionally require the full pipeline — they're an
+ *   AMBOSS-only concept never produced on guideline-only / non-full runs).
+ * - Guideline-only specialties surface guideline coverage *in* the Coverage tab
+ *   (no separate Guidelines tab); `both` keeps Coverage = articles + a dedicated
+ *   Guidelines tab.
+ * - Literature is the rag-corpus reference corpus.
+ */
+function buildVisibleTabs(opts: {
+  showAmboss: boolean;
+  showGuidelines: boolean;
+  showSuggestions: boolean;
+  showLiterature: boolean;
+}): TabDef[] {
+  const tabs: TabDef[] = [
+    { target: 'coverage-articles', label: 'Coverage' },
+    { target: 'coverage-notes', label: 'Coverage Notes & Gaps' },
+  ];
+  if (opts.showSuggestions) {
+    tabs.push(
+      { target: 'suggestion-improvements', label: 'Improvements' },
+      { target: 'suggestion-updates', label: 'Article Updates' },
+      { target: 'suggestion-new-articles', label: 'New Articles' },
+    );
+  }
+  if (opts.showGuidelines && opts.showAmboss) {
+    tabs.push({ target: 'guideline-coverage', label: 'Guidelines' });
+  }
+  if (opts.showLiterature) {
+    tabs.push({ target: 'literature', label: 'Literature' });
+  }
+  tabs.push({ target: 'metadata', label: 'Metadata' });
+  return tabs;
+}
+
+function targetToIndex(tabs: TabDef[], target: DetailTarget | undefined): number {
+  if (!target) return 0;
+  const i = tabs.findIndex((t) => t.target === target);
+  return i === -1 ? 0 : i;
+}
+
+// Which targets carry an inline editor (full-array / notes replacement).
+const EDITABLE_TARGETS = new Set<DetailTarget>([
   'coverage-articles',
   'coverage-notes',
   'suggestion-improvements',
   'suggestion-updates',
   'suggestion-new-articles',
-  'metadata',
-];
-
-function targetToIndex(target: DetailTarget | undefined): number {
-  if (!target) return 0;
-  const i = TAB_ORDER.indexOf(target);
-  return i === -1 ? 0 : i;
-}
+]);
 
 export function CodeDetailModal({
   row,
   target,
   specialtySlug,
+  mappingSource,
+  pipelineMode,
   canEdit,
   lockStatus,
   supportReady = true,
@@ -111,6 +196,8 @@ export function CodeDetailModal({
   row: Code | null;
   target?: DetailTarget;
   specialtySlug: string;
+  mappingSource: MappingSource;
+  pipelineMode: PipelineMode;
   canEdit: boolean;
   lockStatus: string | null;
   supportReady?: boolean;
@@ -121,7 +208,22 @@ export function CodeDetailModal({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState(targetToIndex(target));
+
+  // Source/mode-derived visibility — mirrors the table's column gating so the
+  // modal never shows AMBOSS surfaces for a guidelines-only specialty (or vice
+  // versa) or empty suggestion tabs for non-full / guideline-only runs.
+  const showAmboss = mappingSource !== 'guidelines';
+  const showGuidelines = mappingSource !== 'amboss';
+  const guidelineOnly = mappingSource === 'guidelines';
+  const showSuggestions = pipelineMode === 'full' && showAmboss;
+  const showLiterature = pipelineMode === 'rag-corpus';
+  const visibleTabs = useMemo(
+    () =>
+      buildVisibleTabs({ showAmboss, showGuidelines, showSuggestions, showLiterature }),
+    [showAmboss, showGuidelines, showSuggestions, showLiterature],
+  );
+
+  const [activeTab, setActiveTab] = useState(targetToIndex(visibleTabs, target));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [missingKey, setMissingKey] = useState<ProviderId | null>(null);
@@ -148,7 +250,7 @@ export function CodeDetailModal({
   useEffect(() => {
     // rowKey is read here so a row change with an unchanged target still fires
     void rowKey;
-    setActiveTab(targetToIndex(target));
+    setActiveTab(targetToIndex(visibleTabs, target));
     setError(null);
     setSubmitting(false);
     setMetadata(null);
@@ -158,7 +260,7 @@ export function CodeDetailModal({
     setDetailState(rowKey ? 'loading' : 'idle');
     setDetailError(null);
     setEditingTab(null);
-  }, [target, rowKey]);
+  }, [target, rowKey, visibleTabs]);
 
   useEffect(() => {
     if (!rowKey) return;
@@ -201,8 +303,10 @@ export function CodeDetailModal({
   // effect would otherwise re-trigger the effect, and the previous run's
   // cleanup would flip `cancelled = true` on the in-flight fetch — leaving
   // state stuck at 'loading'. Re-runs on row/tab change cancel cleanly.
+  const activeTarget = visibleTabs[activeTab]?.target ?? 'coverage-articles';
+
   useEffect(() => {
-    if (activeTab !== 5 || !rowKey) return;
+    if (activeTarget !== 'metadata' || !rowKey) return;
     let cancelled = false;
     setMetadataState('loading');
     setMetadataError(null);
@@ -235,7 +339,7 @@ export function CodeDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, rowKey, specialtySlug]);
+  }, [activeTarget, rowKey, specialtySlug]);
 
   if (!row) return null;
 
@@ -330,6 +434,8 @@ export function CodeDetailModal({
   const updates = (detailRow.existingArticleUpdates ?? []) as unknown as SectionUpdate[];
   const newArticles = (detailRow.newArticlesNeeded ??
     []) as unknown as NewArticleSuggestion[];
+  const coveredGuidelines = (detailRow.guidelinesWhereCoverageIs ??
+    []) as unknown as GuidelineCoverageItem[];
   const inAmboss = detailRow.isInAMBOSS;
   const specialty = detailRow.specialty ?? '';
   const category = detailRow.category ?? '';
@@ -344,9 +450,16 @@ export function CodeDetailModal({
   };
 
   // Edit affordances are offered on the array/notes tabs once the lock is open,
-  // the parent supplied a PATCH handler, and the detail has loaded.
+  // the parent supplied a PATCH handler, and the detail has loaded. For a
+  // guideline-only specialty the Coverage tab shows (read-only) guideline
+  // coverage and the Notes tab shows guideline notes/gaps — neither has an
+  // editor (matching today's read-only Guidelines tab), so they're excluded.
+  const targetEditable =
+    EDITABLE_TARGETS.has(activeTarget) &&
+    (activeTarget !== 'coverage-articles' || showAmboss) &&
+    (activeTarget !== 'coverage-notes' || !guidelineOnly);
   const canEditPanel =
-    canEdit && !!onPatchRow && detailState === 'loaded' && activeTab <= 4;
+    canEdit && !!onPatchRow && detailState === 'loaded' && targetEditable;
   const isEditingPanel = editingTab === activeTab;
 
   return (
@@ -387,24 +500,58 @@ export function CodeDetailModal({
             ) : null}
           </Inline>
 
-          <Inline space="s" vAlignItems="center">
-            {inAmboss === true ? (
-              <Badge text="In AMBOSS" color="green" />
-            ) : inAmboss === false ? (
-              <Badge text="Not in AMBOSS" color="red" />
-            ) : (
+          {isUnmapped ? (
+            <Inline space="s" vAlignItems="center">
               <Badge text="Unmapped" color="gray" />
-            )}
-            {detailRow.coverageLevel ? (
-              <CoverageBadge level={detailRow.coverageLevel} />
-            ) : null}
-            {typeof detailRow.depthOfCoverage === 'number' ? (
-              <DepthBadge
-                depth={detailRow.depthOfCoverage}
-                level={detailRow.coverageLevel}
-              />
-            ) : null}
-          </Inline>
+            </Inline>
+          ) : (
+            <>
+              {showAmboss ? (
+                <Inline space="s" vAlignItems="center">
+                  {inAmboss === true ? (
+                    <Badge text="In AMBOSS" color="green" />
+                  ) : (
+                    <Badge text="Not in AMBOSS" color="red" />
+                  )}
+                  {detailRow.coverageLevel ? (
+                    <CoverageBadge level={detailRow.coverageLevel} />
+                  ) : null}
+                  {typeof detailRow.depthOfCoverage === 'number' ? (
+                    <DepthBadge
+                      depth={detailRow.depthOfCoverage}
+                      level={detailRow.coverageLevel}
+                    />
+                  ) : null}
+                </Inline>
+              ) : null}
+              {showGuidelines ? (
+                <Inline space="s" vAlignItems="center">
+                  {detailRow.isInGuidelines === true ? (
+                    <Badge text="In guidelines" color="green" />
+                  ) : detailRow.isInGuidelines === false ? (
+                    <Badge text="Not in guidelines" color="red" />
+                  ) : null}
+                  {detailRow.guidelineCoverageLevel ? (
+                    <CoverageBadge level={detailRow.guidelineCoverageLevel} />
+                  ) : null}
+                  {typeof detailRow.guidelineDepthOfCoverage === 'number' ? (
+                    <DepthBadge
+                      depth={detailRow.guidelineDepthOfCoverage}
+                      level={detailRow.guidelineCoverageLevel}
+                    />
+                  ) : null}
+                </Inline>
+              ) : null}
+              {showAmboss && showGuidelines && detailRow.overallCoverageLevel ? (
+                <Inline space="s" vAlignItems="center">
+                  <Badge
+                    text={`Overall: ${detailRow.overallCoverageLevel}`}
+                    color="blue"
+                  />
+                </Inline>
+              ) : null}
+            </>
+          )}
 
           {error ? (
             <Text size="s" color="error">
@@ -430,14 +577,7 @@ export function CodeDetailModal({
               setActiveTab(i);
               setEditingTab(null);
             }}
-            tabs={[
-              { label: 'Coverage' },
-              { label: 'Coverage Notes & Gaps' },
-              { label: 'Improvements' },
-              { label: 'Article Updates' },
-              { label: 'New Articles' },
-              { label: 'Metadata' },
-            ]}
+            tabs={visibleTabs.map((t) => ({ label: t.label }))}
           >
             <div>
               {canEditPanel && !isEditingPanel ? (
@@ -451,17 +591,17 @@ export function CodeDetailModal({
                   </Button>
                 </Inline>
               ) : null}
-              {detailLoading && activeTab !== 5 ? (
+              {detailLoading && activeTarget !== 'metadata' ? (
                 <Text size="s" color="tertiary">
                   Loading code details…
                 </Text>
-              ) : isEditingPanel && activeTab === 0 ? (
+              ) : isEditingPanel && activeTarget === 'coverage-articles' ? (
                 <CoverageArticlesEditor
                   initial={covered as unknown as CoveredSectionRow[]}
                   save={(next) => patchAndReload({ articlesWhereCoverageIs: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 1 ? (
+              ) : isEditingPanel && activeTarget === 'coverage-notes' ? (
                 <TextFieldsEditor
                   fields={[
                     { key: 'notes', label: 'Notes', value: detailRow.notes ?? '' },
@@ -470,7 +610,7 @@ export function CodeDetailModal({
                   save={(next) => patchAndReload({ notes: next.notes, gaps: next.gaps })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 2 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-improvements' ? (
                 <TextFieldsEditor
                   fields={[
                     {
@@ -482,33 +622,60 @@ export function CodeDetailModal({
                   save={(next) => patchAndReload({ improvements: next.improvements })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 3 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-updates' ? (
                 <ArticleUpdatesEditor
                   initial={updates as unknown as SectionUpdateRow[]}
                   save={(next) => patchAndReload({ existingArticleUpdates: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : isEditingPanel && activeTab === 4 ? (
+              ) : isEditingPanel && activeTarget === 'suggestion-new-articles' ? (
                 <NewArticlesEditor
                   initial={newArticles as unknown as NewArticleRow[]}
                   save={(next) => patchAndReload({ newArticlesNeeded: next })}
                   onClose={() => setEditingTab(null)}
                 />
-              ) : activeTab === 0 ? (
-                <CoverageArticlesPanel covered={covered} />
-              ) : activeTab === 1 ? (
+              ) : activeTarget === 'coverage-articles' ? (
+                // Guideline-only specialties have no AMBOSS coverage — show the
+                // guideline coverage here instead of the (empty) article list.
+                guidelineOnly ? (
+                  <GuidelineCoveragePanel
+                    guidelines={coveredGuidelines}
+                    notes={detailRow.guidelineNotes ?? null}
+                    gaps={detailRow.guidelineGaps ?? null}
+                  />
+                ) : (
+                  <CoverageArticlesPanel covered={covered} />
+                )
+              ) : activeTarget === 'coverage-notes' ? (
                 <CoverageNotesPanel
-                  notes={detailRow.notes ?? null}
-                  gaps={detailRow.gaps ?? null}
+                  notes={
+                    (guidelineOnly ? detailRow.guidelineNotes : detailRow.notes) ?? null
+                  }
+                  gaps={
+                    (guidelineOnly ? detailRow.guidelineGaps : detailRow.gaps) ?? null
+                  }
                 />
-              ) : activeTab === 2 ? (
+              ) : activeTarget === 'suggestion-improvements' ? (
                 <SuggestionImprovementsPanel
                   improvements={detailRow.improvements ?? null}
                 />
-              ) : activeTab === 3 ? (
+              ) : activeTarget === 'suggestion-updates' ? (
                 <SuggestionUpdatesPanel updates={updates} />
-              ) : activeTab === 4 ? (
+              ) : activeTarget === 'suggestion-new-articles' ? (
                 <SuggestionNewArticlesPanel newArticles={newArticles} />
+              ) : activeTarget === 'guideline-coverage' ? (
+                <GuidelineCoveragePanel
+                  guidelines={coveredGuidelines}
+                  notes={detailRow.guidelineNotes ?? null}
+                  gaps={detailRow.guidelineGaps ?? null}
+                />
+              ) : activeTarget === 'literature' ? (
+                <LiteratureCodePanel
+                  specialtySlug={specialtySlug}
+                  codeId={detailRow.id ?? null}
+                  code={detailRow.code ?? ''}
+                  active={activeTarget === 'literature'}
+                />
               ) : (
                 <MetadataPanel
                   state={metadataState}
@@ -574,6 +741,293 @@ function CoverageArticlesPanel({ covered }: { covered: CoveredSection[] }) {
           </div>
         );
       })}
+    </Stack>
+  );
+}
+
+function GuidelineCoveragePanel({
+  guidelines,
+  notes,
+  gaps,
+}: {
+  guidelines: GuidelineCoverageItem[];
+  notes: string | null;
+  gaps: string | null;
+}) {
+  if (guidelines.length === 0 && !notes && !gaps) {
+    return (
+      <Text size="s" color="tertiary">
+        No guideline coverage.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="m">
+      {guidelines.length > 0 ? (
+        <Stack space="s">
+          {guidelines.map((g) => {
+            const recs = flattenRecommendations(g.recommendations);
+            return (
+              <div
+                key={g.guidelineId ?? g.guidelineTitle ?? 'guideline'}
+                style={{ borderLeft: '2px solid rgb(56, 132, 168)', paddingLeft: 10 }}
+              >
+                <Inline space="xxs" vAlignItems="center">
+                  <Text weight="bold">{g.guidelineTitle ?? '(untitled)'}</Text>
+                  {g.organization ? <Badge text={g.organization} color="blue" /> : null}
+                  {typeof g.year === 'number' ? (
+                    <Text size="s" color="tertiary">
+                      {g.year}
+                    </Text>
+                  ) : null}
+                  {g.guidelineId ? (
+                    <Text size="xs" color="tertiary">
+                      {g.guidelineId}
+                    </Text>
+                  ) : null}
+                </Inline>
+                {recs.length > 0 ? (
+                  <Stack space="xxs">
+                    {recs.map((r) => (
+                      <Inline key={r.id || r.title} space="xs" vAlignItems="center">
+                        <Text size="s">{r.title}</Text>
+                        {r.id ? (
+                          <Text size="xs" color="tertiary">
+                            {r.id}
+                          </Text>
+                        ) : null}
+                      </Inline>
+                    ))}
+                  </Stack>
+                ) : null}
+              </div>
+            );
+          })}
+        </Stack>
+      ) : null}
+      {notes || gaps ? <CoverageNotesPanel notes={notes} gaps={gaps} /> : null}
+    </Stack>
+  );
+}
+
+/**
+ * RAG-corpus Literature tab — the reference corpus gathered for this code.
+ * Sources aren't carried on the table row (potentially many per code), so they
+ * are fetched on demand when the tab is shown.
+ */
+function LiteratureCodePanel({
+  specialtySlug,
+  codeId,
+  code,
+  active,
+}: {
+  specialtySlug: string;
+  codeId: string | null;
+  code: string;
+  active: boolean;
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const [sources, setSources] = useState<CodeLitSourceRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active || !codeId) return;
+    let cancelled = false;
+    setState('loading');
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/code-lit-sources?specialtySlug=${encodeURIComponent(specialtySlug)}&codeId=${encodeURIComponent(codeId)}`,
+          { cache: 'no-store' },
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body?.error ?? `HTTP ${res.status}`);
+          setState('error');
+          return;
+        }
+        const json = (await res.json()) as { sources: CodeLitSourceRecord[] };
+        if (cancelled) return;
+        setSources(json.sources ?? []);
+        setState('loaded');
+      } catch (e) {
+        if (cancelled) return;
+        setError(errorMessage(e));
+        setState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, codeId, specialtySlug]);
+
+  const [pane, setPane] = useState<'searched' | 'approved'>('searched');
+  const [addOpen, setAddOpen] = useState(false);
+  const [submittingIds, setSubmittingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  // Human-in-the-loop approval. Optimistically flip the source locally so it
+  // moves panes at once, persist via the server action, and revert on failure
+  // (mirrors SourceDecisionCell in article-manager/sources-table.tsx).
+  const toggleApproval = useCallback(
+    async (source: CodeLitSourceRecord, approve: boolean) => {
+      if (submittingIds.has(source.id)) return;
+      const next = approve ? 'approved' : null;
+      const prev = source.reviewStatus ?? null;
+      setSubmittingIds((s) => new Set(s).add(source.id));
+      setSources((rows) =>
+        rows.map((r) =>
+          r.id === source.id ? { ...r, reviewStatus: next ?? undefined } : r,
+        ),
+      );
+      try {
+        await submitCodeLitSourceReview(specialtySlug, source.id, next);
+      } catch (e) {
+        setSources((rows) =>
+          rows.map((r) =>
+            r.id === source.id ? { ...r, reviewStatus: prev ?? undefined } : r,
+          ),
+        );
+        log('code-lit-source-review').error('submit failed', e);
+      } finally {
+        setSubmittingIds((s) => {
+          const copy = new Set(s);
+          copy.delete(source.id);
+          return copy;
+        });
+      }
+    },
+    [specialtySlug, submittingIds],
+  );
+
+  if (!codeId) {
+    return (
+      <Text size="s" color="tertiary">
+        No literature gathered for this topic yet.
+      </Text>
+    );
+  }
+  if (state === 'loading' || state === 'idle') {
+    return (
+      <Text size="s" color="tertiary">
+        Loading sources…
+      </Text>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <Text size="s" color="error">
+        {error ?? 'Failed to load sources.'}
+      </Text>
+    );
+  }
+  const approved = sources.filter((s) => s.reviewStatus === 'approved');
+  // Searched is the full candidate list — approving a source keeps it here
+  // (with its box checked) and also surfaces it in the Approved pane.
+  const searched = sources;
+  const list = pane === 'approved' ? approved : searched;
+
+  const renderCard = (s: CodeLitSourceRecord) => {
+    const href = s.url || (s.doi ? `https://doi.org/${s.doi}` : null);
+    const isApproved = s.reviewStatus === 'approved';
+    const reviewerHandle = s.reviewerEmail ? s.reviewerEmail.split('@')[0] : '';
+    const stamp = s.reviewedAt ? new Date(s.reviewedAt).toLocaleString() : '';
+    return (
+      <div
+        key={s.id}
+        style={{ borderLeft: '2px solid rgb(124, 58, 237)', paddingLeft: 10 }}
+      >
+        <Inline space="xs" vAlignItems="center">
+          <Checkbox
+            label={isApproved ? 'Approved' : 'Approve'}
+            size="s"
+            checked={isApproved}
+            disabled={submittingIds.has(s.id)}
+            onChange={(e) => toggleApproval(s, e.target.checked)}
+          />
+          {isApproved && reviewerHandle ? (
+            <Text size="xs" color="tertiary">
+              by {reviewerHandle}
+              {stamp ? ` · ${stamp}` : ''}
+            </Text>
+          ) : null}
+        </Inline>
+        <Inline space="xxs" vAlignItems="center">
+          <Text weight="bold">{s.title}</Text>
+          {typeof s.rank === 'number' ? (
+            <Badge text={`#${s.rank}`} color="purple" />
+          ) : null}
+          {s.sourceType ? (
+            <Badge text={s.sourceType.replace(/_/g, ' ')} color="gray" />
+          ) : null}
+        </Inline>
+        <Inline space="xs" vAlignItems="center">
+          {s.journal ? (
+            <Text size="s" color="secondary">
+              {s.journal}
+            </Text>
+          ) : null}
+          {href ? (
+            <a href={href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+              {s.doi ? s.doi : 'Link'}
+            </a>
+          ) : null}
+        </Inline>
+        {s.llmSummary ? <Text size="s">{s.llmSummary}</Text> : null}
+      </div>
+    );
+  };
+
+  return (
+    <Stack space="s">
+      <Inline space="s" vAlignItems="center" alignItems="spaceBetween">
+        <SegmentedControl
+          label="Literature review"
+          isLabelHidden
+          value={pane}
+          onChange={(v) => setPane(v === 'approved' ? 'approved' : 'searched')}
+          options={[
+            {
+              name: 'lit-pane',
+              value: 'searched',
+              label: `Searched (${searched.length})`,
+            },
+            {
+              name: 'lit-pane',
+              value: 'approved',
+              label: `Approved (${approved.length})`,
+            },
+          ]}
+        />
+        <Button
+          variant="secondary"
+          size="s"
+          leftIcon="plus"
+          onClick={() => setAddOpen(true)}
+        >
+          Add source
+        </Button>
+      </Inline>
+      {list.length === 0 ? (
+        <Text size="s" color="tertiary">
+          {pane === 'approved'
+            ? 'No approved literature yet — approve sources from the Searched tab, or add one manually.'
+            : 'No literature gathered for this topic yet.'}
+        </Text>
+      ) : (
+        list.map(renderCard)
+      )}
+      <AddCodeLitSourceModal
+        open={addOpen}
+        slug={specialtySlug}
+        codeId={codeId}
+        code={code}
+        onClose={() => setAddOpen(false)}
+        onAdded={(source) => setSources((rows) => [...rows, source])}
+      />
     </Stack>
   );
 }

@@ -55,6 +55,10 @@ import {
   listCodesForPicker,
   type PickerCode,
 } from '@/lib/data/categories';
+import {
+  createCodeLitSourceAsAdmin,
+  setCodeLitSourceReviewAsAdmin,
+} from '@/lib/data/code-lit-sources';
 import { setConsolidationCategoryReview as setConsolidationCategoryReviewData } from '@/lib/data/consolidation-category-reviews';
 import {
   addReviewComment,
@@ -77,6 +81,7 @@ import { fetchSourceMetadataViaMcp } from '@/lib/integrations/cortex-mcp';
 import type {
   ArticleBacklogStatus,
   ArticleReviewStatus,
+  CodeLitSourceRecord,
   ConsolidationCategoryReviewStatus,
   ReviewCommentRecord,
   ReviewRecordKind,
@@ -172,6 +177,60 @@ export async function submitSourceReview(
   const user = await getCurrentUser();
   await setArticleSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
   revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+/**
+ * Per-source editor decision for a RAG-corpus code-literature source. Pass
+ * `status: null` to clear the decision (returns it to the "Searched" pane).
+ * Reviewer email is taken from the current session.
+ */
+export async function submitCodeLitSourceReview(
+  slug: string,
+  sourceId: string,
+  status: 'approved' | 'rejected' | null,
+): Promise<void> {
+  const user = await getCurrentUser();
+  await setCodeLitSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
+  revalidatePath(`/planning/${slug}`, 'layout');
+}
+
+/**
+ * Manually add a literature source to a code's RAG corpus. The editor supplies
+ * at least a title; it's created pre-approved and appended to the rank order.
+ * Returns the created record so the (client-fetched) Literature panel can
+ * splice it into its local list — `revalidatePath` won't refresh that fetch.
+ */
+export async function addCodeLitSource(
+  slug: string,
+  codeId: string,
+  code: string,
+  fields: {
+    title: string;
+    sourceId?: string;
+    url?: string;
+    journal?: string;
+    doi?: string;
+    sourceType?: string;
+  },
+): Promise<{ source?: CodeLitSourceRecord; error?: string }> {
+  const title = fields.title.trim();
+  if (!title) return { error: 'Title is required.' };
+  const url = fields.url?.trim() ?? '';
+  if (url && !isSafeUrl(url)) {
+    return { error: 'URL must start with http:// or https://' };
+  }
+  const user = await getCurrentUser();
+  const source = await createCodeLitSourceAsAdmin(slug, codeId, code, {
+    title,
+    sourceId: fields.sourceId?.trim() || undefined,
+    url: url || undefined,
+    journal: fields.journal?.trim() || undefined,
+    doi: fields.doi?.trim() || undefined,
+    sourceType: fields.sourceType?.trim() || undefined,
+    reviewerEmail: user?.email ?? '',
+  });
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return { source };
 }
 
 /**

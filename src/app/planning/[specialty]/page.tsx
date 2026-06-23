@@ -64,7 +64,7 @@ async function OverviewData({ slug }: { slug: string }) {
       coverageStats={coverageStats}
       backlogStats={backlogStats}
       stageStates={stageStates}
-      mappingOnly={specialty.mappingOnly ?? false}
+      pipelineMode={specialty.pipelineMode ?? 'full'}
     />
   );
 }

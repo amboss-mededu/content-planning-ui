@@ -1,8 +1,9 @@
 'use client';
 
-import { Callout, Checkbox, Input, Modal, Select, Stack } from '@amboss/design-system';
+import { Callout, Input, Modal, Select, Stack } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 
 function autoSlug(name: string): string {
   return name
@@ -28,7 +29,8 @@ export function AddSpecialtyModal({
   const [slugTouched, setSlugTouched] = useState(false);
   const [region, setRegion] = useState('');
   const [language, setLanguage] = useState('');
-  const [mappingOnly, setMappingOnly] = useState(false);
+  const [pipelineMode, setPipelineMode] = useState<PipelineMode>('full');
+  const [mappingSource, setMappingSource] = useState<MappingSource>('amboss');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +38,9 @@ export function AddSpecialtyModal({
 
   const displayedSlug = slugTouched ? slug : autoSlug(name);
   const canSubmit = !submitting && name.trim().length > 0 && displayedSlug.length > 0;
+  // RAG-corpus always maps against guidelines; lock the source select to it.
+  const sourceLocked = pipelineMode === 'rag-corpus';
+  const effectiveSource: MappingSource = sourceLocked ? 'guidelines' : mappingSource;
 
   const reset = () => {
     setName('');
@@ -43,7 +48,8 @@ export function AddSpecialtyModal({
     setSlugTouched(false);
     setRegion('');
     setLanguage('');
-    setMappingOnly(false);
+    setPipelineMode('full');
+    setMappingSource('amboss');
     setError(null);
     setSubmitting(false);
   };
@@ -67,7 +73,8 @@ export function AddSpecialtyModal({
           source: 'manual',
           region: region || undefined,
           language: language || undefined,
-          mappingOnly: mappingOnly || undefined,
+          pipelineMode,
+          mappingSource: effectiveSource,
         }),
       });
       if (!res.ok) {
@@ -139,12 +146,37 @@ export function AddSpecialtyModal({
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
           />
-          <Checkbox
-            name="specialty-mappingOnly"
-            label="Mapping only"
-            labelHint="Skip consolidation & suggestions — run coverage mapping only."
-            checked={mappingOnly}
-            onChange={(e) => setMappingOnly(e.target.checked)}
+          <Select
+            name="specialty-pipelineMode"
+            label="Workflow"
+            labelHint="What this specialty runs end to end."
+            value={pipelineMode}
+            onChange={(e) => setPipelineMode(e.target.value as PipelineMode)}
+            options={[
+              { value: 'mapping-only', label: 'Mapping only' },
+              {
+                value: 'rag-corpus',
+                label: 'RAG corpus expansion (mapping → literature search)',
+              },
+              { value: 'full', label: 'Full content pipeline (mapping → articles)' },
+            ]}
+          />
+          <Select
+            name="specialty-mappingSource"
+            label="Mapping source"
+            labelHint={
+              sourceLocked
+                ? 'RAG corpus always assesses coverage against guidelines.'
+                : 'Which content to assess coverage against.'
+            }
+            value={effectiveSource}
+            disabled={sourceLocked}
+            onChange={(e) => setMappingSource(e.target.value as MappingSource)}
+            options={[
+              { value: 'amboss', label: 'AMBOSS' },
+              { value: 'guidelines', label: 'Guidelines' },
+              { value: 'both', label: 'Both' },
+            ]}
           />
           {error ? <Callout type="error" text={error} /> : null}
         </Stack>

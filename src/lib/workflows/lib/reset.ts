@@ -22,6 +22,11 @@ import {
   deleteNewArticleSuggestionsForSpecialtyAsAdmin,
 } from '@/lib/data/articles';
 import { deleteCategoriesForSpecialtyAsAdmin } from '@/lib/data/categories';
+import { deleteCodeLitSearchRunsForSpecialtyAsAdmin } from '@/lib/data/code-lit-search-runs';
+import {
+  clearCodeLitSearchStatusForSpecialtyAsAdmin,
+  deleteCodeLitSourcesForSpecialtyAsAdmin,
+} from '@/lib/data/code-lit-sources';
 import {
   clearAllMappingsForSpecialtyAsAdmin,
   clearSuggestionsForSpecialtyAsAdmin,
@@ -127,6 +132,11 @@ async function clearEditorDataForStage(stage: StageName, specialtySlug: string) 
       await deleteArticleLitSearchRunsForSpecialtyAsAdmin(specialtySlug);
       await deleteArticleDraftRunsForSpecialtyAsAdmin(specialtySlug);
       await deleteWritingRunsForSpecialtyAsAdmin(specialtySlug);
+      // RAG-corpus code-level literature search shares this stage: clear the
+      // per-code corpus, run history, and the denormalized status on codes.
+      await deleteCodeLitSourcesForSpecialtyAsAdmin(specialtySlug);
+      await deleteCodeLitSearchRunsForSpecialtyAsAdmin(specialtySlug);
+      await clearCodeLitSearchStatusForSpecialtyAsAdmin(specialtySlug);
       break;
   }
 }

@@ -59,6 +59,52 @@ const ExtractCodesElementSchema = z.object({
 });
 
 /**
+ * Strip a surrounding markdown code fence, if present. Handles both a fence
+ * that wraps the entire payload and the trailing-prose case by only requiring
+ * the fence at the start.
+ */
+function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+/**
+ * Extract the first balanced JSON array (`[ ... ]`) from arbitrary text using a
+ * string-aware depth scanner, so commentary, citations, or `url_context`
+ * artifacts before/after the payload don't break parsing. Mirrors the object
+ * extractor in `consolidation/primary-output.ts`.
+ */
+function extractFirstJsonArray(text: string): string | null {
+  const input = stripJsonFence(text);
+  const start = input.indexOf('[');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < input.length; i++) {
+    const char = input[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '[') depth++;
+    if (char === ']') {
+      depth--;
+      if (depth === 0) return input.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
  * Parse a model completion as a JSON array of `element`-shaped items.
  *
  * The phase steps run with `structuredOutputs: false` (Gemini can't combine a
@@ -68,21 +114,53 @@ const ExtractCodesElementSchema = z.object({
  * without the grammar — the model returns a bare array per the prompt, and
  * `Output.array` then throws `response must be an object with an elements
  * array`. Instead we parse and validate the text ourselves (same approach as
- * `extractMilestonesForInputs`). Tolerates a markdown code fence in case the
- * model wraps the payload.
+ * `extractMilestonesForInputs`).
+ *
+ * Despite the "JSON array, no other text" instruction, models reached through
+ * `url_context` routinely wrap the payload in a markdown fence, prepend a
+ * sentence of commentary, or emit citation artifacts — all of which make a
+ * naive `JSON.parse` throw. We therefore: (1) parse the fence-stripped body
+ * directly, then (2) fall back to extracting the first balanced `[ ... ]` and
+ * (3) unwrapping a `{ elements | items | data | results: [...] }` object before
+ * giving up.
  */
 function parseJsonArray<T>(text: string, element: z.ZodType<T>): T[] {
-  let body = text.trim();
-  const fence = body.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
-  if (fence) body = fence[1].trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
+  const body = stripJsonFence(text);
+
+  const tryParse = (candidate: string): unknown | undefined => {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // 1. Direct parse of the (fence-stripped) body.
+  let parsed = tryParse(body);
+
+  // 2. Fall back to the first balanced array embedded in surrounding text.
+  if (!Array.isArray(parsed)) {
+    const arrayText = extractFirstJsonArray(text);
+    if (arrayText) parsed = tryParse(arrayText);
+  }
+
+  // 3. Unwrap a common single-key object wrapper, e.g. `{ "elements": [...] }`.
+  if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+    for (const key of ['elements', 'items', 'data', 'results']) {
+      const value = (parsed as Record<string, unknown>)[key];
+      if (Array.isArray(value)) {
+        parsed = value;
+        break;
+      }
+    }
+  }
+
+  if (!Array.isArray(parsed)) {
     throw new Error(
-      `Model did not return valid JSON (first 200 chars): ${body.slice(0, 200)}`,
+      `Model did not return a JSON array (first 200 chars): ${body.slice(0, 200)}`,
     );
   }
+
   return z.array(element).parse(parsed);
 }
 

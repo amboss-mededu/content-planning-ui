@@ -26,7 +26,10 @@ export function SpecialtyCard({
         <Card title={specialty.name} titleAs="h3" outlined>
           <CardBox>
             <Stack space="s">
-              <PipelineStageStrip stageStates={stageStates} />
+              <PipelineStageStrip
+                stageStates={stageStates}
+                pipelineMode={specialty.pipelineMode ?? 'full'}
+              />
               {hasCounts ? (
                 <Text color="secondary">
                   {meta?.codes !== undefined ? `${meta.codes} codes` : ''}

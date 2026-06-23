@@ -11,7 +11,7 @@ import {
   type PipelineCardState,
   type PipelineStageStates,
 } from '@/lib/pipeline-stage-state';
-import type { Specialty } from '@/lib/types';
+import type { MappingSource, PipelineMode, Specialty } from '@/lib/types';
 
 // Specialties live in PocketBase. RSC pages call these helpers and get a
 // snapshot via the cookie-authed PB client. Client components that need
@@ -23,6 +23,7 @@ import type { Specialty } from '@/lib/types';
 // would just add staleness without saving any work for an internal tool.
 
 function toSpecialty(row: SpecialtyRecord): Specialty {
+  const pipelineMode = resolvePipelineMode(row);
   return {
     slug: row.slug,
     name: row.name,
@@ -32,8 +33,33 @@ function toSpecialty(row: SpecialtyRecord): Specialty {
     source: row.source as Specialty['source'],
     sheetId: row.sheetId,
     xlsxPath: row.xlsxPath,
-    mappingOnly: row.mappingOnly ?? false,
+    pipelineMode,
+    // `mappingOnly` is derived from the mode — both 'mapping-only' and
+    // 'rag-corpus' want consolidation/suggestions hidden, so every existing
+    // `mappingOnly` consumer keeps working unchanged.
+    mappingOnly: pipelineMode !== 'full',
+    mappingSource: normalizeMappingSource(row.mappingSource),
   };
+}
+
+/** Narrow the stored text to the union; empty/unknown → 'amboss' (today's
+ *  behaviour) so existing specialties keep mapping against AMBOSS only. */
+function normalizeMappingSource(value: string | undefined): MappingSource {
+  return value === 'guidelines' || value === 'both' ? value : 'amboss';
+}
+
+/**
+ * Resolve a specialty's run mode. The `pipelineMode` column is the source of
+ * truth; legacy rows written before it fall back to the old `mappingOnly`
+ * boolean (`true` → 'mapping-only'). Unknown/empty values read as 'full'.
+ * Exported for the workflow context loader (`loadSpecialtyForMapping`).
+ */
+export function resolvePipelineMode(
+  row: Pick<SpecialtyRecord, 'pipelineMode' | 'mappingOnly'> | null | undefined,
+): PipelineMode {
+  const v = row?.pipelineMode;
+  if (v === 'full' || v === 'mapping-only' || v === 'rag-corpus') return v;
+  return row?.mappingOnly ? 'mapping-only' : 'full';
 }
 
 async function userClient(): Promise<PocketBase> {
@@ -105,6 +131,8 @@ export async function createSpecialty(args: {
   region?: string;
   language?: string;
   mappingOnly?: boolean;
+  mappingSource?: MappingSource;
+  pipelineMode?: PipelineMode;
 }): Promise<string> {
   const pb = await userClient();
   const collection = pb.collection<SpecialtyRecord>('specialties');
@@ -179,6 +207,42 @@ export async function setSpecialtyMappingOnly(
     .collection<SpecialtyRecord>('specialties')
     .getFirstListItem(`slug = "${slug}"`);
   await pb.collection('specialties').update(row.id, { mappingOnly: value });
+}
+
+/**
+ * Set the mapping source ('amboss' | 'guidelines' | 'both') on a specialty.
+ * Backs the header control (PATCH /api/specialties). Existing coverage data is
+ * left untouched — the setting only changes which source(s) future mapping
+ * runs query.
+ */
+export async function setSpecialtyMappingSource(
+  slug: string,
+  value: MappingSource,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  await pb.collection('specialties').update(row.id, { mappingSource: value });
+}
+
+/**
+ * Set the per-specialty workflow mode ('full' | 'mapping-only' | 'rag-corpus').
+ * Source of truth for what the pipeline runs; the data layer derives
+ * `mappingOnly` from it. Existing coverage/suggestion data is left untouched —
+ * the mode only changes future runs and which surfaces are visible. Callers
+ * that switch to 'rag-corpus' should also pin the mapping source to
+ * 'guidelines' (the API route does this).
+ */
+export async function setSpecialtyPipelineMode(
+  slug: string,
+  value: PipelineMode,
+): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  await pb.collection('specialties').update(row.id, { pipelineMode: value });
 }
 
 /**

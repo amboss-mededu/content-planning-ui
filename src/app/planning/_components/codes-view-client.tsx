@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
-import type { MappingInFlightRecord } from '@/lib/pb/types';
-import { useLiveCollection } from '@/lib/pb/use-live-collection';
-import type { Code } from '@/lib/types';
+import type { CodeLitSearchRunRecord } from '@/lib/pb/types';
+import type { Code, MappingSource, PipelineMode } from '@/lib/types';
 import { CodesView } from './codes-view';
+import { useCodeLitSearchState } from './use-running-code-lit-search';
+
+const EMPTY_LIT_RUNS: CodeLitSearchRunRecord[] = [];
 
 const PER_PAGE = 200;
-const EMPTY_IN_FLIGHT: MappingInFlightRecord[] = [];
+const EMPTY_IN_FLIGHT: string[] = [];
 const FULL_RECONCILE_INTERVAL_MS = 60_000;
 const PAGE_RETRY_DELAY_MS = 1500;
 
@@ -29,11 +31,21 @@ export function CodesViewClient({
   initialCodes,
   initialHasMore,
   mappingOnly = false,
+  mappingSource = 'amboss',
+  pipelineMode = 'full',
+  initialLitSearchRuns = EMPTY_LIT_RUNS,
+  inFlightCodes: inFlightCodesProp = EMPTY_IN_FLIGHT,
 }: {
   slug: string;
   initialCodes: CodeTableRow[];
   initialHasMore: boolean;
   mappingOnly?: boolean;
+  mappingSource?: MappingSource;
+  pipelineMode?: PipelineMode;
+  initialLitSearchRuns?: CodeLitSearchRunRecord[];
+  /** Live in-flight codes, owned by the parent {@link MappingView} so the page
+   *  badge and the table's per-row "Mapping…" pulses share one poll. */
+  inFlightCodes?: string[];
 }) {
   const [codes, setCodes] = useState<CodeTableRow[]>(initialCodes);
   const [hasMore, setHasMore] = useState(initialHasMore);
@@ -90,17 +102,14 @@ export function CodesViewClient({
     };
   }, [slug]);
 
-  const inFlightRows = useLiveCollection<MappingInFlightRecord>(
-    'mappingsInFlight',
-    EMPTY_IN_FLIGHT,
-    { filter: `specialtySlug = "${slug}"` },
-  );
+  // Live per-code literature-search run state (rag-corpus mapping sheet).
+  const litSearch = useCodeLitSearchState(slug, initialLitSearchRuns);
 
   const inFlightCodes = useMemo(() => {
-    const live = new Set(inFlightRows.map((r) => r.code));
+    const live = new Set(inFlightCodesProp);
     for (const code of summary?.inFlightCodes ?? []) live.add(code);
     return Array.from(live);
-  }, [inFlightRows, summary]);
+  }, [inFlightCodesProp, summary]);
 
   // Progressive page fetch — load remaining lean pages after first paint.
   useEffect(() => {
@@ -264,6 +273,9 @@ export function CodesViewClient({
       loadState={loadState}
       onPatchRow={patchRow}
       mappingOnly={mappingOnly}
+      mappingSource={mappingSource}
+      pipelineMode={pipelineMode}
+      litSearch={litSearch}
     />
   );
 }
