@@ -63,6 +63,9 @@ export function PromptSection({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={3}
+          // The DS Textarea defaults maxLength to 256, which silently truncates
+          // longer prompt instructions. Lift it well above any realistic prompt.
+          maxLength={50000}
         />
       ) : null}
     </Stack>

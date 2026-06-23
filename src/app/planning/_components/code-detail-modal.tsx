@@ -34,6 +34,7 @@ import {
   readSpec,
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
+import { AddCodeLitSourceModal } from './add-code-lit-source-modal';
 import {
   ArticleUpdatesEditor,
   CoverageArticlesEditor,
@@ -672,6 +673,7 @@ export function CodeDetailModal({
                 <LiteratureCodePanel
                   specialtySlug={specialtySlug}
                   codeId={detailRow.id ?? null}
+                  code={detailRow.code ?? ''}
                   active={activeTarget === 'literature'}
                 />
               ) : (
@@ -816,10 +818,12 @@ function GuidelineCoveragePanel({
 function LiteratureCodePanel({
   specialtySlug,
   codeId,
+  code,
   active,
 }: {
   specialtySlug: string;
   codeId: string | null;
+  code: string;
   active: boolean;
 }) {
   const [state, setState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -860,6 +864,7 @@ function LiteratureCodePanel({
   }, [active, codeId, specialtySlug]);
 
   const [pane, setPane] = useState<'searched' | 'approved'>('searched');
+  const [addOpen, setAddOpen] = useState(false);
   const [submittingIds, setSubmittingIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -919,15 +924,10 @@ function LiteratureCodePanel({
       </Text>
     );
   }
-  if (sources.length === 0) {
-    return (
-      <Text size="s" color="tertiary">
-        No literature gathered for this topic yet.
-      </Text>
-    );
-  }
   const approved = sources.filter((s) => s.reviewStatus === 'approved');
-  const searched = sources.filter((s) => s.reviewStatus !== 'approved');
+  // Searched is the full candidate list — approving a source keeps it here
+  // (with its box checked) and also surfaces it in the Approved pane.
+  const searched = sources;
   const list = pane === 'approved' ? approved : searched;
 
   const renderCard = (s: CodeLitSourceRecord) => {
@@ -983,33 +983,51 @@ function LiteratureCodePanel({
 
   return (
     <Stack space="s">
-      <SegmentedControl
-        label="Literature review"
-        isLabelHidden
-        value={pane}
-        onChange={(v) => setPane(v === 'approved' ? 'approved' : 'searched')}
-        options={[
-          {
-            name: 'lit-pane',
-            value: 'searched',
-            label: `Searched (${searched.length})`,
-          },
-          {
-            name: 'lit-pane',
-            value: 'approved',
-            label: `Approved (${approved.length})`,
-          },
-        ]}
-      />
+      <Inline space="s" vAlignItems="center" alignItems="spaceBetween">
+        <SegmentedControl
+          label="Literature review"
+          isLabelHidden
+          value={pane}
+          onChange={(v) => setPane(v === 'approved' ? 'approved' : 'searched')}
+          options={[
+            {
+              name: 'lit-pane',
+              value: 'searched',
+              label: `Searched (${searched.length})`,
+            },
+            {
+              name: 'lit-pane',
+              value: 'approved',
+              label: `Approved (${approved.length})`,
+            },
+          ]}
+        />
+        <Button
+          variant="secondary"
+          size="s"
+          leftIcon="plus"
+          onClick={() => setAddOpen(true)}
+        >
+          Add source
+        </Button>
+      </Inline>
       {list.length === 0 ? (
         <Text size="s" color="tertiary">
           {pane === 'approved'
-            ? 'No approved literature yet — approve sources from the Searched tab.'
-            : 'No literature awaiting review.'}
+            ? 'No approved literature yet — approve sources from the Searched tab, or add one manually.'
+            : 'No literature gathered for this topic yet.'}
         </Text>
       ) : (
         list.map(renderCard)
       )}
+      <AddCodeLitSourceModal
+        open={addOpen}
+        slug={specialtySlug}
+        codeId={codeId}
+        code={code}
+        onClose={() => setAddOpen(false)}
+        onAdded={(source) => setSources((rows) => [...rows, source])}
+      />
     </Stack>
   );
 }

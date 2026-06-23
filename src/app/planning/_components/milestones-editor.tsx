@@ -88,6 +88,9 @@ export function MilestonesEditor({
             }
             rows={16}
             resize="vertical"
+            // The DS Textarea defaults maxLength to 256, which silently truncates
+            // pasted milestone documents. Lift it to the 2 MB server cap.
+            maxLength={2 * 1024 * 1024}
             disabled={saving}
           />
 

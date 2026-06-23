@@ -179,6 +179,57 @@ export async function setCodeLitSourceReviewAsAdmin(
 }
 
 /**
+ * Create a single manually-added literature source for a code. Editor-chosen,
+ * so it's pre-`approved` and appended after the existing sources by rank —
+ * shows up immediately in both the Searched (full list) and Approved panes.
+ * Admin-side mirror of {@link createArticleSourceAsAdmin}.
+ */
+export async function createCodeLitSourceAsAdmin(
+  slug: string,
+  codeId: string,
+  code: string,
+  fields: {
+    title: string;
+    /** Optional Source ID — if given, doubles as the ribosomId + Cortex id.
+     *  Unlike the article flow it's optional: the RAG corpus normally fills
+     *  `cortexSourceId` downstream. */
+    sourceId?: string;
+    url?: string;
+    journal?: string;
+    doi?: string;
+    sourceType?: string;
+    reviewerEmail?: string;
+  },
+): Promise<CodeLitSourceRecord> {
+  const pb = await createAdminClient();
+  const existing = await pb
+    .collection<CodeLitSourceRecord>('codeLitSources')
+    .getFullList({ filter: `specialtySlug = "${slug}" && codeId = "${codeId}"` });
+  const next =
+    existing.reduce((max, s) => Math.max(max, s.rank ?? 0, s.priority ?? 0), 0) + 1;
+  const payload: Record<string, unknown> = {
+    specialtySlug: slug,
+    codeId,
+    code,
+    title: fields.title,
+    rank: next,
+    priority: next,
+    reviewStatus: 'approved',
+    reviewerEmail: fields.reviewerEmail ?? '',
+    reviewedAt: Date.now(),
+  };
+  if (fields.sourceId) {
+    payload.ribosomId = fields.sourceId;
+    payload.cortexSourceId = fields.sourceId;
+  }
+  if (fields.url) payload.url = fields.url;
+  if (fields.journal) payload.journal = fields.journal;
+  if (fields.doi) payload.doi = fields.doi;
+  if (fields.sourceType) payload.sourceType = fields.sourceType;
+  return pb.collection<CodeLitSourceRecord>('codeLitSources').create(payload);
+}
+
+/**
  * Stamp the denormalized lit-search result fields onto the `codes` row so the
  * mapping sheet can show a source count / status without a separate query.
  * Tolerates a missing code row (deleted between dispatch and callback).

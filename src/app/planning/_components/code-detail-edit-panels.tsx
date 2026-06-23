@@ -304,6 +304,9 @@ export function ArticleUpdatesEditor({
                 label="Changes"
                 name={`upd-sec-changes-${i}-${si}`}
                 resize="vertical"
+                // The DS Textarea defaults maxLength to 256, which silently
+                // truncates longer text. Lift it past any realistic entry.
+                maxLength={50000}
                 value={sec.changes ?? ''}
                 onChange={(e) =>
                   patch(i, {
@@ -438,6 +441,9 @@ export function TextFieldsEditor({
           label={f.label}
           name={`text-${f.key}`}
           resize="vertical"
+          // The DS Textarea defaults maxLength to 256, which silently
+          // truncates longer text. Lift it past any realistic entry.
+          maxLength={50000}
           value={draft[f.key] ?? ''}
           onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
         />
