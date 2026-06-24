@@ -284,13 +284,27 @@ export async function mapGuidelinesForCode(input: {
         },
       });
 
-      const result = await runAgentAttempt({
-        spec: step.spec,
-        apiKeys: input.apiKeys,
-        system,
-        userMessage,
-        tools,
-      });
+      let result: Awaited<ReturnType<typeof runAgentAttempt>>;
+      try {
+        result = await runAgentAttempt({
+          spec: step.spec,
+          apiKeys: input.apiKeys,
+          system,
+          userMessage,
+          tools,
+        });
+      } catch (e) {
+        // Timeout/abort (hung MCP or provider) or transport error — log and
+        // fall through to the next rung instead of rejecting the batch.
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'warn',
+          message: `Guidelines attempt ${attempts} (${step.label}) agent call failed for ${input.code}: ${errorMessage(e)}`,
+          metrics: { phase: 'map_guidelines', model: lastModel, code: input.code },
+        });
+        continue;
+      }
       const durationMs = Date.now() - started;
 
       let parsed: GuidelineOutput;

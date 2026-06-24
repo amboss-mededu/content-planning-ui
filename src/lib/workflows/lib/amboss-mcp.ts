@@ -107,6 +107,26 @@ const MappingOutputSchema = z.object({
 
 export type MappingOutput = z.infer<typeof MappingOutputSchema>;
 
+/** A blank "not covered" mapping, written through when the attempt ladder is
+ *  exhausted without a single parseable result (e.g. every attempt timed out).
+ *  Lets the stage complete with the code flagged unresolved instead of hanging
+ *  or failing the whole run. */
+function emptyUnresolvedMapping(code: string, description: string): MappingOutput {
+  return {
+    code,
+    description,
+    coverage: {
+      inAMBOSS: false,
+      coveredSections: [],
+      generalNotes: 'Unresolved — no parseable agent output after all attempts.',
+      gaps: '',
+      coverageLevel: 'none',
+      coverageScore: 0,
+    },
+    suggestion: { improvement: '', sectionUpdates: [], newArticlesNeeded: [] },
+  };
+}
+
 // The suggestion-only pass returns just the `suggestion` block — coverage is
 // supplied as input and merged back in before validation.
 const SuggestionOnlyOutputSchema = z.object({
@@ -333,6 +353,17 @@ function correctionMessage(invalidIds: string[]): string {
 // Single model call. Isolated so the attempt loop just swaps model IDs.
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-step ceiling: one model round-trip (a single request plus the tool calls
+ * it triggers) should never legitimately take this long. A stalled MCP/provider
+ * socket that opens but never responds is the failure mode this guards against —
+ * `stopWhen` only fires *between* completed steps and the SDK's default retry
+ * only fires on a *rejected* request, so neither can interrupt a hung socket.
+ */
+const AGENT_STEP_TIMEOUT_MS = 90_000;
+/** Hard ceiling for one full attempt (the whole ≤20-step tool loop). */
+const AGENT_TOTAL_TIMEOUT_MS = 300_000;
+
 export async function runAgentAttempt(params: {
   spec: ModelSpec;
   apiKeys: ProviderApiKeys;
@@ -353,6 +384,11 @@ export async function runAgentAttempt(params: {
     prompt: userMessage,
     tools,
     stopWhen: ({ steps }: { steps: Array<unknown> }) => steps.length >= 20,
+    // Bound every agent call. Without this a hung MCP/provider socket leaves
+    // `generateText` pending forever, which wedges the per-code `Promise.all`
+    // and leaves the whole map_codes stage stuck on `running`. `stepMs` aborts
+    // a single stalled round-trip; `totalMs` caps the entire tool loop.
+    timeout: { stepMs: AGENT_STEP_TIMEOUT_MS, totalMs: AGENT_TOTAL_TIMEOUT_MS },
     temperature: 1,
     providerOptions: resolved.providerOptions,
   });
@@ -574,13 +610,30 @@ export async function mapAndValidateCode(input: {
         },
       });
 
-      const result = await runAgentAttempt({
-        spec: step.spec,
-        apiKeys: input.apiKeys,
-        system,
-        userMessage,
-        tools,
-      });
+      let result: Awaited<ReturnType<typeof runAgentAttempt>>;
+      try {
+        result = await runAgentAttempt({
+          spec: step.spec,
+          apiKeys: input.apiKeys,
+          system,
+          userMessage,
+          tools,
+        });
+      } catch (e) {
+        // Timeout/abort (hung MCP or provider) or a transport error. Treat it
+        // like a bad attempt: log and fall through to the next rung instead of
+        // rejecting the whole batch and wedging the stage on `running`.
+        const msg = errorMessage(e);
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'warn',
+          message: `Map attempt ${attempts} (${step.label}) agent call failed for ${input.code}: ${msg}`,
+          metrics: { phase: 'map', model: lastModel, code: input.code },
+        });
+        cumulativeInvalid = ['<agent error>'];
+        continue;
+      }
 
       const durationMs = Date.now() - started;
       let parsed: MappingOutput;
@@ -662,11 +715,13 @@ export async function mapAndValidateCode(input: {
       // Continue the ladder; parse was valid but IDs aren't.
     }
 
-    // Ladder exhausted. Write through the last mapping with unresolved flag.
+    // Ladder exhausted. Write through the last mapping (or an explicit empty
+    // "not covered" mapping if no attempt ever parsed — e.g. every attempt
+    // timed out) flagged unresolved. We never throw here: failing one code must
+    // not abort the whole stage and discard the other codes' progress.
     const durationMs = Date.now() - started;
-    if (!lastMapping) {
-      throw new Error('All attempts produced unparseable output');
-    }
+    const resolvedMapping: MappingOutput =
+      lastMapping ?? emptyUnresolvedMapping(input.code, input.description);
     await logEvent({
       runId: input.runId,
       stage: input.stage,
@@ -676,14 +731,14 @@ export async function mapAndValidateCode(input: {
         phase: 'map',
         model: lastModel,
         code: input.code,
-        completion: lastMapping,
+        completion: resolvedMapping,
         invalidIds: cumulativeInvalid,
         durationMs,
         attempts,
       },
     });
     return {
-      mapping: lastMapping,
+      mapping: resolvedMapping,
       attempts,
       model: lastModel,
       invalidIds: cumulativeInvalid,
@@ -851,13 +906,28 @@ export async function generateSuggestionsForCode(input: {
         },
       });
 
-      const result = await runAgentAttempt({
-        spec: step.spec,
-        apiKeys: input.apiKeys,
-        system,
-        userMessage,
-        tools,
-      });
+      let result: Awaited<ReturnType<typeof runAgentAttempt>>;
+      try {
+        result = await runAgentAttempt({
+          spec: step.spec,
+          apiKeys: input.apiKeys,
+          system,
+          userMessage,
+          tools,
+        });
+      } catch (e) {
+        // Timeout/abort or transport error — fall through to the next rung.
+        const msg = errorMessage(e);
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'warn',
+          message: `Suggest attempt ${attempts} (${step.label}) agent call failed for ${input.code}: ${msg}`,
+          metrics: { phase: 'map', model: lastModel, code: input.code },
+        });
+        cumulativeInvalid = ['<agent error>'];
+        continue;
+      }
 
       const durationMs = Date.now() - started;
       let parsed: MappingOutput;
