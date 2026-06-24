@@ -146,6 +146,7 @@ export function PipelineDashboard({
               completed={stages.extract_codes?.stage?.status === 'completed'}
               hasDownstream={mappedCodeCount > 0}
               runId={stages.extract_codes?.stage?.runId ?? null}
+              pipelineMode={pipelineMode}
             />
           </StageCard>
           <StageCard

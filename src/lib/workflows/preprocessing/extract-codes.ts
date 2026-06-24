@@ -140,13 +140,28 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       });
     }
 
-    // Number codes per-source so each namespace starts at 0001.
+    // Number codes within the specialty. Curriculum runs use a single
+    // specialty-scoped counter and drop the source segment from the id —
+    // a curriculum has one logical source, so `<slug>_<nnnn>` is enough and the
+    // `none_`/`ab_` prefix is just noise. Other modes keep per-source namespaces
+    // (`<source>_<slug>_<nnnn>`) so codes from different ontologies
+    // (ICD10/HCUP/ABIM/Orpha) never collide. The `source` field is still stored
+    // either way — only the id format differs.
+    const isCurriculum = variant === 'curriculum';
     const perSourceCounts: Record<string, number> = {};
+    let curriculumCount = 0;
     const rawCodes = extracted.map((c) => {
-      const n = (perSourceCounts[c.source] ?? 0) + 1;
-      perSourceCounts[c.source] = n;
+      let code: string;
+      if (isCurriculum) {
+        curriculumCount += 1;
+        code = `${input.specialtySlug}_${String(curriculumCount).padStart(4, '0')}`;
+      } else {
+        const n = (perSourceCounts[c.source] ?? 0) + 1;
+        perSourceCounts[c.source] = n;
+        code = `${c.source}_${input.specialtySlug}_${String(n).padStart(4, '0')}`;
+      }
       return {
-        code: `${c.source}_${input.specialtySlug}_${String(n).padStart(4, '0')}`,
+        code,
         category: c.category,
         consolidationCategory: c.consolidationCategory,
         description: c.description,

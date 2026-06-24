@@ -937,3 +937,17 @@ export async function clearInFlightForRunAsAdmin(runId: string): Promise<void> {
     .getFullList({ filter: `runId = "${runId}"` });
   await Promise.all(rows.map((r) => pb.collection('mappingsInFlight').delete(r.id)));
 }
+
+/**
+ * Clear every in-flight marker for a specialty, regardless of run. Backs the
+ * universal "Cancel mapping" button: deleting the markers makes the sheet's
+ * "Mapping…" pulses disappear at once instead of waiting for the cancelled
+ * workflow to reach its next status poll and clear them itself.
+ */
+export async function clearInFlightForSpecialtyAsAdmin(slug: string): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<MappingInFlightRecord>('mappingsInFlight')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
+  await Promise.all(rows.map((r) => pb.collection('mappingsInFlight').delete(r.id)));
+}

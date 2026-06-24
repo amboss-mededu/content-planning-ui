@@ -2,6 +2,7 @@
 
 import { Button, Inline, Modal } from '@amboss/design-system';
 import { useState } from 'react';
+import type { PipelineMode } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { RunningButton } from '../../../_components/running-button';
 import { RerunExtractionButton } from './rerun-extraction-button';
@@ -14,10 +15,14 @@ export function StartCodesModal({
   completed = false,
   hasDownstream = false,
   runId = null,
+  pipelineMode = 'full',
 }: {
   specialtySlug: string;
   sources: CodeSource[];
   running: boolean;
+  /** Drives the mode-aware code-id hint in the form (curriculum drops the
+   *  source prefix). */
+  pipelineMode?: PipelineMode;
   /** Latest extract_codes run finished — show "Re run extraction" instead. */
   completed?: boolean;
   /** Mapping has run, so a re-run must wipe downstream (typed confirm). */
@@ -59,7 +64,11 @@ export function StartCodesModal({
           onAction={() => setOpen(false)}
         >
           <Modal.Stack>
-            <StartRunForm specialtySlug={specialtySlug} sources={sources} />
+            <StartRunForm
+              specialtySlug={specialtySlug}
+              sources={sources}
+              pipelineMode={pipelineMode}
+            />
           </Modal.Stack>
         </Modal>
       ) : null}

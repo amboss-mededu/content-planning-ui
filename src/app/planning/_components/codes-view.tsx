@@ -744,8 +744,10 @@ export function CodesView({
 
     // Curriculum-mapping slots the time-dimension columns in right after the
     // metadata columns (source is pinned to AMBOSS, so coverage columns remain).
+    // The Source column is dropped here too — a curriculum has one logical
+    // source, so the ontology column is meaningless noise (other modes keep it).
     if (curriculum) {
-      const metaCols = result.filter((c) => c.group === 'metadata');
+      const metaCols = result.filter((c) => c.group === 'metadata' && c.key !== 'source');
       const rest = result.filter((c) => c.group !== 'metadata');
       result = [...metaCols, ...curriculumCols, ...rest];
     }

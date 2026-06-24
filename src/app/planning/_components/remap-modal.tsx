@@ -14,6 +14,7 @@ import {
   readSpec,
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
+import { CancelMappingButton } from './cancel-mapping-button';
 import {
   estimateScopeCount,
   MappingScopePicker,
@@ -39,6 +40,7 @@ export function RemapModal({
   categories,
   unmappedCodes,
   unmappedCount,
+  mappingActive = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -46,6 +48,9 @@ export function RemapModal({
   categories: CodeCategorySummary[];
   unmappedCodes: UnmappedCodePickerRow[];
   unmappedCount: number;
+  /** A map/remap run is already in flight — show a Cancel control so a stuck
+   *  or unwanted run can be stopped from here. */
+  mappingActive?: boolean;
 }) {
   const router = useRouter();
   const [scope, setScope] = useState<MappingScopeValue>({
@@ -134,6 +139,15 @@ export function RemapModal({
       >
         <Modal.Stack>
           <Stack space="s">
+            {mappingActive ? (
+              <Stack space="xs">
+                <Callout
+                  type="warning"
+                  text="A mapping run is already in progress. You can stop it before starting another."
+                />
+                <CancelMappingButton slug={specialtySlug} onCancelled={onClose} />
+              </Stack>
+            ) : null}
             <Text>
               Concurrency = 10 · primary + backup models picked from the Map codes
               pipeline card.

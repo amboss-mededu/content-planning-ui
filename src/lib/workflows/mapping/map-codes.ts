@@ -303,6 +303,15 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
         await revalidateSpecialtyCache(input.specialtySlug);
       }
 
+      // Final cancellation check before the terminal writes. The per-batch and
+      // per-code polls can't catch a cancel that lands after the last code
+      // resolves but before completion is written — and markStageCompleted /
+      // updatePipelineRunStatus are plain updates with no status precondition,
+      // so without this a late cancel would be silently resurrected to
+      // 'completed'. Bail into the RunCancelledError path instead.
+      const finalStatus = await getPipelineRunStatus(input.runId);
+      if (shouldAbort(finalStatus)) throw new RunCancelledError(finalStatus);
+
       const totals = await aggregateStageMetrics(input.runId, 'map_codes');
       // Stash the run-level summary on the stage row alongside completion so
       // the pipeline card still shows mapped/escalations/cost without going

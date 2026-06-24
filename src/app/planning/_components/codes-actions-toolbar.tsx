@@ -21,6 +21,9 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
   const [unmappedCount, setUnmappedCount] = useState(0);
   // Bulk mapping only needs to pause during a full-specialty consolidation.
   const [runningAll, setRunningAll] = useState(false);
+  // Whether a map/remap run is currently in flight — surfaces the "Cancel
+  // mapping" control inside the Map-codes modal.
+  const [mappingActive, setMappingActive] = useState(false);
 
   const [remapOpen, setRemapOpen] = useState(false);
   const [remapData, setRemapData] = useState<{
@@ -37,10 +40,12 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       if (!res.ok) return;
       const data = (await res.json()) as {
         unmappedCount: number;
+        inFlightCodes?: string[];
         activity: { runningAll: boolean; runningBuckets: string[] };
       };
       setUnmappedCount(data.unmappedCount);
       setRunningAll(data.activity.runningAll);
+      setMappingActive((data.inFlightCodes?.length ?? 0) > 0);
       setSupportReady(true);
     } catch {
       /* buttons stay disabled until the next refetch */
@@ -81,6 +86,9 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       size="m"
       disabled={!canRemap || remapLoading}
       onClick={async () => {
+        // Refresh the in-flight signal so the modal's Cancel control reflects
+        // a run that may have started since the last mount/focus fetch.
+        void refetchSummary();
         await loadRemapData();
         setRemapOpen(true);
       }}
@@ -110,6 +118,7 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
         categories={remapData?.categories ?? []}
         unmappedCodes={remapData?.unmappedCodes ?? []}
         unmappedCount={unmappedCount}
+        mappingActive={mappingActive}
       />
     </Inline>
   );

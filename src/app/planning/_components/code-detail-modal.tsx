@@ -39,6 +39,7 @@ import {
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
 import { AddCodeLitSourceModal } from './add-code-lit-source-modal';
+import { CancelMappingButton } from './cancel-mapping-button';
 import {
   ArticleUpdatesEditor,
   CoverageArticlesEditor,
@@ -515,6 +516,16 @@ export function CodeDetailModal({
               </Text>
             ) : null}
           </Inline>
+
+          {inFlight ? (
+            <Inline space="s" vAlignItems="center">
+              <Badge text="Mapping…" color="blue" icon="loader" />
+              <Text size="s" color="secondary">
+                This code is currently being mapped.
+              </Text>
+              <CancelMappingButton slug={specialtySlug} onCancelled={onClose} />
+            </Inline>
+          ) : null}
 
           {isUnmapped ? (
             <Inline space="s" vAlignItems="center">

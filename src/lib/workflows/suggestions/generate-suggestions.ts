@@ -196,6 +196,12 @@ export async function generateSuggestionsWorkflow(
         await revalidateSpecialtyCache(input.specialtySlug);
       }
 
+      // Final cancellation check before the terminal writes (see map-codes):
+      // catch a cancel that lands after the last code but before completion is
+      // written, so it isn't silently resurrected to 'completed'.
+      const finalStatus = await getPipelineRunStatus(input.runId);
+      if (shouldAbort(finalStatus)) throw new RunCancelledError(finalStatus);
+
       const totals = await aggregateStageMetrics(input.runId, 'map_suggestions');
       await markStageCompleted(input.runId, 'map_suggestions', undefined, {
         codes: pending.length,
