@@ -713,6 +713,35 @@ export function CodesView({
       },
     ];
 
+    // --- Question mapping column (curriculum-mapping only) -----------------
+    const questionCols: Column<Code>[] = [
+      {
+        key: 'questionsWhereCoverageIs',
+        label: 'Questions',
+        description: 'AMBOSS Qbank questions (EIDs) that cover this code',
+        width: 160,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const n = r.questionCount ?? r.questionsWhereCoverageIs?.length ?? 0;
+          if (n === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={`${n} question${n === 1 ? '' : 's'}`}
+              tone="questions"
+              onClick={() => onOpenDetail(r, 'questions')}
+            />
+          );
+        },
+        accessor: (r) => r.questionCount ?? r.questionsWhereCoverageIs?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        // Sits under the existing "AMBOSS coverage" group banner (beside
+        // Articles) rather than getting its own header.
+        group: 'coverage',
+      },
+    ];
+
     // Compose the column set by source. AMBOSS coverage columns are dropped
     // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
     // guideline + overall columns slot in between AMBOSS coverage and the
@@ -746,10 +775,15 @@ export function CodesView({
     // metadata columns (source is pinned to AMBOSS, so coverage columns remain).
     // The Source column is dropped here too — a curriculum has one logical
     // source, so the ontology column is meaningless noise (other modes keep it).
+    // Scoring isn't useful for curricula, so the AMBOSS Coverage level + Score
+    // columns are dropped; the Articles column stays and a Questions column is
+    // added beside it (codes map to AMBOSS articles AND questions).
     if (curriculum) {
       const metaCols = result.filter((c) => c.group === 'metadata' && c.key !== 'source');
-      const rest = result.filter((c) => c.group !== 'metadata');
-      result = [...metaCols, ...curriculumCols, ...rest];
+      const rest = result.filter(
+        (c) => c.group !== 'metadata' && c.key !== 'coverage' && c.key !== 'depth',
+      );
+      result = [...metaCols, ...curriculumCols, ...rest, ...questionCols];
     }
     return result;
   }, [
@@ -830,13 +864,18 @@ function getLoadStatusText(
 }
 
 const CHIP_TONES: Record<
-  'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions',
+  'coverage' | 'questions' | 'guideline' | 'overall' | 'literature' | 'suggestions',
   { bg: string; fg: string; border: string }
 > = {
   coverage: {
     bg: 'rgba(34, 139, 80, 0.10)',
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
+  },
+  questions: {
+    bg: 'rgba(13, 148, 136, 0.12)',
+    fg: 'rgb(15, 90, 85)',
+    border: 'rgb(13, 148, 136)',
   },
   guideline: {
     bg: 'rgba(56, 132, 168, 0.12)',
@@ -866,7 +905,7 @@ function ChipButton({
   onClick,
 }: {
   label: string;
-  tone: 'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions';
+  tone: 'coverage' | 'questions' | 'guideline' | 'overall' | 'literature' | 'suggestions';
   onClick: () => void;
 }) {
   const c = CHIP_TONES[tone];

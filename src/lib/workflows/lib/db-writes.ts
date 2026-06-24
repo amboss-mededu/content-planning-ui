@@ -34,7 +34,11 @@ import {
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
 import { log } from '@/lib/log';
-import type { GuidelineCoverage, GuidelineRecommendationRef } from '@/lib/pb/types';
+import type {
+  GuidelineCoverage,
+  GuidelineRecommendationRef,
+  QuestionRef,
+} from '@/lib/pb/types';
 import type { MappingSource, PipelineMode } from '@/lib/types';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
@@ -43,6 +47,7 @@ import {
   coerceScore,
   type GuidelineCoverageBlock,
 } from './guidelines-mcp';
+import type { QuestionCoverageBlock } from './questions-mcp';
 
 export type PipelineRunStatus =
   | 'running'
@@ -434,6 +439,27 @@ function normaliseGuidelineCoverage(
   });
 }
 
+/**
+ * Coerce a question agent's `coveredQuestions` block into the stored
+ * `QuestionRef[]` shape. Drops entries with no EID (a question without an id is
+ * not actionable). Mirrors {@link normaliseGuidelineCoverage}.
+ */
+function normaliseQuestions(
+  blocks: QuestionCoverageBlock['coveredQuestions'],
+): QuestionRef[] {
+  return (blocks ?? [])
+    .filter((q) => Boolean(q.questionId))
+    .map((q) => ({
+      questionId: q.questionId,
+      questionStem: q.questionStem,
+      studyObjectives: q.studyObjectives,
+      learningObjective: q.learningObjective,
+      competency: q.competency,
+      system: q.system,
+      difficulty: q.difficulty,
+    }));
+}
+
 export async function writeCodeMapping(
   specialtySlug: string,
   code: string,
@@ -442,6 +468,8 @@ export async function writeCodeMapping(
   extra?: {
     /** Guideline coverage block (source includes 'guidelines'). */
     guideline?: GuidelineCoverageBlock | null;
+    /** Question coverage block (curriculum-mapping question track). */
+    questions?: QuestionCoverageBlock | null;
     /** Synthesized/active overall verdict. */
     overall?: CoverageVerdict | null;
     /** Which source(s) produced this row. Defaults to 'amboss'. */
@@ -456,6 +484,7 @@ export async function writeCodeMapping(
   });
   const coverageScore = coerceScore(mapping.coverage.coverageScore);
   const g = extra?.guideline ?? null;
+  const q = extra?.questions ?? null;
   await writeCodeMappingAsAdmin({
     slug: specialtySlug,
     code,
@@ -476,6 +505,8 @@ export async function writeCodeMapping(
     guidelinesWhereCoverageIs: g
       ? normaliseGuidelineCoverage(g.coveredGuidelines)
       : undefined,
+    // --- Question mapping track (curriculum-mapping) -----------------------
+    questionsWhereCoverageIs: q ? normaliseQuestions(q.coveredQuestions) : undefined,
     // --- Overall coverage track + provenance -------------------------------
     overallCoverageLevel: extra?.overall?.coverageLevel || undefined,
     overallDepthOfCoverage: extra?.overall?.coverageScore,

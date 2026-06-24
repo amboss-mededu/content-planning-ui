@@ -18,6 +18,7 @@ import type {
   GuidelineCoverage,
   MappingInFlightRecord,
   NewArticle,
+  QuestionRef,
   SectionUpdate,
 } from '@/lib/pb/types';
 import { filterCodesByConsolidationCategories } from '@/lib/workflows/consolidation/buckets';
@@ -53,6 +54,7 @@ export type CodeTableRow = Pick<
   | 'overallCoverageLevel'
   | 'overallDepthOfCoverage'
   | 'mappingSourceUsed'
+  | 'questionCount'
   | 'litSearchStatus'
   | 'litSearchSourceCount'
   | 'litSearchedAt'
@@ -66,6 +68,7 @@ type CodeTableRowSource = CodeTableRow &
     | 'existingArticleUpdates'
     | 'newArticlesNeeded'
     | 'guidelinesWhereCoverageIs'
+    | 'questionsWhereCoverageIs'
   >;
 
 const CODE_TABLE_FIELDS = [
@@ -98,6 +101,7 @@ const CODE_TABLE_FIELDS = [
   'overallCoverageLevel',
   'overallDepthOfCoverage',
   'mappingSourceUsed',
+  'questionCount',
   'litSearchStatus',
   'litSearchSourceCount',
   'litSearchedAt',
@@ -106,6 +110,7 @@ const CODE_TABLE_FIELDS = [
   'existingArticleUpdates',
   'newArticlesNeeded',
   'guidelinesWhereCoverageIs',
+  'questionsWhereCoverageIs',
 ].join(',');
 
 function buildMappingCounts(mapping: {
@@ -113,6 +118,7 @@ function buildMappingCounts(mapping: {
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   guidelinesWhereCoverageIs?: GuidelineCoverage[];
+  questionsWhereCoverageIs?: QuestionRef[];
 }): {
   coverageArticleCount: number;
   coverageSectionCount: number;
@@ -120,6 +126,7 @@ function buildMappingCounts(mapping: {
   newArticleSuggestionCount: number;
   guidelineCount: number;
   guidelineRecommendationCount: number;
+  questionCount: number;
 } {
   return deriveCodeTableCounts(mapping);
 }
@@ -130,6 +137,7 @@ function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
     existingArticleUpdates,
     newArticlesNeeded,
     guidelinesWhereCoverageIs,
+    questionsWhereCoverageIs,
     ...rest
   } = row;
   return {
@@ -139,12 +147,14 @@ function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
       existingArticleUpdates,
       newArticlesNeeded,
       guidelinesWhereCoverageIs,
+      questionsWhereCoverageIs,
       coverageArticleCount: row.coverageArticleCount,
       coverageSectionCount: row.coverageSectionCount,
       existingArticleUpdateCount: row.existingArticleUpdateCount,
       newArticleSuggestionCount: row.newArticleSuggestionCount,
       guidelineCount: row.guidelineCount,
       guidelineRecommendationCount: row.guidelineRecommendationCount,
+      questionCount: row.questionCount,
     }),
   };
 }
@@ -391,11 +401,13 @@ export async function patchCode(
         existingArticleUpdates:
           fields.existingArticleUpdates ?? row.existingArticleUpdates,
         newArticlesNeeded: fields.newArticlesNeeded ?? row.newArticlesNeeded,
-        // The patch route never edits guideline coverage — preserve the
-        // stored guideline counts rather than letting them fall back to 0.
+        // The patch route never edits guideline coverage or questions —
+        // preserve their stored counts rather than letting them fall back to 0.
         guidelinesWhereCoverageIs: row.guidelinesWhereCoverageIs,
         guidelineCount: row.guidelineCount,
         guidelineRecommendationCount: row.guidelineRecommendationCount,
+        questionsWhereCoverageIs: row.questionsWhereCoverageIs,
+        questionCount: row.questionCount,
       }),
     );
   }
@@ -607,6 +619,10 @@ export type WriteCodeMappingArgs = {
   overallCoverageLevel?: string;
   overallDepthOfCoverage?: number;
   mappingSourceUsed?: string;
+  // --- Question mapping track (curriculum-mapping) -------------------------
+  /** Matched AMBOSS Qbank questions; `questionCount` is derived by
+   *  `buildMappingCounts` on write. */
+  questionsWhereCoverageIs?: QuestionRef[];
   /** Stamp the suggestion-processed marker (combined full-mode write). Left
    *  unset by coverage-only writes so the backfill stage can find the code. */
   suggestionsGeneratedAt?: number;
@@ -721,6 +737,9 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       overallCoverageLevel: null,
       overallDepthOfCoverage: null,
       mappingSourceUsed: null,
+      // Question mapping track (curriculum-mapping).
+      questionsWhereCoverageIs: null,
+      questionCount: 0,
       // Unmapping removes the code from consolidation input — stale its bucket.
       consolidationInputChangedAt: now,
     });
@@ -801,6 +820,9 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     overallCoverageLevel: null,
     overallDepthOfCoverage: null,
     mappingSourceUsed: null,
+    // Question mapping track (curriculum-mapping).
+    questionsWhereCoverageIs: null,
+    questionCount: 0,
     // Unmapping removes the code from consolidation input — stale its bucket.
     consolidationInputChangedAt: Date.now(),
   });

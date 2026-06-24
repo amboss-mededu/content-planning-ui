@@ -104,6 +104,12 @@ export interface CodeRecord extends PbRecord {
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   improvements?: string;
+  // --- Question mapping track (curriculum-mapping) -------------------------
+  // AMBOSS Qbank questions that cover this code, found by a separate agent via
+  // the `search_questions` MCP tool. `questionCount` is the derived length for
+  // the table column (the JSON blob is fetched only for the detail modal).
+  questionsWhereCoverageIs?: QuestionRef[];
+  questionCount?: number;
   // --- Guideline coverage track (source includes 'guidelines') -------------
   // Mirror of the AMBOSS coverage columns above, populated by the guidelines
   // mapping agent. Null/unset for amboss-only rows.
@@ -810,6 +816,19 @@ export interface CoveredSection {
   articleTitle?: string;
   articleId?: string;
   sections?: SectionRef[];
+}
+
+/** One AMBOSS Qbank question matched to a code by the question-mapping agent.
+ *  `questionId` is the AMBOSS EID; the rest is the `search_questions` metadata
+ *  (all optional — the agent fills what the tool returns). */
+export interface QuestionRef {
+  questionId?: string;
+  questionStem?: string;
+  studyObjectives?: string[];
+  learningObjective?: string;
+  competency?: string;
+  system?: string;
+  difficulty?: string;
 }
 
 /** A single recommendation/statement within a guideline the agent cited. */

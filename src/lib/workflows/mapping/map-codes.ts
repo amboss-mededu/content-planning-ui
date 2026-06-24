@@ -31,6 +31,7 @@ import {
 import { aggregateStageMetrics, logEvent } from '../lib/events';
 import { mapGuidelinesForCode, synthesizeOverallCoverage } from '../lib/guidelines-mcp';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
+import { mapQuestionsForCode } from '../lib/questions-mcp';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import { chunk } from '../lib/util';
 
@@ -129,12 +130,22 @@ async function mapAndWriteOne(input: {
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
-}): Promise<{ code: string; attempts: number; model: string; unresolved: boolean }> {
+}): Promise<{
+  code: string;
+  attempts: number;
+  model: string;
+  escalated: boolean;
+  unresolved: boolean;
+}> {
   const source = input.mappingSource;
   const runAmboss = source === 'amboss' || source === 'both';
   const runGuidelines = source === 'guidelines' || source === 'both';
+  // Curriculum-mapping additionally maps each code against AMBOSS Qbank
+  // questions, as a SEPARATE agent call (its own MCP `search_questions` tool),
+  // run concurrently with the article/guideline agents. Other modes skip it.
+  const runQuestions = input.pipelineMode === 'curriculum-mapping';
 
-  const [ambossResult, guidelineResult] = await Promise.all([
+  const [ambossResult, guidelineResult, questionsResult] = await Promise.all([
     runAmboss
       ? mapAndValidateCode({
           code: input.code,
@@ -157,6 +168,23 @@ async function mapAndWriteOne(input: {
       : Promise.resolve(null),
     runGuidelines
       ? mapGuidelinesForCode({
+          code: input.code,
+          description: input.description,
+          category: input.category,
+          specialty: input.specialty,
+          contentBase: input.contentBase,
+          language: input.language,
+          milestones: input.milestones,
+          additionalInstructions: input.additionalInstructions,
+          runId: input.runId,
+          stage: 'map_codes',
+          primaryModel: input.primaryModel,
+          backupModel: input.backupModel,
+          apiKeys: input.apiKeys,
+        })
+      : Promise.resolve(null),
+    runQuestions
+      ? mapQuestionsForCode({
           code: input.code,
           description: input.description,
           category: input.category,
@@ -207,6 +235,7 @@ async function mapAndWriteOne(input: {
     runAmboss ? input.includeSuggestions : false,
     {
       guideline: guidelineResult?.mapping.coverage ?? null,
+      questions: questionsResult?.mapping.coverage ?? null,
       overall,
       mappingSourceUsed: source,
     },
@@ -214,9 +243,22 @@ async function mapAndWriteOne(input: {
 
   return {
     code: input.code,
-    attempts: (ambossResult?.attempts ?? 0) + (guidelineResult?.attempts ?? 0),
-    model: ambossResult?.model ?? guidelineResult?.model ?? 'none',
-    unresolved: Boolean(ambossResult?.unresolved) || Boolean(guidelineResult?.unresolved),
+    attempts:
+      (ambossResult?.attempts ?? 0) +
+      (guidelineResult?.attempts ?? 0) +
+      (questionsResult?.attempts ?? 0),
+    model:
+      ambossResult?.model ?? guidelineResult?.model ?? questionsResult?.model ?? 'none',
+    // Any agent that fell through to the (claude) backup counts as an
+    // escalation — including the questions agent, whose model the single
+    // `model` field above never surfaces for curriculum runs.
+    escalated: [ambossResult, guidelineResult, questionsResult].some((r) =>
+      Boolean(r?.model.startsWith('claude-')),
+    ),
+    unresolved:
+      Boolean(ambossResult?.unresolved) ||
+      Boolean(guidelineResult?.unresolved) ||
+      Boolean(questionsResult?.unresolved),
   };
 }
 
@@ -295,7 +337,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
           ),
         );
         for (const r of results) {
-          if (r.model.startsWith('claude-')) escalations += 1;
+          if (r.escalated) escalations += 1;
           if (r.unresolved) unresolvedCount += 1;
         }
         // Surface incremental progress so polling clients can pick it up

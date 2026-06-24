@@ -151,6 +151,20 @@ export type GuidelineCoverageRef = {
   [key: string]: unknown;
 };
 
+/** One AMBOSS Qbank question matched to a code (curriculum-mapping question
+ *  track). `questionId` is the AMBOSS EID; the rest is `search_questions`
+ *  metadata. Mirrors the storage shape in `pb/types` `QuestionRef`. */
+export type QuestionCoverageRef = {
+  questionId?: string;
+  questionStem?: string;
+  studyObjectives?: string[];
+  learningObjective?: string;
+  competency?: string;
+  system?: string;
+  difficulty?: string;
+  [key: string]: unknown;
+};
+
 export type Code = {
   /** PocketBase record id. Present on rows sourced from the codes table
    *  (`CodeTableRow`); used to scope per-code literature search / sources. */
@@ -178,6 +192,9 @@ export type Code = {
   existingArticleUpdates?: ArticleUpdate[];
   newArticlesNeeded?: NewArticleRef[];
   improvements?: string;
+  // --- Question mapping track (curriculum-mapping) --------------------------
+  questionsWhereCoverageIs?: QuestionCoverageRef[];
+  questionCount?: number;
   // --- Guideline coverage track ---------------------------------------------
   isInGuidelines?: boolean;
   guidelineCoverageLevel?: CoverageLevel;

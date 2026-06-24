@@ -76,6 +76,16 @@ type NewArticleSuggestion = {
   importance?: number;
 };
 
+type CoveredQuestion = {
+  questionId?: string;
+  questionStem?: string;
+  studyObjectives?: string[];
+  learningObjective?: string;
+  competency?: string;
+  system?: string;
+  difficulty?: string;
+};
+
 type GuidelineCoverageItem = {
   guidelineTitle?: string;
   guidelineId?: string;
@@ -125,6 +135,7 @@ export type DetailTarget =
   | 'suggestion-updates'
   | 'suggestion-new-articles'
   | 'guideline-coverage'
+  | 'questions'
   | 'literature'
   | 'curriculum'
   | 'metadata';
@@ -148,6 +159,7 @@ function buildVisibleTabs(opts: {
   showAmboss: boolean;
   showGuidelines: boolean;
   showSuggestions: boolean;
+  showQuestions: boolean;
   showLiterature: boolean;
   showCurriculum: boolean;
 }): TabDef[] {
@@ -164,6 +176,9 @@ function buildVisibleTabs(opts: {
   }
   if (opts.showGuidelines && opts.showAmboss) {
     tabs.push({ target: 'guideline-coverage', label: 'Guidelines' });
+  }
+  if (opts.showQuestions) {
+    tabs.push({ target: 'questions', label: 'Questions' });
   }
   if (opts.showLiterature) {
     tabs.push({ target: 'literature', label: 'Literature' });
@@ -228,16 +243,27 @@ export function CodeDetailModal({
   const showSuggestions = pipelineMode === 'full' && showAmboss;
   const showLiterature = pipelineMode === 'rag-corpus';
   const showCurriculum = pipelineMode === 'curriculum-mapping';
+  // Questions are mapped only for curriculum-mapping specialties (a separate
+  // search_questions agent runs alongside article mapping there).
+  const showQuestions = pipelineMode === 'curriculum-mapping';
   const visibleTabs = useMemo(
     () =>
       buildVisibleTabs({
         showAmboss,
         showGuidelines,
         showSuggestions,
+        showQuestions,
         showLiterature,
         showCurriculum,
       }),
-    [showAmboss, showGuidelines, showSuggestions, showLiterature, showCurriculum],
+    [
+      showAmboss,
+      showGuidelines,
+      showSuggestions,
+      showQuestions,
+      showLiterature,
+      showCurriculum,
+    ],
   );
 
   const [activeTab, setActiveTab] = useState(targetToIndex(visibleTabs, target));
@@ -453,6 +479,8 @@ export function CodeDetailModal({
     []) as unknown as NewArticleSuggestion[];
   const coveredGuidelines = (detailRow.guidelinesWhereCoverageIs ??
     []) as unknown as GuidelineCoverageItem[];
+  const coveredQuestions = (detailRow.questionsWhereCoverageIs ??
+    []) as unknown as CoveredQuestion[];
   const inAmboss = detailRow.isInAMBOSS;
   const specialty = detailRow.specialty ?? '';
   const category = detailRow.category ?? '';
@@ -696,6 +724,8 @@ export function CodeDetailModal({
                   notes={detailRow.guidelineNotes ?? null}
                   gaps={detailRow.guidelineGaps ?? null}
                 />
+              ) : activeTarget === 'questions' ? (
+                <QuestionsPanel questions={coveredQuestions} />
               ) : activeTarget === 'literature' ? (
                 <LiteratureCodePanel
                   specialtySlug={specialtySlug}
@@ -865,6 +895,51 @@ function GuidelineCoveragePanel({
         </Stack>
       ) : null}
       {notes || gaps ? <CoverageNotesPanel notes={notes} gaps={gaps} /> : null}
+    </Stack>
+  );
+}
+
+/**
+ * Read-only view of the AMBOSS Qbank questions matched to this code
+ * (curriculum-mapping question track). Shows the question stem, its EID, and the
+ * `search_questions` metadata.
+ */
+function QuestionsPanel({ questions }: { questions: CoveredQuestion[] }) {
+  if (questions.length === 0) {
+    return (
+      <Text size="s" color="tertiary">
+        No matched questions.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="s">
+      {questions.map((q) => (
+        <div
+          key={q.questionId ?? q.questionStem ?? 'question'}
+          style={{ borderLeft: '2px solid rgb(13, 148, 136)', paddingLeft: 10 }}
+        >
+          <Text weight="bold">{q.questionStem ?? '(no stem)'}</Text>
+          <Inline space="xs" vAlignItems="center">
+            {q.questionId ? (
+              <Text size="xs" color="tertiary">
+                {q.questionId}
+              </Text>
+            ) : null}
+            {q.competency ? <Badge text={q.competency} color="blue" /> : null}
+            {q.system ? <Badge text={q.system} color="gray" /> : null}
+            {q.difficulty ? <Badge text={q.difficulty} color="yellow" /> : null}
+          </Inline>
+          {q.learningObjective ? <Text size="s">{q.learningObjective}</Text> : null}
+          {q.studyObjectives && q.studyObjectives.length > 0 ? (
+            <Inline space="xxs" vAlignItems="center">
+              {[...new Set(q.studyObjectives)].map((so) => (
+                <Badge key={so} text={so} color="purple" />
+              ))}
+            </Inline>
+          ) : null}
+        </div>
+      ))}
     </Stack>
   );
 }
