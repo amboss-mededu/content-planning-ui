@@ -34,6 +34,7 @@ import {
   type ExtractionVariant,
   extractCodesForCategory,
   identifyModulesForUrl,
+  uploadLocalInputsToGemini,
 } from '../lib/gemini';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
@@ -75,6 +76,17 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       message: `Run started for ${input.inputs.length} input(s)`,
     });
 
+    // Uploaded PDFs are served from a private/localhost URL that Google's
+    // url_context can't fetch — attach those directly to the model instead.
+    // Public URLs aren't in the map and keep using url_context.
+    const fileMap = await uploadLocalInputsToGemini({
+      inputs: input.inputs,
+      model: input.model,
+      apiKeys: input.apiKeys,
+      runId: input.runId,
+      stage: 'extract_codes',
+    });
+
     // Phase 1: identify modules per (url, source), batched fan-out.
     const perUrlCategories: { url: string; source: string; category: string }[] = [];
     for (const batch of chunk(input.inputs, URL_CONCURRENCY)) {
@@ -90,6 +102,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             model: input.model,
             apiKeys: input.apiKeys,
             variant,
+            file: fileMap.get(inp.url),
           }),
         ),
       );
@@ -131,6 +144,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             model: input.model,
             apiKeys: input.apiKeys,
             variant,
+            file: fileMap.get(p.url),
           }),
         ),
       );
