@@ -14,8 +14,13 @@ import {
   SpecialtiesOverviewView,
 } from './_components/specialties-overview';
 
+// Curriculum-mapping specialties live under the Teaching tab now, so the
+// Content Planner dashboard lists everything except them.
+const isContentPlanner = (s: { pipelineMode?: string }) =>
+  s.pipelineMode !== 'curriculum-mapping';
+
 export default async function PlanningIndex() {
-  const specialties = await listSpecialties();
+  const specialties = (await listSpecialties()).filter(isContentPlanner);
   return (
     <DashboardEntryView
       specialties={specialties}
@@ -40,7 +45,7 @@ async function SpecialtiesGridData() {
   ]);
   return (
     <SpecialtiesGridView
-      specialties={specialties}
+      specialties={specialties.filter(isContentPlanner)}
       stageStatesBySlug={stageStatesBySlug}
     />
   );
@@ -48,5 +53,7 @@ async function SpecialtiesGridData() {
 
 async function AllSpecialtiesOverviewData() {
   const rows = await listSpecialtiesOverview();
-  return <SpecialtiesOverviewView rows={rows} />;
+  return (
+    <SpecialtiesOverviewView rows={rows.filter((r) => isContentPlanner(r.specialty))} />
+  );
 }

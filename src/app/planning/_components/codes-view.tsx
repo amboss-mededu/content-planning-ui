@@ -222,6 +222,10 @@ export function CodesView({
         align: 'center',
         accessor: (r) => r.code ?? null,
         type: 'string',
+        // Curriculum plans key off the human-readable description, not the
+        // ontology code — hide the Code column by default (re-enable from the
+        // Columns menu). Other modes keep it visible.
+        defaultHidden: curriculum,
         group: 'metadata',
       },
       {
@@ -749,6 +753,30 @@ export function CodesView({
       },
     ];
 
+    // --- Curriculum learning-objective column (curriculum-mapping only) ----
+    // Sits right after Description in the metadata group. The objective comes
+    // from the source PDF when stated, else is model-generated from the
+    // category + description during extraction; it's also fed into the mapping
+    // prompt. Read-only display (also shown in the detail modal).
+    const objectiveCol: Column<Code> = {
+      key: 'curriculumObjective',
+      label: 'Objective',
+      description:
+        'Learning objective for this curriculum item (from the source, or model-generated from the category + description)',
+      width: 280,
+      verticalAlign: 'top',
+      render: (r) => (
+        <span style={{ textAlign: 'left' }}>
+          {r.curriculumMeta?.learningObjective ?? '—'}
+        </span>
+      ),
+      accessor: (r) => r.curriculumMeta?.learningObjective ?? null,
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
+      group: 'metadata',
+    };
+
     // --- Curriculum approval gate column (curriculum-mapping only) ---------
     // First/left column: Approve (✓) / Reject (✗). Only approved items are
     // mapped. Buttons stop propagation so they don't open the detail modal.
@@ -839,19 +867,35 @@ export function CodesView({
     // guidelines, so AMBOSS columns are already absent via the branch above).
     if (ragCorpus) result = [...result, ...litCols];
 
-    // Curriculum-mapping slots the time-dimension columns in right after the
-    // metadata columns (source is pinned to AMBOSS, so coverage columns remain).
-    // The Source column is dropped here too — a curriculum has one logical
-    // source, so the ontology column is meaningless noise (other modes keep it).
-    // Scoring isn't useful for curricula, so the AMBOSS Coverage level + Score
-    // columns are dropped; the Articles column stays and a Questions column is
-    // added beside it (codes map to AMBOSS articles AND questions).
+    // Curriculum-mapping reshapes the table around the curriculum item rather
+    // than the ontology code. The Source column is dropped (a curriculum has one
+    // logical source). Scoring isn't useful for curricula, so the AMBOSS
+    // Coverage level + Score columns are dropped; the Articles column stays and
+    // a Questions column is added beside it (codes map to AMBOSS articles AND
+    // questions). Metadata is reordered to: Code (hidden) → Category →
+    // Description → Objective → Subtopics (Subtopics folded out of the
+    // time-dimension group and made the final metadata column). The remaining
+    // time-dimension columns (Year/Phase/Timeframe/Duration) follow.
     if (curriculum) {
-      const metaCols = result.filter((c) => c.group === 'metadata' && c.key !== 'source');
+      const find = (k: string) => result.find((c) => c.key === k);
+      // Subtopics moves into the metadata group as its final column.
+      const subtopicsBase = curriculumCols.find((c) => c.key === 'curriculumSubtopics');
+      const subtopicsCol = subtopicsBase
+        ? { ...subtopicsBase, group: 'metadata' as const }
+        : undefined;
+      const metaCols = [
+        find('code'),
+        find('category'),
+        find('description'),
+        objectiveCol,
+        subtopicsCol,
+      ].filter((c): c is Column<Code> => !!c);
+      // Time-dimension columns, minus Subtopics (now in metadata).
+      const timeCols = curriculumCols.filter((c) => c.key !== 'curriculumSubtopics');
       const rest = result.filter(
         (c) => c.group !== 'metadata' && c.key !== 'coverage' && c.key !== 'depth',
       );
-      result = [reviewCol, ...metaCols, ...curriculumCols, ...rest, ...questionCols];
+      result = [reviewCol, ...metaCols, ...timeCols, ...rest, ...questionCols];
     }
     return result;
   }, [

@@ -253,7 +253,7 @@ For each item, also capture its TIME DIMENSION exactly as the document presents 
 - For LONGITUDINAL items that recur instead of occupying a fixed block (e.g. "… (weekly)", "… (monthly)"), set "cadence" to "weekly", "monthly", or "longitudinal" and leave startMonth/endMonth null.
 
 Also, for each item capture:
-- "learningObjective": a single concise sentence stating the overarching objective / competency the block teaches, taken (verbatim or lightly summarized) from the document. Leave empty/omit when the document does not state one.
+- "learningObjective": a single concise sentence stating the overarching objective / competency the block teaches. When the document states one, use it (verbatim or lightly summarized). When the document does NOT state one, generate a suitable objective inferred from the item's category and description (a single sentence of the form "Understand/diagnose/manage …"). Always provide a learningObjective — never leave it empty.
 - "subtopics": an array of the discrete topics / sub-blocks the document lists under the item (e.g. ["Acute coronary syndrome", "Heart failure", "Arrhythmias"]). Leave empty/omit when none are listed. Do not invent subtopics that are not in the document.
 
 You must return exclusively a JSON array with no preceding or trailing text:
@@ -570,13 +570,24 @@ export function applySuggestionVisibility(prompt: string, include: boolean): str
 // Contains `${specialty}`, `${code}`, `${codeCategory}`, `${description}`,
 // `${contentBase}`, `${language}` placeholders — the mapping step substitutes
 // them per-code before sending the user message.
+/**
+ * Render the curriculum learning objective as a single labelled line for the
+ * `\${objectiveLine}` token in the mapping/guideline/question user templates.
+ * Returns `''` when there's no objective (clinician modes), which collapses the
+ * token to nothing and leaves those prompts byte-for-byte unchanged.
+ */
+export function objectiveLine(objective?: string | null): string {
+  const trimmed = objective?.trim();
+  return trimmed ? `Learning Objective: ${trimmed}\n` : '';
+}
+
 export const DEFAULT_MAPPING_USER_MESSAGE_TEMPLATE = `
 Please analyze the following code and description using the available AMBOSS MCP server tools:
 Specialty: \${specialty}
 Code: \${code}
 Code Category: \${codeCategory}
 Description: \${description}
-AMBOSS Content Base: \${contentBase}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
 Language: \${language}
 
 CRITICAL: MAKE SURE TO ONLY RETURN SECTION IDS AND NOT SUBSECTION IDS!
@@ -777,7 +788,7 @@ Specialty: \${specialty}
 Code: \${code}
 Code Category: \${codeCategory}
 Description: \${description}
-AMBOSS Content Base: \${contentBase}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
 Language: \${language}
 
 CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
@@ -866,7 +877,7 @@ Specialty: \${specialty}
 Code: \${code}
 Code Category: \${codeCategory}
 Description: \${description}
-AMBOSS Content Base: \${contentBase}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
 Language: \${language}
 
 CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!

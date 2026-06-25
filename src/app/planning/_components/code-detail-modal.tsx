@@ -1149,24 +1149,17 @@ function QuestionsPanel({ questions }: { questions: CoveredQuestion[] }) {
           <Text weight="bold">
             {q.questionStem ?? q.learningObjective ?? '(no stem)'}
           </Text>
-          <Inline space="xs" vAlignItems="center">
-            {q.questionId ? (
-              <Text size="xs" color="tertiary">
-                {q.questionId}
-              </Text>
-            ) : null}
-            {q.competency ? <Badge text={q.competency} color="blue" /> : null}
-            {q.system ? <Badge text={q.system} color="gray" /> : null}
-            {q.difficulty ? (
+          {q.learningObjective ? (
+            <Text size="s">Learning Objective: {q.learningObjective}</Text>
+          ) : null}
+          {q.questionId ? (
+            <Text size="xs" color="tertiary">
+              Question ID: {q.questionId}
+            </Text>
+          ) : null}
+          {q.difficulty ? (
+            <Inline space="xs" vAlignItems="center">
               <Badge text={`Difficulty ${q.difficulty}/5`} color="yellow" />
-            ) : null}
-          </Inline>
-          {q.learningObjective ? <Text size="s">{q.learningObjective}</Text> : null}
-          {q.studyObjectives && q.studyObjectives.length > 0 ? (
-            <Inline space="xxs" vAlignItems="center">
-              {[...new Set(q.studyObjectives)].map((so) => (
-                <Badge key={so} text={so} color="purple" />
-              ))}
             </Inline>
           ) : null}
         </div>

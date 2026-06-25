@@ -33,6 +33,7 @@ import {
   DEFAULT_GUIDELINES_USER_MESSAGE_TEMPLATE,
   DEFAULT_OVERALL_SYNTHESIS_SYSTEM_PROMPT,
   DEFAULT_OVERALL_SYNTHESIS_USER_TEMPLATE,
+  objectiveLine,
 } from './prompts';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,7 @@ function composeGuidelinesUser(input: {
   code: string;
   codeCategory: string;
   description: string;
+  objective?: string;
   contentBase: string;
   language: string;
 }): string {
@@ -148,6 +150,7 @@ function composeGuidelinesUser(input: {
     .replaceAll('${code}', input.code)
     .replaceAll('${codeCategory}', input.codeCategory)
     .replaceAll('${description}', input.description)
+    .replaceAll('${objectiveLine}', objectiveLine(input.objective))
     .replaceAll('${contentBase}', input.contentBase)
     .replaceAll('${language}', input.language);
   /* biome-ignore-end lint/suspicious/noTemplateCurlyInString: intentional placeholder */
@@ -176,6 +179,8 @@ export async function mapGuidelinesForCode(input: {
   code: string;
   description: string;
   category: string;
+  /** Curriculum learning objective, passed to the model as context. */
+  objective?: string;
   specialty: string;
   contentBase: string;
   language: string;
@@ -251,6 +256,7 @@ export async function mapGuidelinesForCode(input: {
       code: input.code,
       codeCategory: input.category,
       description: input.description,
+      objective: input.objective,
       contentBase: input.contentBase,
       language: input.language,
     });

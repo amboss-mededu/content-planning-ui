@@ -467,7 +467,14 @@ export async function patchCode(
 export async function listUnmappedCodesAsAdmin(
   slug: string,
   filter?: { categories?: string[]; codes?: string[]; approvedOnly?: boolean } | null,
-): Promise<Array<{ code: string; category: string | null; description: string | null }>> {
+): Promise<
+  Array<{
+    code: string;
+    category: string | null;
+    description: string | null;
+    objective: string | null;
+  }>
+> {
   const pb = await createAdminClient();
   // Curriculum-mapping gate: only human-approved curriculum items are mapped.
   const approvedClause = filter?.approvedOnly
@@ -489,6 +496,9 @@ export async function listUnmappedCodesAsAdmin(
       code: r.code,
       category: r.category ?? null,
       description: r.description ?? null,
+      // The curriculum learning objective travels with the code so the mapping
+      // agents can factor it into the AMBOSS/question coverage assessment.
+      objective: r.curriculumMeta?.learningObjective ?? null,
     }));
 }
 

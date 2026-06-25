@@ -29,17 +29,17 @@ const valueStyle: CSSProperties = { display: 'flex', gap: 8, alignItems: 'baseli
 // text-align (keeps the score-table headers aligned with their value columns).
 const helpStyle: CSSProperties = { cursor: 'help' };
 
-function fmtPct(n: number): string {
+export function fmtPct(n: number): string {
   return `${n.toFixed(2)}%`;
 }
 
-function fmtNum(n: number): string {
+export function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
 /** Label/value row, with an optional muted sub-value (e.g. the "< 3" count) and
  *  an optional hover explanation surfaced on the label. */
-function StatRow({
+export function StatRow({
   label,
   value,
   sub,
@@ -78,7 +78,7 @@ function StatRow({
   );
 }
 
-function Panel({
+export function Panel({
   title,
   titleTooltip,
   children,

@@ -56,6 +56,7 @@ export function PipelineDashboard({
   mappingOnly = false,
   pipelineMode = 'full',
   mappedWithoutSuggestionsCount = 0,
+  basePath = '/planning',
 }: {
   specialtySlug: string;
   run: PipelineRunRow | null;
@@ -89,6 +90,10 @@ export function PipelineDashboard({
   /** Codes mapped without suggestions — drives the "Generate suggestions"
    *  backfill card's visibility and count. */
   mappedWithoutSuggestionsCount?: number;
+  /** URL prefix this dashboard is mounted under (without trailing slash).
+   *  Defaults to `/planning`; curriculum plans pass `/teaching/curriculum-plans`
+   *  so in-dashboard navigation stays inside the Teaching tab. */
+  basePath?: string;
 }) {
   const runActive =
     run !== null &&
@@ -149,26 +154,30 @@ export function PipelineDashboard({
               pipelineMode={pipelineMode}
             />
           </StageCard>
-          <StageCard
-            title="Extract milestones"
-            description="Extract ACGME-style milestones for this specialty."
-            stage={stages.extract_milestones?.stage ?? null}
-            specialtySlug={specialtySlug}
-            stageName="extract_milestones"
-            runUrls={stages.extract_milestones?.runUrls}
-            events={stages.extract_milestones?.events ?? []}
-            sources={milestoneSources}
-            hasOutput={stageHasOutput.extract_milestones ?? false}
-            manualState={stageState(stageStates, 'extract_milestones')}
-          >
-            <StartMilestonesModal
+          {/* Milestones step is disabled for curriculum-mapping — the
+              curriculum mapping prompt bakes the year-based scale inline. */}
+          {pipelineMode !== 'curriculum-mapping' ? (
+            <StageCard
+              title="Extract milestones"
+              description="Extract ACGME-style milestones for this specialty."
+              stage={stages.extract_milestones?.stage ?? null}
               specialtySlug={specialtySlug}
+              stageName="extract_milestones"
+              runUrls={stages.extract_milestones?.runUrls}
+              events={stages.extract_milestones?.events ?? []}
               sources={milestoneSources}
-              running={isStageRunningFresh(stages.extract_milestones?.stage)}
-              completed={stages.extract_milestones?.stage?.status === 'completed'}
-              runId={stages.extract_milestones?.stage?.runId ?? null}
-            />
-          </StageCard>
+              hasOutput={stageHasOutput.extract_milestones ?? false}
+              manualState={stageState(stageStates, 'extract_milestones')}
+            >
+              <StartMilestonesModal
+                specialtySlug={specialtySlug}
+                sources={milestoneSources}
+                running={isStageRunningFresh(stages.extract_milestones?.stage)}
+                completed={stages.extract_milestones?.stage?.status === 'completed'}
+                runId={stages.extract_milestones?.stage?.runId ?? null}
+              />
+            </StageCard>
+          ) : null}
         </Stack>
       </PhaseGroup>
 
@@ -239,7 +248,7 @@ export function PipelineDashboard({
               <Button
                 variant="secondary"
                 size="s"
-                onClick={() => router.push(`/planning/${specialtySlug}/mapping`)}
+                onClick={() => router.push(`${basePath}/${specialtySlug}/mapping`)}
               >
                 Open Mapping sheet
               </Button>

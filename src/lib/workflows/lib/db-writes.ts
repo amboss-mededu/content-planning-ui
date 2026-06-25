@@ -338,6 +338,8 @@ export type UnmappedCodeRow = {
   code: string;
   category: string | null;
   description: string | null;
+  /** Curriculum learning objective (curriculum-mapping); null otherwise. */
+  objective: string | null;
 };
 
 /** Optional filter applied to the unmapped-codes query. */

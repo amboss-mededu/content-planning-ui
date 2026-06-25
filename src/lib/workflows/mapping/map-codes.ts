@@ -118,6 +118,9 @@ async function mapAndWriteOne(input: {
   code: string;
   description: string;
   category: string;
+  /** Curriculum learning objective, included in the mapping prompt context
+   *  (curriculum-mapping only; empty string otherwise). */
+  objective: string;
   specialty: string;
   contentBase: string;
   language: string;
@@ -151,6 +154,7 @@ async function mapAndWriteOne(input: {
           code: input.code,
           description: input.description,
           category: input.category,
+          objective: input.objective,
           specialty: input.specialty,
           contentBase: input.contentBase,
           language: input.language,
@@ -171,6 +175,7 @@ async function mapAndWriteOne(input: {
           code: input.code,
           description: input.description,
           category: input.category,
+          objective: input.objective,
           specialty: input.specialty,
           contentBase: input.contentBase,
           language: input.language,
@@ -188,6 +193,7 @@ async function mapAndWriteOne(input: {
           code: input.code,
           description: input.description,
           category: input.category,
+          objective: input.objective,
           specialty: input.specialty,
           contentBase: input.contentBase,
           language: input.language,
@@ -283,7 +289,10 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
     );
     const contentBase = input.contentBase || deriveContentBase(spec.region);
     const language = input.language || deriveLanguage(spec.language);
-    const milestones = spec.milestones ?? '';
+    // Milestones are disabled for curriculum-mapping: the curriculum prompt
+    // bakes the year-based 0–5 scale inline, so the extracted rubric must not
+    // feed scoring. Other modes keep milestones as their scoring rubric.
+    const milestones = approvedOnly ? '' : (spec.milestones ?? '');
     // Source is a per-specialty setting — read from the specialty, not the run.
     const mappingSource = spec.mappingSource;
 
@@ -326,6 +335,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               code: c.code,
               description: c.description ?? '',
               category: c.category ?? '',
+              objective: c.objective ?? '',
               specialty: input.specialtySlug,
               contentBase,
               language,
