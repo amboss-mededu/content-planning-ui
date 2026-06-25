@@ -35,11 +35,15 @@ export function CreateStudyPlanModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load category options the first time the modal opens.
+  // Load category options whenever the modal opens. Deps MUST stay [open, slug]
+  // only: including the loading/loaded flags would let `setLoadingOptions(true)`
+  // re-run this effect, whose cleanup flips the in-flight request's `cancelled`
+  // flag and strands it — leaving the combobox greyed on "Loading…" forever.
   useEffect(() => {
-    if (!open || optionsLoaded || loadingOptions) return;
+    if (!open) return;
     let cancelled = false;
     setLoadingOptions(true);
+    setError(null);
     loadStudyPlanCategoriesAction(slug)
       .then((opts) => {
         if (cancelled) return;
@@ -55,7 +59,7 @@ export function CreateStudyPlanModal({
     return () => {
       cancelled = true;
     };
-  }, [open, slug, optionsLoaded, loadingOptions]);
+  }, [open, slug]);
 
   if (!open) return null;
 
@@ -144,7 +148,7 @@ export function CreateStudyPlanModal({
               placeholder={loadingOptions ? 'Loading categories…' : 'Select categories…'}
               emptyStateMessage="No categories match the filter."
               maxHeight={320}
-              disabled={loadingOptions || options.length === 0}
+              disabled={loadingOptions}
               slotProps={{
                 tag: {
                   clearButtonAriaLabel: 'Remove category',
