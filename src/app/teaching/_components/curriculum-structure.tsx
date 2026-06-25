@@ -7,7 +7,6 @@ import {
   Collapsible,
   CollapsibleHeader,
   Divider,
-  H2,
   Inline,
   Stack,
   Text,
@@ -102,7 +101,6 @@ export function CurriculumStructure({ codes }: { codes: CodeRecord[] }) {
 
   return (
     <Stack space="m">
-      <H2>Curriculum structure</H2>
       {sorted.length === 0 ? (
         <Text color="secondary">No curriculum items yet.</Text>
       ) : (

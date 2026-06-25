@@ -1,17 +1,13 @@
-'use client';
-
-import { Stack, Text } from '@amboss/design-system';
-import type { CoverageStats } from '@/lib/data/coverage-stats-compute';
 import type { CurriculumPlanStats } from '@/lib/data/curriculum-plans';
-import type { CodeRecord } from '@/lib/pb/types';
-import {
-  type StatItem,
-  CoverageStats as StatTiles,
-} from '../../planning/_components/coverage-stats';
-import { CurriculumCoverageStatistics } from './curriculum-coverage-statistics';
-import { CurriculumStructure } from './curriculum-structure';
+import type { StatItem } from '../../planning/_components/coverage-stats';
 
-function statTiles(stats: CurriculumPlanStats): StatItem[] {
+/**
+ * The always-visible curriculum overview stat tiles — the headline numbers for a
+ * curriculum plan (items, approved %, mapped, articles, questions). Rendered
+ * above the analytics tabs by `CurriculumDashboard`, so they stay on screen
+ * regardless of the active tab.
+ */
+export function curriculumStatTiles(stats: CurriculumPlanStats): StatItem[] {
   const approvedPct =
     stats.totalItems > 0 ? Math.round((stats.approved / stats.totalItems) * 100) : 0;
   return [
@@ -41,33 +37,4 @@ function statTiles(stats: CurriculumPlanStats): StatItem[] {
       hint: `${stats.totalQuestions} total`,
     },
   ];
-}
-
-// The plan title + breadcrumb + tab bar are rendered by the curriculum layout;
-// this view is just the Overview tab's body.
-export function CurriculumOverviewView({
-  stats,
-  coverageStats,
-  codes,
-}: {
-  stats: CurriculumPlanStats;
-  coverageStats: CoverageStats;
-  codes: CodeRecord[];
-}) {
-  return (
-    <Stack space="xl">
-      <StatTiles stats={statTiles(stats)} />
-
-      <CurriculumCoverageStatistics
-        coverageStats={coverageStats}
-        questions={{ total: stats.totalQuestions, unique: stats.uniqueQuestions }}
-      />
-
-      <CurriculumStructure codes={codes} />
-
-      {codes.length === 0 ? (
-        <Text color="secondary">No curriculum items have been extracted yet.</Text>
-      ) : null}
-    </Stack>
-  );
 }

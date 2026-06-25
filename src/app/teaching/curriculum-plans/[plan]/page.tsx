@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { listCodes } from '@/lib/data/codes';
 import { getCoverageStats } from '@/lib/data/coverage-stats';
 import { computeCurriculumPlanStats } from '@/lib/data/curriculum-plans';
-import { CurriculumOverviewView } from '../../_components/curriculum-overview-view';
+import { CurriculumDashboard } from '../../_components/curriculum-dashboard';
 
 export default async function CurriculumPlanOverviewPage({
   params,
@@ -26,6 +26,11 @@ async function CurriculumPlanOverviewData({ slug }: { slug: string }) {
   const stats = computeCurriculumPlanStats(codes);
 
   return (
-    <CurriculumOverviewView stats={stats} coverageStats={coverageStats} codes={codes} />
+    <CurriculumDashboard
+      slug={slug}
+      stats={stats}
+      coverageStats={coverageStats}
+      codes={codes}
+    />
   );
 }
