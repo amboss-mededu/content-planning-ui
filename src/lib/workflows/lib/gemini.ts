@@ -254,10 +254,10 @@ export async function identifyModulesForUrl(input: {
   );
   const userMessage = isCurriculum
     ? `
-Please load and analyze the curriculum outline at the following URL(s):
+Please load and analyze the curriculum document at the following URL(s):
 ${input.url}
 
-Identify the curriculum hierarchy (Academic Year → Phase → Course/Block) and return exclusively a JSON array of chunks, with no other text.
+Identify the hierarchy the document actually uses and return exclusively a JSON array of chunks, with no other text.
 `.trim()
     : `
 Please load and analyze the content at the following URL(s):
@@ -373,12 +373,12 @@ export async function extractCodesForCategory(input: {
   );
   const userMessage = isCurriculum
     ? `
-You are extracting curriculum blocks for the medical curriculum: ${input.specialtySlug}.
+You are extracting curriculum items for the medical curriculum: ${input.specialtySlug}.
 
-Please load and analyze the curriculum outline at the following URL(s):
+Please load and analyze the curriculum document at the following URL(s):
 ${input.url}
 
-Extract only the courses / blocks / rotations / longitudinal threads in this chunk, with their time dimension, and do not invent anything not explicitly shown:
+Extract only the curriculum items (courses / blocks / rotations / units / themes / longitudinal threads) in this chunk, with their curriculum metadata when the document shows it, and do not invent anything not explicitly present:
 ${input.category}
 
 Return exclusively a JSON array, with no other text.
