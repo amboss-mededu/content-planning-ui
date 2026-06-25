@@ -225,27 +225,44 @@ You must return exclusively a JSON with no preceding or trailing text with the f
 // the identify step (it only produces chunk categories).
 export const DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT = DEFAULT_IDENTIFY_SYSTEM_PROMPT;
 
-// The default extract prompt verbatim, plus a curriculum metadata addendum that
-// extends each item with a `curriculum` object. Everything the default says
-// about extracting every discrete item individually still applies unchanged.
+// The default extract prompt verbatim, plus a curriculum metadata addendum. The
+// addendum OVERRIDES the default's "extract every discrete item individually"
+// granularity for curricula: the most granular leaf entries are captured as
+// `subtopics` of their parent topic instead of being emitted as their own rows,
+// and each emitted row carries a `curriculum` metadata object.
 export const DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT = `${DEFAULT_EXTRACT_SYSTEM_PROMPT}
 
-## Curriculum metadata (this document is a medical-school curriculum)
+## Curriculum extraction (this document is a medical-school curriculum)
 
-Everything above still applies unchanged — extract every discrete item individually with its full pipe-separated category, exhaustively, and do not group items. In ADDITION to "category" and "description", attach to each item a "curriculum" object capturing the fields below WHENEVER the document shows them. Leave a field null / omit it when the document does not show it — never guess or invent.
+This document is a medical-school curriculum. Capture its full hierarchy the same way as above, with TWO changes that OVERRIDE the general instructions wherever they conflict.
+
+### Granularity: leaf items become subtopics, not their own rows
+
+Do NOT emit the most granular, leaf-level entries as their own rows. A leaf is an entry that has no further sub-entries beneath it in the document's hierarchy — e.g. in a numbered temario, "1.1.1 Concepto" sitting under "1.1 Introducción", or "1.4.2.1 Presión osmótica" sitting under "1.4.2 …". Instead:
+
+- Emit one row per TOPIC — the lowest hierarchy node that still has leaf entries beneath it. Put every ancestor above it in the full pipe-separated "category".
+- Collect that topic's leaf entries into its "subtopics" array (verbatim), rather than emitting each leaf as a separate row.
+- A node that has no sub-entries of its own is itself the topic/row, with an empty "subtopics".
+- Still be exhaustive: every topic in the document becomes a row, and every leaf is captured as a subtopic of its topic — nothing is dropped, the leaves are just nested under their parent instead of flattened into their own rows.
+
+This REPLACES the general guidance above to "extract every discrete item individually" and "extract every piece of the hierarchy as its own item": for a curriculum, the leaf entries live in "subtopics", not in their own rows.
+
+### Per-row curriculum metadata
+
+In ADDITION to "category" and "description", attach to each emitted row a "curriculum" object capturing the fields below WHENEVER the document shows them. Leave a field null / omit it when the document does not show it — never guess or invent.
 
 - "year" and "phase": the academic year (1, 2, 3 …) and phase, using the document's own labels, when indicated.
-- "startMonth" / "endMonth": the calendar months the item spans, when the document places it on a timeline (e.g. "Sep", "Nov", "2026-09").
+- "startMonth" / "endMonth": the calendar months the topic spans, when the document places it on a timeline (e.g. "Sep", "Nov", "2026-09").
 - "durationWeeks" (a number) and/or "durationLabel" (verbatim, e.g. "15 wks", "2 h", "Month 1–6"): whenever a duration is stated. Never guess months from a duration or a duration from months.
-- "cadence": for LONGITUDINAL items that recur instead of occupying a fixed block, set "weekly", "monthly", or "longitudinal".
-- "learningObjective": a single concise sentence stating the objective / competency the item teaches. Use the document's stated objective (verbatim or lightly summarized) when present; otherwise generate a suitable one inferred from the item's category and description. Always provide a learningObjective — never leave it empty.
-- "subtopics": discrete sub-items listed under THIS item that you are not already emitting as their own rows (e.g. an inline comma-separated list). Leave empty when there are none. Do not invent subtopics.
+- "cadence": for LONGITUDINAL topics that recur instead of occupying a fixed block, set "weekly", "monthly", or "longitudinal".
+- "learningObjective": a single concise sentence stating the objective / competency the topic teaches. Use the document's stated objective (verbatim or lightly summarized) when present; otherwise generate a suitable one inferred from the topic's category and description. Always provide a learningObjective — never leave it empty.
+- "subtopics": the leaf entries listed under THIS topic (per the granularity rule above), captured verbatim. Leave empty when the topic has no leaf entries. Do not invent subtopics.
 
-So each item in the JSON array becomes:
+So each row in the JSON array becomes:
 [
   {
     "category": "the category including all hierarchical information. Separate each hierarchy using a pipe separator |",
-    "description": "the item",
+    "description": "the topic",
     "curriculum": {
       "year": null,
       "phase": null,
@@ -255,7 +272,7 @@ So each item in the JSON array becomes:
       "durationLabel": null,
       "cadence": null,
       "learningObjective": "Explain the structure, function, and common pathologies of the cardiovascular system.",
-      "subtopics": []
+      "subtopics": ["Concepto", "Importancia de la fisiología", "Homeostasis"]
     }
   }
 ]
