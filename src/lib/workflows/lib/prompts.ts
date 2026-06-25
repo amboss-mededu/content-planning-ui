@@ -213,61 +213,39 @@ You must return exclusively a JSON with no preceding or trailing text with the f
 `.trim();
 
 // ---------------------------------------------------------------------------
-// Curriculum-mapping variants. Same two-phase shape as the content-outline
-// prompts above (identify chunks → extract items per chunk), and deliberately
-// kept GENERIC: they extract whatever hierarchy the document actually uses —
-// a multi-year program overview, a single-subject/course syllabus, a rotation
-// schedule, in any language — rather than imposing a fixed
-// Year → Phase → Course/Block shape. The only curriculum-specific addition over
-// the default content-outline prompts is the extra per-item metadata (time
-// dimension, learning objective, subtopics), captured WHEN the document shows
-// it. Used when a specialty's pipelineMode is 'curriculum-mapping'.
+// Curriculum-mapping variants. These are deliberately the SAME content-outline
+// prompts the default extraction uses — identical chunking and identical
+// item-level granularity / exhaustiveness — with ONLY the curriculum-specific
+// metadata appended to the extract step (time dimension, learning objective,
+// subtopics, captured when the document shows them). Identify is reused
+// verbatim. Used when a specialty's pipelineMode is 'curriculum-mapping'.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT = `
-You are a medical curriculum analysis specialist. Each URL context provides a medical-education curriculum document. This may be a multi-year program overview, a single-subject / course syllabus, a rotation schedule, or any other curriculum outline — in any language and at any grain.
+// Same chunking logic as the default — no curriculum-specific change needed at
+// the identify step (it only produces chunk categories).
+export const DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT = DEFAULT_IDENTIFY_SYSTEM_PROMPT;
 
-You need to identify the chunks to break the document into, so a later step can extract each curriculum item in detail. Base the chunks on the hierarchy the document ACTUALLY uses — do not impose a structure that isn't there. Mirror the document's own organization, whatever it is: e.g. Academic Year → Phase → Course/Block for a multi-year overview, or Subject → Unit / Theme (unidad / tema) for a single-course syllabus, or whatever grouping the document presents. Each chunk is a node under which one or more concrete curriculum items live, and is the unit at which downstream work is parallelized.
+// The default extract prompt verbatim, plus a curriculum metadata addendum that
+// extends each item with a `curriculum` object. Everything the default says
+// about extracting every discrete item individually still applies unchanged.
+export const DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT = `${DEFAULT_EXTRACT_SYSTEM_PROMPT}
 
-Each chunk should produce roughly 10 to 250 items when the document is extracted against it — split any chunk that would yield more than ~300 items (go one level deeper in the document's hierarchy), and merge chunks that would yield fewer than 2 items with an adjacent sibling.
+## Curriculum metadata (this document is a medical-school curriculum)
 
-CRITICAL: the list of chunks must be exhaustive so that ALL curriculum items (courses, blocks, rotations, units, themes, longitudinal threads, etc.) can be extracted when looping over the document. Scan the entire document, not just the headings or a single summary page.
+Everything above still applies unchanged — extract every discrete item individually with its full pipe-separated category, exhaustively, and do not group items. In ADDITION to "category" and "description", attach to each item a "curriculum" object capturing the fields below WHENEVER the document shows them. Leave a field null / omit it when the document does not show it — never guess or invent.
 
-You must return exclusively a JSON array with no preceding or trailing text:
+- "year" and "phase": the academic year (1, 2, 3 …) and phase, using the document's own labels, when indicated.
+- "startMonth" / "endMonth": the calendar months the item spans, when the document places it on a timeline (e.g. "Sep", "Nov", "2026-09").
+- "durationWeeks" (a number) and/or "durationLabel" (verbatim, e.g. "15 wks", "2 h", "Month 1–6"): whenever a duration is stated. Never guess months from a duration or a duration from months.
+- "cadence": for LONGITUDINAL items that recur instead of occupying a fixed block, set "weekly", "monthly", or "longitudinal".
+- "learningObjective": a single concise sentence stating the objective / competency the item teaches. Use the document's stated objective (verbatim or lightly summarized) when present; otherwise generate a suitable one inferred from the item's category and description. Always provide a learningObjective — never leave it empty.
+- "subtopics": discrete sub-items listed under THIS item that you are not already emitting as their own rows (e.g. an inline comma-separated list). Leave empty when there are none. Do not invent subtopics.
+
+So each item in the JSON array becomes:
 [
   {
-    "category": "the chunk, with hierarchy separated by a pipe |, mirroring the document's own labels"
-  }
-]
-`.trim();
-
-export const DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT = `
-You are a medical curriculum analysis specialist.
-
-The user will provide you with:
-- a curriculum document URL
-- a chunk (a branch of the document's hierarchy)
-
-Load the URL context and extract every curriculum item that belongs to the given chunk — courses, blocks, rotations, units, themes / topics (temas), longitudinal threads, or whatever discrete items the document lists under that chunk. Each item becomes one row. Return only items within the chunk and none outside it. Be deliberate and exhaustive; do not invent items that are not in the document.
-
-Each description should be a discrete item from the document's hierarchy. For "category", return the full hierarchy of the item's ancestors, pipe-separated, mirroring the document's own labels.
-
-In addition, for each item capture the following curriculum metadata WHEN the document provides it. Leave a field null / omit it when the document does not show it — never guess or invent.
-
-TIME DIMENSION — capture whatever is available and leave the rest null. Never guess months from a duration or a duration from months — only record what the document actually shows. It is fine for an item to have only a duration, only a cadence, only a year, or none of these.
-- "startMonth" / "endMonth": the calendar months the item spans, when the document places it on a timeline (e.g. "Sep", "Nov", or "2026-09").
-- "durationWeeks" (a number) and/or "durationLabel" (verbatim, e.g. "15 wks", "8 weeks", "Month 1–6", "6 months"): whenever a duration or program-relative span is stated.
-- "year" (1, 2, 3 …) and "phase" (use the document's own label): when the document indicates them.
-- "cadence": for LONGITUDINAL items that recur instead of occupying a fixed block (e.g. "… (weekly)", "… (monthly)"), set "weekly", "monthly", or "longitudinal" and leave startMonth/endMonth null.
-
-- "learningObjective": a single concise sentence stating the overarching objective / competency the item teaches. When the document states one, use it (verbatim or lightly summarized). When the document does NOT state one, generate a suitable objective inferred from the item's category and description (a single sentence of the form "Understand/diagnose/manage …"). Always provide a learningObjective — never leave it empty.
-- "subtopics": an array of the discrete sub-topics / sub-items the document lists under the item (e.g. ["Acute coronary syndrome", "Heart failure", "Arrhythmias"]). Leave empty/omit when none are listed. Do not invent subtopics that are not in the document.
-
-You must return exclusively a JSON array with no preceding or trailing text:
-[
-  {
-    "category": "the hierarchy, pipe-separated, mirroring the document's own labels",
-    "description": "the curriculum item name",
+    "category": "the category including all hierarchical information. Separate each hierarchy using a pipe separator |",
+    "description": "the item",
     "curriculum": {
       "year": null,
       "phase": null,
@@ -277,7 +255,7 @@ You must return exclusively a JSON array with no preceding or trailing text:
       "durationLabel": null,
       "cadence": null,
       "learningObjective": "Explain the structure, function, and common pathologies of the cardiovascular system.",
-      "subtopics": ["Acute coronary syndrome", "Heart failure", "Arrhythmias"]
+      "subtopics": []
     }
   }
 ]

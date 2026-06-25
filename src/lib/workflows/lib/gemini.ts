@@ -252,14 +252,9 @@ export async function identifyModulesForUrl(input: {
       : DEFAULT_IDENTIFY_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = isCurriculum
-    ? `
-Please load and analyze the curriculum document at the following URL(s):
-${input.url}
-
-Identify the hierarchy the document actually uses and return exclusively a JSON array of chunks, with no other text.
-`.trim()
-    : `
+  // Same user message for both variants — the curriculum behavior lives in the
+  // system prompt (the curriculum identify prompt is the default verbatim).
+  const userMessage = `
 Please load and analyze the content at the following URL(s):
 ${input.url}
 
@@ -371,19 +366,9 @@ export async function extractCodesForCategory(input: {
       : DEFAULT_EXTRACT_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = isCurriculum
-    ? `
-You are extracting curriculum items for the medical curriculum: ${input.specialtySlug}.
-
-Please load and analyze the curriculum document at the following URL(s):
-${input.url}
-
-Extract only the curriculum items (courses / blocks / rotations / units / themes / longitudinal threads) in this chunk, with their curriculum metadata when the document shows it, and do not invent anything not explicitly present:
-${input.category}
-
-Return exclusively a JSON array, with no other text.
-`.trim()
-    : `
+  // Same user message for both variants — the curriculum metadata requirement
+  // lives in the system prompt (default extract prompt + curriculum addendum).
+  const userMessage = `
 You are extracting medical items for the medical specialty: ${input.specialtySlug}.
 
 Please load and analyze the content at the following URL(s):
