@@ -934,8 +934,12 @@ export function CodesView({
         // can step through items as they appear in the table.
         onVisibleRowsChange={curriculum ? setVisibleRows : undefined}
         // The whole row opens the detail modal; editable cells and the
-        // deep-link chips stop propagation so they don't trip this.
-        onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
+        // deep-link chips stop propagation so they don't trip this. In
+        // curriculum mode, land on the Curriculum tab so the subtopics (and
+        // objective/timing) show on open without an extra click.
+        onRowClick={(r) =>
+          onOpenDetail(r, curriculum ? 'curriculum' : 'coverage-articles')
+        }
         // For rag-corpus, also surface how many mapped topics sit below the
         // lit-search coverage threshold, folded into the row-count parenthetical.
         countAddendum={(filtered) => {
