@@ -352,11 +352,14 @@ export type MappingFilter = {
 export async function listUnmappedCodes(
   specialtySlug: string,
   filter?: MappingFilter | null,
+  /** Curriculum-mapping gate: restrict to human-approved codes only. */
+  approvedOnly = false,
 ): Promise<UnmappedCodeRow[]> {
-  log('pipeline').info('listUnmappedCodes', { specialtySlug, filter });
+  log('pipeline').info('listUnmappedCodes', { specialtySlug, filter, approvedOnly });
   const rows = await listUnmappedCodesAsAdmin(specialtySlug, {
     categories: filter?.categories?.filter((s) => typeof s === 'string' && s.length > 0),
     codes: filter?.codes?.filter((s) => typeof s === 'string' && s.length > 0),
+    approvedOnly,
   });
   log('pipeline').info('listUnmappedCodes →', rows.length);
   return rows;

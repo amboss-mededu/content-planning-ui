@@ -144,6 +144,11 @@ export interface CodeRecord extends PbRecord {
   // Populated only for `curriculum-mapping` specialties; the curriculum
   // extractor records year/phase/timing for each block. JSON field.
   curriculumMeta?: CurriculumMeta;
+  // --- Curriculum-mapping human-in-the-loop approval gate -------------------
+  // Curriculum-mapping only; only `'approved'` codes are mapped. '' = pending.
+  curriculumReviewStatus?: '' | 'approved' | 'rejected';
+  curriculumReviewedAt?: number;
+  curriculumReviewedBy?: string;
 }
 
 // --- Collection: codeCategories --------------------------------------------

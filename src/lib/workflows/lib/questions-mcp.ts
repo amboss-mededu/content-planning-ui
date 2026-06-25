@@ -5,8 +5,9 @@
  * A SEPARATE agent from the AMBOSS article mapper (`amboss-mcp.ts`) and the
  * guidelines mapper (`guidelines-mcp.ts`), so the three tracks never
  * cross-contaminate. It runs against the SAME AMBOSS MCP server but exposes
- * ONLY the `search_questions` tool, and returns the matched AMBOSS Qbank
- * question EIDs + stems (+ the tool's metadata).
+ * only the question tools (`search_questions` to find EIDs + metadata, then
+ * `get_questions` to fetch the stems), and returns the matched AMBOSS Qbank
+ * question EIDs + stems (+ metadata).
  *
  * Like the guidelines ladder:
  *   - No library-ID validation (there is no local question catalog) — the
@@ -178,13 +179,23 @@ export async function mapQuestionsForCode(input: {
 
   try {
     const allTools = await mcp.tools();
-    // Prefer the documented name; tolerate a renamed tool by matching
-    // /question/i. If absent, fail soft so the run never crashes.
-    const questionsToolName =
-      'search_questions' in allTools
-        ? 'search_questions'
-        : Object.keys(allTools).find((n) => n.toLowerCase().includes('question'));
-    if (!questionsToolName) {
+    // Two-step flow: `search_questions` finds EIDs + metadata, `get_questions`
+    // fetches the stems. Prefer the documented names; tolerate a renamed search
+    // tool by matching /search.*question/i. If no search tool exists, fail soft.
+    const tools: ToolSet = {};
+    for (const name of ['search_questions', 'get_questions']) {
+      if (name in allTools) tools[name] = allTools[name];
+    }
+    if (!('search_questions' in allTools)) {
+      const alt = Object.keys(allTools).find(
+        (n) => n.toLowerCase().includes('question') && n.toLowerCase().includes('search'),
+      );
+      if (alt) tools[alt] = allTools[alt];
+    }
+    const hasSearch = Object.keys(tools).some(
+      (n) => n.toLowerCase().includes('question') && n.toLowerCase().includes('search'),
+    );
+    if (!hasSearch) {
       const none = stubQuestionMapping(input.code, input.description);
       none.coverage.generalNotes = 'search_questions tool not exposed by the MCP server';
       await logEvent({
@@ -196,7 +207,6 @@ export async function mapQuestionsForCode(input: {
       });
       return { mapping: none, attempts: 0, model: 'none', unresolved: true };
     }
-    const tools: ToolSet = { [questionsToolName]: allTools[questionsToolName] };
 
     const system = composeQuestionsSystem(input.milestones, input.additionalInstructions);
     const userMessage = composeQuestionsUser({

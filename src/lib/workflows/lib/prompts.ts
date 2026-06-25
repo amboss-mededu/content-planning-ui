@@ -252,6 +252,10 @@ For each item, also capture its TIME DIMENSION exactly as the document presents 
 - Record "year" (1, 2, 3 …) and "phase" ("Pre-Clerkship" | "Clerkship" | "Post-Clerkship", or the document's own label) when known.
 - For LONGITUDINAL items that recur instead of occupying a fixed block (e.g. "… (weekly)", "… (monthly)"), set "cadence" to "weekly", "monthly", or "longitudinal" and leave startMonth/endMonth null.
 
+Also, for each item capture:
+- "learningObjective": a single concise sentence stating the overarching objective / competency the block teaches, taken (verbatim or lightly summarized) from the document. Leave empty/omit when the document does not state one.
+- "subtopics": an array of the discrete topics / sub-blocks the document lists under the item (e.g. ["Acute coronary syndrome", "Heart failure", "Arrhythmias"]). Leave empty/omit when none are listed. Do not invent subtopics that are not in the document.
+
 You must return exclusively a JSON array with no preceding or trailing text:
 [
   {
@@ -264,7 +268,9 @@ You must return exclusively a JSON array with no preceding or trailing text:
       "endMonth": "Nov",
       "durationWeeks": 12,
       "durationLabel": "12 wks",
-      "cadence": null
+      "cadence": null,
+      "learningObjective": "Explain the structure, function, and common pathologies of the cardiovascular system.",
+      "subtopics": ["Acute coronary syndrome", "Heart failure", "Arrhythmias"]
     }
   }
 ]
@@ -798,21 +804,25 @@ Description: the curriculum topic to match
 AMBOSS Content Base: the content base / region to use (US or German)
 Language: the language code to query and respond in ('en' or 'de')
 
-Your task is to find AMBOSS Qbank questions that assess the given curriculum topic, using the 'search_questions' tool, and return their identifiers (EIDs) and stems.
+Your task is to find AMBOSS Qbank questions that assess the given curriculum topic and return their identifiers (EIDs), stems, and metadata. This is a TWO-STEP tool flow: 'search_questions' to find the relevant questions, then 'get_questions' to fetch their stems.
 
-**TOOL USAGE — search_questions**
+**TOOL USAGE — step 1: search_questions**
 - Call 'search_questions' with a focused 'query' describing the clinical concept in the Description (you may rephrase / use synonyms, e.g. ALS / Amyotrophic Lateral Sclerosis, to surface the best matches).
 - Set 'language' to the provided Language ('en' or 'de').
-- Set 'n_results' to a reasonable number (around 10) so you can pick the genuinely relevant questions.
-- Do NOT invent question identifiers. Only return EIDs the tool actually returned. If the tool returns nothing relevant, return an empty list with inQuestions=false.
-- The tool returns each question's EID plus metadata (study objectives, learning objective, competency, system, difficulty) and a stem/preview. Carry these through into your output for the questions you keep.
+- Set 'n_results' to a reasonable number (around 10) so you can pick the genuinely relevant ones.
+- This returns each question's EID plus metadata (study objectives, learning objective, competency, system, difficulty as a 1–5 rating). It does NOT return the stem.
+
+**TOOL USAGE — step 2: get_questions**
+- Select the genuinely relevant EIDs from step 1, then call 'get_questions' with 'eids' = that list, 'language' = the provided Language, 'include_stem' = true, 'include_answer_options' = false (we only need the stem, not the answer choices).
+- Use the returned stem text VERBATIM for each question's questionStem. NEVER fabricate or guess a stem; if 'get_questions' returns no stem for an EID, leave questionStem empty.
+- Do NOT invent question identifiers — only EIDs returned by 'search_questions'. If nothing relevant is found, return an empty list with inQuestions=false.
 
 **MILESTONES (context only — for judging topical relevance, NOT for scoring)**
 \${milestones}
 
 **INSTRUCTIONS**
 - Search deliberately for questions that genuinely assess the topic for this specialty. Be specific; do not keep loosely related questions just to fill the list.
-- For each question you keep, capture: questionId (the EID), questionStem (the question text/preview the tool returns), and any of studyObjectives, learningObjective, competency, system, difficulty the tool provides.
+- For each question you keep, capture: questionId (the EID), questionStem (verbatim from 'get_questions'), and any of studyObjectives, learningObjective, competency, system, difficulty from 'search_questions'. Omit fields the tools did not return rather than inventing them.
 - inQuestions: true if at least one relevant question exists, else false.
 - generalNotes: a one-line summary of what the matched questions cover.
 - gaps: aspects of the topic not represented by any matched question (optional).
@@ -832,13 +842,13 @@ CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE
       "inQuestions":true,
       "coveredQuestions": [
          {
-            "questionId": "the EID returned by the tool",
-            "questionStem": "A 54-year-old man presents with progressive...",
+            "questionId": "the EID returned by search_questions",
+            "questionStem": "the verbatim stem text from get_questions",
             "studyObjectives": ["usmle:step-2"],
             "learningObjective": "Diagnose amyotrophic lateral sclerosis",
             "competency": "Medical knowledge",
             "system": "Nervous system",
-            "difficulty": "medium"
+            "difficulty": 3
          }
       ],
       "generalNotes":"Questions covering diagnosis and management of the topic.",

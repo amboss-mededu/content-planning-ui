@@ -73,6 +73,15 @@ export const GROUP_STYLES: Record<
     border: 'rgb(217, 119, 6)',
     stripe: 'rgba(217, 119, 6, 0.07)',
   },
+  review: {
+    label: 'Review',
+    // A cooler, slightly deeper grey than the neutral Metadata band so the
+    // approval column reads as its own group sitting beside Metadata.
+    bg: 'rgb(228, 230, 235)',
+    fg: 'rgb(71, 85, 105)',
+    border: 'rgb(148, 163, 184)',
+    stripe: 'rgba(71, 85, 105, 0.06)',
+  },
   actions: {
     label: '',
     bg: 'transparent',

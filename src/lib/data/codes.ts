@@ -59,6 +59,7 @@ export type CodeTableRow = Pick<
   | 'litSearchSourceCount'
   | 'litSearchedAt'
   | 'curriculumMeta'
+  | 'curriculumReviewStatus'
 >;
 
 type CodeTableRowSource = CodeTableRow &
@@ -106,6 +107,7 @@ const CODE_TABLE_FIELDS = [
   'litSearchSourceCount',
   'litSearchedAt',
   'curriculumMeta',
+  'curriculumReviewStatus',
   'articlesWhereCoverageIs',
   'existingArticleUpdates',
   'newArticlesNeeded',
@@ -323,6 +325,9 @@ export type PatchCodeFields = {
   articlesWhereCoverageIs?: CoveredSection[];
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
+  /** Curriculum-mapping approval gate. The reviewer email + timestamp are
+   *  stamped server-side in `patchCode`, never client-supplied. */
+  curriculumReviewStatus?: '' | 'approved' | 'rejected';
 };
 
 // Editing any of these on an unmapped row implies a (manual) mapping verdict —
@@ -378,6 +383,7 @@ export async function patchCode(
   slug: string,
   code: string,
   fields: PatchCodeFields,
+  reviewerEmail?: string | null,
 ): Promise<CodeTableRow> {
   const pb = await userClient();
   const row = await pb
@@ -387,6 +393,19 @@ export async function patchCode(
     );
 
   const update: Record<string, unknown> = { ...fields };
+
+  // Curriculum approval gate: stamp reviewer + time when a decision is made,
+  // and clear both when the decision is reset to pending (''). This never
+  // touches mappedAt — approval is not a mapping verdict.
+  if (fields.curriculumReviewStatus !== undefined) {
+    if (fields.curriculumReviewStatus === '') {
+      update.curriculumReviewedAt = 0;
+      update.curriculumReviewedBy = '';
+    } else {
+      update.curriculumReviewedAt = Date.now();
+      update.curriculumReviewedBy = reviewerEmail ?? '';
+    }
+  }
 
   const touchesArrays =
     fields.articlesWhereCoverageIs !== undefined ||
@@ -447,11 +466,15 @@ export async function patchCode(
  */
 export async function listUnmappedCodesAsAdmin(
   slug: string,
-  filter?: { categories?: string[]; codes?: string[] } | null,
+  filter?: { categories?: string[]; codes?: string[]; approvedOnly?: boolean } | null,
 ): Promise<Array<{ code: string; category: string | null; description: string | null }>> {
   const pb = await createAdminClient();
+  // Curriculum-mapping gate: only human-approved curriculum items are mapped.
+  const approvedClause = filter?.approvedOnly
+    ? ' && curriculumReviewStatus = "approved"'
+    : '';
   const rows = await pb.collection<CodeRecord>('codes').getFullList({
-    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)`,
+    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)${approvedClause}`,
   });
   const catSet = filter?.categories?.length ? new Set(filter.categories) : null;
   const codeSet = filter?.codes?.length ? new Set(filter.codes) : null;

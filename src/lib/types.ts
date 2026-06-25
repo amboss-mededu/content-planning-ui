@@ -112,6 +112,11 @@ export type CurriculumMeta = {
   durationLabel?: string;
   /** Longitudinal recurring items (start/end usually absent). */
   cadence?: CurriculumCadence;
+  /** The overarching learning objective the block teaches, as stated in the
+   *  source (curriculum extraction). */
+  learningObjective?: string;
+  /** Discrete sub-topics listed under the block in the source. */
+  subtopics?: string[];
 };
 
 // --- Code ------------------------------------------------------------------
@@ -214,6 +219,12 @@ export type Code = {
   litSearchedAt?: number;
   // --- Curriculum-mapping time dimension ------------------------------------
   curriculumMeta?: CurriculumMeta;
+  // --- Curriculum-mapping approval gate -------------------------------------
+  /** '' (pending) | 'approved' | 'rejected'. Only approved curriculum items
+   *  are mapped. Curriculum-mapping only. */
+  curriculumReviewStatus?: '' | 'approved' | 'rejected';
+  curriculumReviewedAt?: number;
+  curriculumReviewedBy?: string;
   metadata?: unknown;
   fullJsonOutput?: unknown;
 };

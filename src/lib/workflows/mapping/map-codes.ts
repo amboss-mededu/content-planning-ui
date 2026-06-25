@@ -272,10 +272,15 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
   try {
     await markStageRunning(input.runId, 'map_codes');
 
-    const [spec, unmapped] = await Promise.all([
-      loadSpecialtyForMapping(input.specialtySlug),
-      listUnmappedCodes(input.specialtySlug, input.filter ?? null),
-    ]);
+    // Load the specialty first: curriculum-mapping gates mapping on the
+    // per-item human approval, so we must know the mode before listing codes.
+    const spec = await loadSpecialtyForMapping(input.specialtySlug);
+    const approvedOnly = spec.pipelineMode === 'curriculum-mapping';
+    const unmapped = await listUnmappedCodes(
+      input.specialtySlug,
+      input.filter ?? null,
+      approvedOnly,
+    );
     const contentBase = input.contentBase || deriveContentBase(spec.region);
     const language = input.language || deriveLanguage(spec.language);
     const milestones = spec.milestones ?? '';

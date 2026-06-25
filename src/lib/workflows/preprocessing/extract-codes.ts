@@ -193,7 +193,9 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     // codes appear in Mapping/Categories immediately. Clear the specialty's
     // existing codes first so a re-run replaces rather than duplicates — the
     // `codes` schema has no unique constraint on `code`, and bulk insert is
-    // create-only.
+    // create-only. Note: for curriculum-mapping this intentionally resets each
+    // item's `curriculumReviewStatus` to pending — re-extracted items are new
+    // content and must be re-approved before they map.
     await deleteCodesForSpecialtyAsAdmin(input.specialtySlug);
     await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
     await markStageCompleted(input.runId, 'extract_codes', undefined, summary);

@@ -37,6 +37,7 @@ export type ColumnGroup =
   | 'literature'
   | 'consolidation'
   | 'suggestions'
+  | 'review'
   | 'actions';
 
 export interface Column<T> {

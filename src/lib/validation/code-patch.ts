@@ -76,6 +76,9 @@ export const CodePatchBody = z
     articlesWhereCoverageIs: z.array(CoveredSectionSchema).optional(),
     existingArticleUpdates: z.array(SectionUpdateSchema).optional(),
     newArticlesNeeded: z.array(NewArticleSchema).optional(),
+    // Curriculum-mapping approval gate. `curriculumReviewedAt`/`...By` are
+    // server-stamped in `patchCode`, never accepted from the client.
+    curriculumReviewStatus: z.enum(['', 'approved', 'rejected']).optional(),
   })
   .strict();
 

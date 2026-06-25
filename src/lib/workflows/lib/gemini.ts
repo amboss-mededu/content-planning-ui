@@ -93,6 +93,8 @@ const CurriculumExtractElementSchema = z.object({
       durationWeeks: z.union([z.number(), z.string()]).nullish(),
       durationLabel: z.string().nullish(),
       cadence: z.string().nullish(),
+      learningObjective: z.string().nullish(),
+      subtopics: z.array(z.string()).nullish(),
     })
     .passthrough()
     .nullish()

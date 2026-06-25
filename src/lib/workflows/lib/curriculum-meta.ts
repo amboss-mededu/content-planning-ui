@@ -34,6 +34,20 @@ function coerceString(v: unknown): string | undefined {
 }
 
 /**
+ * Coerce a raw `subtopics` value into a clean string[] (or undefined). Accepts
+ * an array of strings; tolerates a lone string by wrapping it. Drops empties.
+ */
+function coerceStringArray(v: unknown): string[] | undefined {
+  const raw = Array.isArray(v) ? v : v == null ? [] : [v];
+  const out: string[] = [];
+  for (const item of raw) {
+    const s = coerceString(item);
+    if (s) out.push(s);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
  * Coerce a raw `curriculum` object (from the extract model) into a clean
  * {@link CurriculumMeta}, or `undefined` when nothing usable is present.
  */
@@ -66,6 +80,12 @@ export function normalizeCurriculumMeta(raw: unknown): CurriculumMeta | undefine
   if (cadence && (CADENCES as readonly string[]).includes(cadence)) {
     out.cadence = cadence as CurriculumCadence;
   }
+
+  const learningObjective = coerceString(r.learningObjective);
+  if (learningObjective) out.learningObjective = learningObjective;
+
+  const subtopics = coerceStringArray(r.subtopics);
+  if (subtopics) out.subtopics = subtopics;
 
   return Object.keys(out).length > 0 ? out : undefined;
 }

@@ -17,6 +17,7 @@ import {
 import { CancelCodeLitSearchButton } from './cancel-code-lit-search-button';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
+import { DecisionButtons, rowTint } from './decision-buttons';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { RunCodeLitSearchRowButton } from './run-code-lit-search-row-button';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
@@ -140,7 +141,20 @@ export function CodesView({
     [],
   );
 
+  // The sorted+filtered row set, captured from the table so the detail modal
+  // can step through items in the order the editor is looking at them
+  // (curriculum approval review). Seeded with the full list before first emit.
+  const [visibleRows, setVisibleRows] = useState<Code[]>(codes);
+
   const editingEnabled = canEdit && !!onPatchRow;
+
+  // Curriculum approval decision: reuse the per-code PATCH path (the field is
+  // part of PatchCodeFields). Maps a cleared decision (null) to '' (pending).
+  const decideCurriculum = useCallback(
+    (code: string, status: '' | 'approved' | 'rejected') =>
+      onPatchRow?.(code, { curriculumReviewStatus: status }),
+    [onPatchRow],
+  );
 
   // Source is edited via a select fed by the distinct source values already
   // present in the table (new sources come in through the file import flow).
@@ -711,7 +725,61 @@ export function CodesView({
         filterable: true,
         group: 'curriculum',
       },
+      {
+        key: 'curriculumSubtopics',
+        label: 'Subtopics',
+        description: 'Number of subtopics extracted for this curriculum item',
+        width: 100,
+        align: 'center',
+        render: (r) => {
+          const n = r.curriculumMeta?.subtopics?.length ?? 0;
+          if (n === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={`${n} subtopic${n === 1 ? '' : 's'}`}
+              tone="overall"
+              onClick={() => onOpenDetail(r, 'curriculum')}
+            />
+          );
+        },
+        accessor: (r) => r.curriculumMeta?.subtopics?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        group: 'curriculum',
+      },
     ];
+
+    // --- Curriculum approval gate column (curriculum-mapping only) ---------
+    // First/left column: Approve (✓) / Reject (✗). Only approved items are
+    // mapped. Buttons stop propagation so they don't open the detail modal.
+    const reviewCol: Column<Code> = {
+      key: 'curriculumReview',
+      label: 'Review',
+      description:
+        'Approve or reject this curriculum item. Only approved items are mapped.',
+      width: 90,
+      align: 'center',
+      render: (r) => (
+        <DecisionButtons
+          status={r.curriculumReviewStatus || undefined}
+          disabled={!editingEnabled || inFlightSet.has(r.code)}
+          approveTitle="Approve (A)"
+          rejectTitle="Reject (R)"
+          onDecide={(next) => {
+            void decideCurriculum(r.code, next ?? '');
+          }}
+        />
+      ),
+      accessor: (r) => r.curriculumReviewStatus || 'pending',
+      type: 'string',
+      filterable: true,
+      filterOptions: [
+        { value: 'pending', label: 'Pending' },
+        { value: 'approved', label: 'Approved' },
+        { value: 'rejected', label: 'Rejected' },
+      ],
+      group: 'review',
+    };
 
     // --- Question mapping column (curriculum-mapping only) -----------------
     const questionCols: Column<Code>[] = [
@@ -783,7 +851,7 @@ export function CodesView({
       const rest = result.filter(
         (c) => c.group !== 'metadata' && c.key !== 'coverage' && c.key !== 'depth',
       );
-      result = [...metaCols, ...curriculumCols, ...rest, ...questionCols];
+      result = [reviewCol, ...metaCols, ...curriculumCols, ...rest, ...questionCols];
     }
     return result;
   }, [
@@ -791,6 +859,7 @@ export function CodesView({
     inFlightSet,
     editingEnabled,
     onPatchRow,
+    decideCurriculum,
     sourceOptions,
     mappingOnly,
     mappingSource,
@@ -815,6 +884,11 @@ export function CodesView({
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
         leadingNote={getLoadStatusText(loadState, totalCount, codes.length)}
+        // Curriculum approval: tint rows green (approved) / red (rejected).
+        getRowStyle={curriculum ? (r) => rowTint(r.curriculumReviewStatus) : undefined}
+        // Feed the detail modal the sorted+filtered order so curriculum review
+        // can step through items as they appear in the table.
+        onVisibleRowsChange={curriculum ? setVisibleRows : undefined}
         // The whole row opens the detail modal; editable cells and the
         // deep-link chips stop propagation so they don't trip this.
         onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
@@ -846,6 +920,20 @@ export function CodesView({
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
         onPatchRow={onPatchRow}
         onClose={() => setSelected(null)}
+        // Curriculum approval: step through items + approve/reject in the modal.
+        navList={curriculum ? visibleRows : undefined}
+        navIndex={
+          curriculum && selected
+            ? visibleRows.findIndex((r) => r.code === selected.row.code)
+            : undefined
+        }
+        onNavigate={
+          curriculum
+            ? (r) =>
+                setSelected((prev) => (prev ? { row: r, target: prev.target } : prev))
+            : undefined
+        }
+        onDecideCurriculum={curriculum ? decideCurriculum : undefined}
       />
     </Stack>
   );
