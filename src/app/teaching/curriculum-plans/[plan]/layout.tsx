@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { SpecialtyTabs } from '@/app/planning/_components/specialty-tabs';
+import { CreateStudyPlanButton } from '@/app/teaching/_components/create-study-plan-button';
 import { CurriculumPlanHeader } from '@/app/teaching/_components/curriculum-plan-header';
 import { getSpecialty } from '@/lib/data/specialties';
 import { getTabsComplete } from '@/lib/data/tab-status';
@@ -45,12 +46,20 @@ export default async function CurriculumPlanLayout({
 
 async function CurriculumTabsData({ slug }: { slug: string }) {
   const tabsComplete = await getTabsComplete(slug);
+  // Tabs on the left grow to fill the row (so the stepper underline spans it);
+  // the "Create study plan" action floats to the far right, aligned to the
+  // baseline. The button self-hides off the Overview page.
   return (
-    <SpecialtyTabs
-      slug={slug}
-      tabsComplete={tabsComplete}
-      hiddenSegments={CURRICULUM_HIDDEN_SEGMENTS}
-      basePath={BASE_PATH}
-    />
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <SpecialtyTabs
+          slug={slug}
+          tabsComplete={tabsComplete}
+          hiddenSegments={CURRICULUM_HIDDEN_SEGMENTS}
+          basePath={BASE_PATH}
+        />
+      </div>
+      <CreateStudyPlanButton slug={slug} />
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { listCodes } from '@/lib/data/codes';
 import { getCoverageStats } from '@/lib/data/coverage-stats';
 import { computeCurriculumPlanStats } from '@/lib/data/curriculum-plans';
+import { listStudyPlans } from '@/lib/data/study-plans';
 import { CurriculumDashboard } from '../../_components/curriculum-dashboard';
 
 export default async function CurriculumPlanOverviewPage({
@@ -19,9 +20,10 @@ export default async function CurriculumPlanOverviewPage({
 
 // The layout already guards that `slug` is a curriculum-mapping specialty.
 async function CurriculumPlanOverviewData({ slug }: { slug: string }) {
-  const [coverageStats, codes] = await Promise.all([
+  const [coverageStats, codes, studyPlans] = await Promise.all([
     getCoverageStats(slug),
     listCodes(slug),
+    listStudyPlans(slug),
   ]);
   const stats = computeCurriculumPlanStats(codes);
 
@@ -31,6 +33,7 @@ async function CurriculumPlanOverviewData({ slug }: { slug: string }) {
       stats={stats}
       coverageStats={coverageStats}
       codes={codes}
+      studyPlans={studyPlans}
     />
   );
 }

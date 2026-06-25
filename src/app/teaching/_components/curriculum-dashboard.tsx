@@ -5,13 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { CoverageStats } from '@/lib/data/coverage-stats-compute';
 import type { CurriculumPlanStats } from '@/lib/data/curriculum-plans';
-import type { CodeRecord } from '@/lib/pb/types';
+import type { CodeRecord, StudyPlanRecord } from '@/lib/pb/types';
 import { CoverageStats as StatTiles } from '../../planning/_components/coverage-stats';
 import { CurriculumCoverageStatistics } from './curriculum-coverage-statistics';
 import { CurriculumGapReportView } from './curriculum-gap-report-view';
 import { curriculumStatTiles } from './curriculum-overview-view';
 import { CurriculumReviewNotesView } from './curriculum-review-notes-view';
 import { CurriculumStructure } from './curriculum-structure';
+import { CurriculumStudyPlansView } from './curriculum-study-plans-view';
 import { CurriculumTimelineView } from './curriculum-timeline-view';
 
 /**
@@ -22,13 +23,14 @@ import { CurriculumTimelineView } from './curriculum-timeline-view';
  * The active tab is mirrored to `?view=` for deep-linking.
  */
 
-type DashboardView = 'structure' | 'timeline' | 'gaps' | 'review';
+type DashboardView = 'structure' | 'timeline' | 'gaps' | 'review' | 'plans';
 
 const VIEW_TABS: { view: DashboardView; label: string }[] = [
   { view: 'structure', label: 'Curriculum structure' },
   { view: 'timeline', label: 'Timeline' },
   { view: 'gaps', label: 'Gap Report' },
   { view: 'review', label: 'Review Notes' },
+  { view: 'plans', label: 'Study Plans' },
 ];
 
 const DEFAULT_VIEW: DashboardView = 'structure';
@@ -47,11 +49,13 @@ export function CurriculumDashboard({
   stats,
   coverageStats,
   codes,
+  studyPlans,
 }: {
   slug: string;
   stats: CurriculumPlanStats;
   coverageStats: CoverageStats;
   codes: CodeRecord[];
+  studyPlans: StudyPlanRecord[];
 }) {
   const searchParams = useSearchParams();
   const [view, setView] = useState<DashboardView>(() =>
@@ -87,6 +91,15 @@ export function CurriculumDashboard({
       break;
     case 'review':
       body = <CurriculumReviewNotesView codes={codes} />;
+      break;
+    case 'plans':
+      body = (
+        <CurriculumStudyPlansView
+          slug={slug}
+          codes={codes}
+          initialStudyPlans={studyPlans}
+        />
+      );
       break;
     default:
       body = <CurriculumStructure codes={codes} />;

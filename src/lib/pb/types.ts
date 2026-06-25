@@ -71,6 +71,18 @@ export interface SpecialtyRecord extends PbRecord {
   pipelineStageStates?: Record<string, string>;
 }
 
+// --- Collection: studyPlans ------------------------------------------------
+
+export interface StudyPlanRecord extends PbRecord {
+  /** Owning curriculum plan slug (same value as `codes.specialtySlug`). */
+  specialtySlug: string;
+  name: string;
+  /** Curriculum `category` strings this plan includes. */
+  selectedCategories?: string[];
+  /** Creator email (best effort; '' when unknown). */
+  createdBy?: string;
+}
+
 // --- Collection: codes -----------------------------------------------------
 
 export interface CodeRecord extends PbRecord {
