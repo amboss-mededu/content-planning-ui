@@ -228,6 +228,23 @@ export function CodesViewClient({
     };
   }, [slug, loadState, newestUpdated, fullReconcile]);
 
+  // The moment a map/remap finishes (the live in-flight set falls from
+  // non-empty to empty), pull the final state straight from the API with a
+  // full reconcile. The API read is `no-store` and bypasses both the Next
+  // router cache and the periodic 5s poll, so the table reflects the completed
+  // mapping immediately — no manual page reload. Watches the live parent prop
+  // (the poll source of truth), not the merged set, so a stale `summary`
+  // snapshot can't mask the falling edge.
+  const prevInFlightCount = useRef(inFlightCodesProp.length);
+  useEffect(() => {
+    const count = inFlightCodesProp.length;
+    const justFinished = prevInFlightCount.current > 0 && count === 0;
+    prevInFlightCount.current = count;
+    if (justFinished) {
+      fullReconcile().catch(() => undefined);
+    }
+  }, [inFlightCodesProp, fullReconcile]);
+
   // Apply an inline cell edit. PATCH returns the updated lean row; merge it in
   // place so the table reflects the change (and any server-recomputed counts /
   // mappedAt stamp) immediately, without waiting for the 5s poll.
