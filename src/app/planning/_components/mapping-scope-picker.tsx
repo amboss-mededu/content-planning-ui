@@ -13,13 +13,18 @@ function fmtNum(n: number): string {
   return new Intl.NumberFormat().format(n);
 }
 
-export type MappingScopeMode = 'categories' | 'codes';
+export type MappingScopeMode = 'categories' | 'codes' | 'approved';
 
 export type MappingScopeValue = {
   mode: MappingScopeMode;
   selectedCats: string[];
   specificCodes: string[];
 };
+
+/** Code strings among the unmapped picker rows that are approved for mapping. */
+export function approvedUnmappedCodes(unmappedCodes: UnmappedCodePickerRow[]): string[] {
+  return unmappedCodes.filter((c) => c.reviewStatus === 'approved').map((c) => c.code);
+}
 
 /**
  * Total unmapped codes the current scope would target. Used both for the
@@ -29,7 +34,9 @@ export function estimateScopeCount(
   scope: MappingScopeValue,
   categories: CodeCategorySummary[],
   unmappedCount: number,
+  approvedCount = 0,
 ): number {
+  if (scope.mode === 'approved') return approvedCount;
   if (scope.mode === 'codes') return scope.specificCodes.length;
   const allValues = categories.map((c) => c.category);
   const allSelected =
@@ -51,13 +58,21 @@ export function MappingScopePicker({
   unmappedCount,
   value,
   onChange,
+  /** Curriculum plans gate mapping on approval — offer an "Approved only"
+   *  scope that targets every approved, still-unmapped code. */
+  showApproved = false,
 }: {
   categories: CodeCategorySummary[];
   unmappedCodes: UnmappedCodePickerRow[];
   unmappedCount: number;
   value: MappingScopeValue;
   onChange: (next: MappingScopeValue) => void;
+  showApproved?: boolean;
 }) {
+  const approvedCount = useMemo(
+    () => approvedUnmappedCodes(unmappedCodes).length,
+    [unmappedCodes],
+  );
   const allCategoryValues = useMemo(
     () => categories.map((c) => c.category),
     [categories],
@@ -118,6 +133,15 @@ export function MappingScopePicker({
         value={value.mode}
         onChange={(next) => onChange({ ...value, mode: next as MappingScopeMode })}
         options={[
+          ...(showApproved
+            ? [
+                {
+                  name: 'mapping-scope',
+                  label: 'Approved only',
+                  value: 'approved',
+                },
+              ]
+            : []),
           {
             name: 'mapping-scope',
             label: 'Limit to categories',
@@ -133,7 +157,21 @@ export function MappingScopePicker({
         ]}
       />
 
-      {value.mode === 'categories' ? (
+      {value.mode === 'approved' ? (
+        approvedCount > 0 ? (
+          <Callout
+            type="info"
+            text={`Maps all ${fmtNum(approvedCount)} approved, still-unmapped code${
+              approvedCount === 1 ? '' : 's'
+            }. Approve more codes from a category (Source categories tab) to widen this.`}
+          />
+        ) : (
+          <Callout
+            type="warning"
+            text="No approved, unmapped codes yet. Approve codes first — open a category from the Source categories tab."
+          />
+        )
+      ) : value.mode === 'categories' ? (
         categories.length > 0 ? (
           <Combobox
             name="mappingCategories"

@@ -281,6 +281,9 @@ export type UnmappedCodePickerRow = {
   code: string;
   description: string | null;
   category: string | null;
+  /** Curriculum approval gate state — lets the picker offer an "approved only"
+   *  scope. Empty string for plans without an approval step. */
+  reviewStatus: '' | 'approved' | 'rejected';
 };
 
 export async function listUnmappedCodesForPicker(
@@ -296,6 +299,7 @@ export async function listUnmappedCodesForPicker(
     code: r.code,
     description: r.description ?? null,
     category: r.category ?? null,
+    reviewStatus: r.curriculumReviewStatus ?? '',
   }));
 }
 

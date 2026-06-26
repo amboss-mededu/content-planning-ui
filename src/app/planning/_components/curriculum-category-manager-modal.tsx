@@ -14,7 +14,6 @@ import {
   Modal,
   Stack,
   Text,
-  Tooltip,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -540,62 +539,6 @@ export function CurriculumCategoryManagerModal({
         open={missingKey !== null}
         provider={missingKey}
         onClose={() => setMissingKey(null)}
-      />
-    </>
-  );
-}
-
-/**
- * Curriculum-plan entry point for category management, rendered in place of the
- * stock `RemapModal` on the Mapping tab. Unlike "Map by category…" it's **not**
- * greyed out when everything is mapped — remapping is the whole point — but it
- * still waits for the summary fetch and pauses during a full consolidation.
- */
-export function CurriculumCategoryManagerButton({
-  slug,
-  supportReady,
-  runningAll,
-  mappingActive,
-  onClosed,
-}: {
-  slug: string;
-  supportReady: boolean;
-  runningAll: boolean;
-  mappingActive: boolean;
-  /** Called after the modal closes so the toolbar can refetch its summary. */
-  onClosed: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const canOpen = supportReady && !runningAll;
-
-  const button = (
-    <Button
-      variant="secondary"
-      size="m"
-      disabled={!canOpen}
-      onClick={() => setOpen(true)}
-    >
-      Map by category…
-    </Button>
-  );
-
-  return (
-    <>
-      {supportReady && runningAll ? (
-        <Tooltip content="A full consolidation is running — mapping resumes as soon as it finishes.">
-          <span style={{ display: 'inline-flex' }}>{button}</span>
-        </Tooltip>
-      ) : (
-        button
-      )}
-      <CurriculumCategoryManagerModal
-        slug={slug}
-        open={open}
-        mappingActive={mappingActive}
-        onClose={() => {
-          setOpen(false);
-          onClosed();
-        }}
       />
     </>
   );

@@ -4,7 +4,6 @@ import { Button, Inline, Tooltip } from '@amboss/design-system';
 import { useCallback, useEffect, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import type { PipelineMode } from '@/lib/types';
-import { CurriculumCategoryManagerButton } from './curriculum-category-manager-modal';
 import { ImportCodesModal } from './import-codes-modal';
 import { RemapModal } from './remap-modal';
 
@@ -17,6 +16,11 @@ import { RemapModal } from './remap-modal';
  * activity) so the buttons can enable/disable without threading state up from
  * the codes table. The button stays mounted at all times — it's disabled, never
  * hidden, so it doesn't pop in and out while the table's pages stream in.
+ *
+ * Curriculum plans use the same category search/selector here; the per-category
+ * approve + map/remap surface lives behind a Source-categories row click
+ * (`SourceCategoriesTable` → `CurriculumCategoryManagerModal`). For curriculum,
+ * the map workflow maps only approved codes (the `approvedOnly` gate).
  */
 export function CodesActionsToolbar({
   slug,
@@ -101,27 +105,9 @@ export function CodesActionsToolbar({
         setRemapOpen(true);
       }}
     >
-      {remapLoading ? 'Loading…' : 'Map by category…'}
+      {remapLoading ? 'Loading…' : 'Map'}
     </Button>
   );
-
-  // Curriculum plans get the Category Manager instead of the stock Remap
-  // modal: it surfaces approval + map/remap by category and is never greyed
-  // out when everything is already mapped (remapping is the point).
-  if (pipelineMode === 'curriculum-mapping') {
-    return (
-      <Inline space="s" vAlignItems="center" noWrap>
-        <ImportCodesModal slug={slug} />
-        <CurriculumCategoryManagerButton
-          slug={slug}
-          supportReady={supportReady}
-          runningAll={runningAll}
-          mappingActive={mappingActive}
-          onClosed={refetchSummary}
-        />
-      </Inline>
-    );
-  }
 
   return (
     <Inline space="s" vAlignItems="center" noWrap>
@@ -141,6 +127,7 @@ export function CodesActionsToolbar({
           refetchSummary();
         }}
         specialtySlug={slug}
+        pipelineMode={pipelineMode}
         categories={remapData?.categories ?? []}
         unmappedCodes={remapData?.unmappedCodes ?? []}
         unmappedCount={unmappedCount}

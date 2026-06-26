@@ -2,9 +2,10 @@
 
 import { Callout, Modal, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
+import type { PipelineMode } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
 import { MissingKeyModal } from '../[specialty]/pipeline/_components/missing-key-modal';
@@ -16,6 +17,7 @@ import {
 } from '../[specialty]/pipeline/_components/model-selection-storage';
 import { CancelMappingButton } from './cancel-mapping-button';
 import {
+  approvedUnmappedCodes,
   estimateScopeCount,
   MappingScopePicker,
   type MappingScopeValue,
@@ -37,6 +39,7 @@ export function RemapModal({
   open,
   onClose,
   specialtySlug,
+  pipelineMode = 'full',
   categories,
   unmappedCodes,
   unmappedCount,
@@ -45,6 +48,9 @@ export function RemapModal({
   open: boolean;
   onClose: () => void;
   specialtySlug: string;
+  /** Curriculum plans gate mapping on approval — default the scope to the
+   *  approved, unmapped codes and offer an "Approved only" picker. */
+  pipelineMode?: PipelineMode;
   categories: CodeCategorySummary[];
   unmappedCodes: UnmappedCodePickerRow[];
   unmappedCount: number;
@@ -53,8 +59,9 @@ export function RemapModal({
   mappingActive?: boolean;
 }) {
   const router = useRouter();
+  const curriculum = pipelineMode === 'curriculum-mapping';
   const [scope, setScope] = useState<MappingScopeValue>({
-    mode: categories.length > 0 ? 'categories' : 'codes',
+    mode: curriculum ? 'approved' : categories.length > 0 ? 'categories' : 'codes',
     selectedCats: categories.map((c) => c.category),
     specificCodes: [],
   });
@@ -62,9 +69,19 @@ export function RemapModal({
   const [error, setError] = useState<string | null>(null);
   const [missingKey, setMissingKey] = useState<ProviderId | null>(null);
 
+  const approvedCodes = useMemo(
+    () => approvedUnmappedCodes(unmappedCodes),
+    [unmappedCodes],
+  );
+
   if (!open) return null;
 
-  const estimatedCount = estimateScopeCount(scope, categories, unmappedCount);
+  const estimatedCount = estimateScopeCount(
+    scope,
+    categories,
+    unmappedCount,
+    approvedCodes.length,
+  );
   const allSelected =
     scope.selectedCats.length === categories.length && categories.length > 0;
   const submitDisabled = submitting || estimatedCount === 0;
@@ -86,9 +103,11 @@ export function RemapModal({
           ? scope.selectedCats
           : undefined;
       const codesPayload =
-        scope.mode === 'codes' && scope.specificCodes.length > 0
-          ? scope.specificCodes
-          : undefined;
+        scope.mode === 'approved'
+          ? approvedCodes
+          : scope.mode === 'codes' && scope.specificCodes.length > 0
+            ? scope.specificCodes
+            : undefined;
       const res = await fetch('/api/workflows/map-codes', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -158,6 +177,7 @@ export function RemapModal({
               unmappedCount={unmappedCount}
               value={scope}
               onChange={setScope}
+              showApproved={curriculum}
             />
             {error ? <Callout type="error" text={error} /> : null}
           </Stack>
