@@ -149,7 +149,9 @@ export function MappingView({
         </Inline>
         {/* Bulk code actions live inline with the view selector, clustered on
             the right. Only relevant to the Codes view. */}
-        {mode === 'codes' ? <CodesActionsToolbar slug={slug} /> : null}
+        {mode === 'codes' ? (
+          <CodesActionsToolbar slug={slug} pipelineMode={pipelineMode} />
+        ) : null}
       </Inline>
       {/* Codes stays mounted across switches so its progressive pagination
           and live-collection polling survive a detour to the other views. The
@@ -169,7 +171,13 @@ export function MappingView({
       {mode === 'consolidation' && !mappingOnly ? (
         <ConsolidationBucketsView rows={rows} slug={slug} />
       ) : null}
-      {mode === 'source' ? <SourceCategoriesTable rows={sourceRows} slug={slug} /> : null}
+      {mode === 'source' ? (
+        <SourceCategoriesTable
+          rows={sourceRows}
+          slug={slug}
+          pipelineMode={pipelineMode}
+        />
+      ) : null}
       {codeCount === 0 && codeSources ? (
         <StartCodesModal
           specialtySlug={slug}

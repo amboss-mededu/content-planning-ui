@@ -461,6 +461,101 @@ export async function patchCode(
 }
 
 /**
+ * Curriculum approval gate — admin write for a single code. Mirrors the
+ * stamping in `patchCode` (set reviewer + time on a decision, clear both when
+ * reset to pending ''). Never touches `mappedAt` — approval is not a mapping
+ * verdict. No-ops on a missing code so callers can fire in bulk safely.
+ */
+export async function setCurriculumReviewAsAdmin(
+  slug: string,
+  code: string,
+  status: '' | 'approved' | 'rejected',
+  reviewerEmail?: string | null,
+): Promise<void> {
+  const pb = await createAdminClient();
+  let row: CodeRecord;
+  try {
+    row = await pb
+      .collection<CodeRecord>('codes')
+      .getFirstListItem(
+        pb.filter('specialtySlug = {:slug} && code = {:code}', { slug, code }),
+      );
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return;
+    throw e;
+  }
+  await pb.collection('codes').update(row.id, {
+    curriculumReviewStatus: status,
+    curriculumReviewedAt: status === '' ? 0 : Date.now(),
+    curriculumReviewedBy: status === '' ? '' : (reviewerEmail ?? ''),
+  });
+}
+
+/**
+ * Bulk variant of {@link setCurriculumReviewAsAdmin} — applies one decision to
+ * every listed code (the category manager's "Approve all / Reject all").
+ * Operates on explicit code strings rather than a category filter so it's
+ * immune to category whitespace/quoting and the "Uncategorized" bucket.
+ * Returns the count actually updated.
+ */
+export async function setCurriculumReviewForCodesAsAdmin(
+  slug: string,
+  codes: string[],
+  status: '' | 'approved' | 'rejected',
+  reviewerEmail?: string | null,
+): Promise<number> {
+  const pb = await createAdminClient();
+  const at = status === '' ? 0 : Date.now();
+  const by = status === '' ? '' : (reviewerEmail ?? '');
+  let updated = 0;
+  for (const code of codes) {
+    try {
+      const row = await pb
+        .collection<CodeRecord>('codes')
+        .getFirstListItem(
+          pb.filter('specialtySlug = {:slug} && code = {:code}', { slug, code }),
+        );
+      await pb.collection('codes').update(row.id, {
+        curriculumReviewStatus: status,
+        curriculumReviewedAt: at,
+        curriculumReviewedBy: by,
+      });
+      updated += 1;
+    } catch (e) {
+      if (e instanceof ClientResponseError && e.status === 404) continue;
+      throw e;
+    }
+  }
+  return updated;
+}
+
+/**
+ * Codes that are currently mapped AND curriculum-approved, narrowed by the
+ * same `{ categories?, codes? }` filter the map-codes route uses. The remap
+ * path clears these (`clearMappingAsAdmin`) so the workflow re-maps exactly the
+ * approved, already-mapped slice. Unapproved codes are left alone.
+ */
+export async function listApprovedMappedCodesAsAdmin(
+  slug: string,
+  filter?: { categories?: string[]; codes?: string[] } | null,
+): Promise<string[]> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: `specialtySlug = "${slug}" && mappedAt > 0 && curriculumReviewStatus = "approved"`,
+  });
+  const catSet = filter?.categories?.length ? new Set(filter.categories) : null;
+  const codeSet = filter?.codes?.length ? new Set(filter.codes) : null;
+  return rows
+    .filter((r) => {
+      if (!catSet && !codeSet) return true;
+      if (catSet && r.category && catSet.has(r.category)) return true;
+      if (codeSet?.has(r.code)) return true;
+      return false;
+    })
+    .map((r) => r.code);
+}
+
+/**
  * Workflow-side lean read of unmapped codes, optionally narrowed by
  * category or by exact code.
  */

@@ -3,6 +3,8 @@
 import { Button, Inline, Tooltip } from '@amboss/design-system';
 import { useCallback, useEffect, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
+import type { PipelineMode } from '@/lib/types';
+import { CurriculumCategoryManagerButton } from './curriculum-category-manager-modal';
 import { ImportCodesModal } from './import-codes-modal';
 import { RemapModal } from './remap-modal';
 
@@ -16,7 +18,13 @@ import { RemapModal } from './remap-modal';
  * the codes table. The button stays mounted at all times — it's disabled, never
  * hidden, so it doesn't pop in and out while the table's pages stream in.
  */
-export function CodesActionsToolbar({ slug }: { slug: string }) {
+export function CodesActionsToolbar({
+  slug,
+  pipelineMode = 'full',
+}: {
+  slug: string;
+  pipelineMode?: PipelineMode;
+}) {
   const [supportReady, setSupportReady] = useState(false);
   const [unmappedCount, setUnmappedCount] = useState(0);
   // Bulk mapping only needs to pause during a full-specialty consolidation.
@@ -96,6 +104,24 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       {remapLoading ? 'Loading…' : 'Map by category…'}
     </Button>
   );
+
+  // Curriculum plans get the Category Manager instead of the stock Remap
+  // modal: it surfaces approval + map/remap by category and is never greyed
+  // out when everything is already mapped (remapping is the point).
+  if (pipelineMode === 'curriculum-mapping') {
+    return (
+      <Inline space="s" vAlignItems="center" noWrap>
+        <ImportCodesModal slug={slug} />
+        <CurriculumCategoryManagerButton
+          slug={slug}
+          supportReady={supportReady}
+          runningAll={runningAll}
+          mappingActive={mappingActive}
+          onClosed={refetchSummary}
+        />
+      </Inline>
+    );
+  }
 
   return (
     <Inline space="s" vAlignItems="center" noWrap>

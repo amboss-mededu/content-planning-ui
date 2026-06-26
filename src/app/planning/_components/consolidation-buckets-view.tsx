@@ -7,8 +7,10 @@ import type {
   CategoryOrchestration,
   SourceCategoryProgress,
 } from '@/lib/data/categories';
+import type { PipelineMode } from '@/lib/types';
 import { CategoryDetailsModal } from './category-details-modal';
 import { ConsolidationProgressBadge } from './consolidation-progress-badge';
+import { CurriculumCategoryManagerModal } from './curriculum-category-manager-modal';
 import { type Column, DataTable } from './data-table';
 import { useConsolidationRerun } from './use-consolidation-rerun';
 import {
@@ -373,10 +375,17 @@ export function ConsolidationBucketsView({
 export function SourceCategoriesTable({
   rows,
   slug,
+  pipelineMode = 'full',
 }: {
   rows: SourceCategoryProgress[];
   slug: string;
+  pipelineMode?: PipelineMode;
 }) {
+  // Curriculum plans: clicking a category row opens the Category Manager
+  // scoped to that one category (approve all + map/remap). Other pipeline
+  // modes keep this as a read-only backup table.
+  const curriculum = pipelineMode === 'curriculum-mapping';
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const columns: Column<SourceCategoryProgress>[] = [
     {
       key: 'category',
@@ -419,8 +428,10 @@ export function SourceCategoriesTable({
   return (
     <Stack space="m">
       <Text color="secondary">
-        {rows.length} source-ontology categories from the codes table. Backup view — the
-        Consolidation buckets view is the primary surface.
+        {rows.length} source-ontology categories from the codes table.{' '}
+        {curriculum
+          ? 'Click a category to approve and map its codes.'
+          : 'Backup view — the Consolidation buckets view is the primary surface.'}
       </Text>
       <DataTable
         rows={rows}
@@ -428,7 +439,16 @@ export function SourceCategoriesTable({
         getRowKey={(r, i) => `${r.category}-${i}`}
         emptyText="No source categories found."
         storageKey={`source-categories-table:${slug}`}
+        onRowClick={curriculum ? (r) => setOpenCategory(r.category) : undefined}
       />
+      {curriculum ? (
+        <CurriculumCategoryManagerModal
+          slug={slug}
+          open={openCategory !== null}
+          initialCategory={openCategory}
+          onClose={() => setOpenCategory(null)}
+        />
+      ) : null}
     </Stack>
   );
 }
