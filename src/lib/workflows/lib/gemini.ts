@@ -282,6 +282,11 @@ export async function uploadLocalInputsToGemini(input: {
   const apiKey = input.apiKeys.google;
   if (!apiKey) return map;
 
+  // Candidates are inputs Google's url_context can't fetch (private/local
+  // hosts). We then try to fetch + upload them ourselves — but uploadUrlToGemini
+  // is SSRF-guarded and only fetches our configured upload host, so a malicious
+  // internal URL (e.g. http://10.0.0.5/) is rejected there and falls back to
+  // url_context rather than being fetched server-side. See safe-fetch.ts.
   const localUrls = [...new Set(input.inputs.map((i) => i.url))].filter(
     (u) => !isPubliclyFetchableUrl(u),
   );
