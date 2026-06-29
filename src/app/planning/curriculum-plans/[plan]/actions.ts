@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getCurrentUser } from '@/lib/auth';
+import { assertArchitect, getCurrentUser } from '@/lib/auth';
 import {
   createStudyPlan,
   deleteStudyPlan,
@@ -27,6 +27,7 @@ export async function createStudyPlanAction(
   const cats = (categories ?? []).map((c) => c.trim()).filter(Boolean);
   if (!trimmedName) return { error: 'Study plan name is required.' };
   if (cats.length === 0) return { error: 'Select at least one category.' };
+  await assertArchitect();
   const user = await getCurrentUser();
   try {
     const created = await createStudyPlan({
@@ -48,6 +49,7 @@ export async function deleteStudyPlanAction(
   slug: string,
   id: string,
 ): Promise<{ error?: string }> {
+  await assertArchitect();
   try {
     await deleteStudyPlan(id);
     revalidatePath(`${PLAN_PATH}/${slug}`, 'layout');

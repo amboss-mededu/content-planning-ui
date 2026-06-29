@@ -2,7 +2,9 @@
 
 import { H1, Stack, Text } from '@amboss/design-system';
 import { useCallback, useEffect, useState } from 'react';
+import type { TeamMember } from '@/lib/data/users';
 import { type ProviderId, ProviderKeyCard } from './provider-key-card';
+import { TeamRolesPanel } from './team-roles-panel';
 
 const PROVIDERS: ProviderId[] = ['google', 'anthropic', 'openai'];
 
@@ -14,7 +16,15 @@ type ProviderStatus = {
 
 type AllStatus = Record<ProviderId, ProviderStatus>;
 
-export function SettingsView() {
+export function SettingsView({
+  isArchitect,
+  teamMembers,
+  viewerId,
+}: {
+  isArchitect: boolean;
+  teamMembers: TeamMember[];
+  viewerId: string;
+}) {
   const [status, setStatus] = useState<AllStatus | null>(null);
 
   const refresh = useCallback(async () => {
@@ -49,6 +59,7 @@ export function SettingsView() {
           />
         ))}
       </Stack>
+      {isArchitect && <TeamRolesPanel initialMembers={teamMembers} viewerId={viewerId} />}
     </Stack>
   );
 }

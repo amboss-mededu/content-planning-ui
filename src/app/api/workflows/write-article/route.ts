@@ -27,7 +27,7 @@
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getCurrentUser, requireUserResponse } from '@/lib/auth';
+import { getCurrentUser, requireArchitectResponse } from '@/lib/auth';
 import { listArticleSourcesForArticleAsAdmin } from '@/lib/data/article-sources';
 import { createWritingRunAsAdmin } from '@/lib/data/article-writing';
 import { getConsolidatedArticleByIdAsAdmin } from '@/lib/data/articles';
@@ -55,7 +55,7 @@ type EnqueueOutcome =
     };
 
 export async function POST(req: NextRequest) {
-  const guard = await requireUserResponse();
+  const guard = await requireArchitectResponse();
   if (guard) return guard;
 
   const body = await parseBodyOr400(req, Body);

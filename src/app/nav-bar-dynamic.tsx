@@ -145,11 +145,23 @@ function UserMenu({ user }: { user: CurrentUser }) {
   );
 }
 
+// Editors only get My Backlog. Collapse the nav to a single Content Planner
+// section whose secondary row is just that one link — the primary Learning /
+// Clinical Care / Teaching tabs and the rest of the pipeline disappear.
+// Settings stays reachable via the user dropdown menu. Architects get the full
+// SECTIONS above. (Server-side guards enforce access; this is presentation.)
+const MY_BACKLOG_LINK = CONTENT_PLANNER.secondary.find(
+  (l) => l.href === '/my-backlog',
+) as NavLink;
+
+const EDITOR_SECTIONS: Section[] = [{ ...CONTENT_PLANNER, secondary: [MY_BACKLOG_LINK] }];
+
 export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
   const pathname = usePathname() ?? '/';
   const isCompact = useScrollCompact();
   const isAuthenticated = !!user;
-  const active = SECTIONS.find((s) => s.match(pathname)) ?? CONTENT_PLANNER;
+  const sections = user?.role === 'editor' ? EDITOR_SECTIONS : SECTIONS;
+  const active = sections.find((s) => s.match(pathname)) ?? sections[sections.length - 1];
   const hasSecondary = active.secondary.length > 0;
 
   return (
@@ -166,7 +178,7 @@ export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
             <Logo href="/" ariaLabel="AMBOSS Content Planner — Home" />
             {isAuthenticated && (
               <NavBar.PrimaryNav aria-label="Main navigation">
-                {SECTIONS.map((section) => (
+                {sections.map((section) => (
                   <NavBar.PrimaryNavItem
                     key={section.key}
                     label={section.label}

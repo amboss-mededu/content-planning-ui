@@ -1,11 +1,14 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { getArticleBacklogAssignee } from '@/lib/data/article-backlog';
 import { createServerClient } from '@/lib/pb/server';
+import { normalizeRole, type UserRole } from './roles';
 
 export type CurrentUser = {
   _id: string;
   email: string | null;
   name: string | null;
+  role: UserRole;
 };
 
 async function readAuthClient() {
@@ -26,6 +29,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     _id: record.id,
     email: typeof record.email === 'string' ? record.email : null,
     name: typeof record.name === 'string' ? record.name : null,
+    role: normalizeRole(record.role),
   };
 }
 
@@ -49,4 +53,81 @@ export async function isAuthenticated(): Promise<boolean> {
 export async function requireUserResponse(): Promise<NextResponse | null> {
   if (await isAuthenticated()) return null;
   return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+}
+
+/**
+ * Guard for API route handlers that only content architects may call (running
+ * mappings/pipelines, approving articles into the backlog, reassigning, etc.).
+ * Returns 401 when signed out, 403 when signed in as an editor, null when the
+ * caller is an architect. This — not the proxy or nav — is the real security
+ * boundary: it re-reads the live record, so a stale cookie role can't bypass it.
+ *
+ *   export async function POST(req: NextRequest) {
+ *     const guard = await requireArchitectResponse();
+ *     if (guard) return guard;
+ *     // … architect-only handler
+ *   }
+ */
+export async function requireArchitectResponse(): Promise<NextResponse | null> {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (user.role !== 'architect') {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Guard for Server Actions, which throw rather than returning a Response.
+ * Throws when the caller is not a content architect; returns the user otherwise.
+ * Call at the top of every architect-only action.
+ */
+export async function assertArchitect(): Promise<CurrentUser> {
+  const user = await getCurrentUser();
+  if (!user) throw new Error('You must be signed in.');
+  if (user.role !== 'architect') {
+    throw new Error('Only content architects can perform this action.');
+  }
+  return user;
+}
+
+/**
+ * Guard for Server Actions that operate on a single backlog article (sourcing,
+ * drafting, status). Architects may act on any article; editors only on rows
+ * assigned to them. Throws otherwise; returns the user on success.
+ *
+ * This is the assignee boundary: My Backlog only shows an editor their own
+ * rows, but a hand-crafted request could target someone else's — so the check
+ * re-reads the row's assignee server-side rather than trusting the client.
+ */
+export async function assertCanWorkArticle(
+  slug: string,
+  articleKey: string,
+): Promise<CurrentUser> {
+  const user = await getCurrentUser();
+  if (!user) throw new Error('You must be signed in.');
+  if (user.role === 'architect') return user;
+  const assignee = await getArticleBacklogAssignee(slug, articleKey);
+  if (!assignee || !user.email || assignee !== user.email) {
+    throw new Error('You can only work on articles assigned to you.');
+  }
+  return user;
+}
+
+/**
+ * Route-handler form of {@link assertCanWorkArticle}: 401 when signed out,
+ * 403 when an editor targets an article not assigned to them, null when allowed.
+ */
+export async function requireArticleAssigneeResponse(
+  slug: string,
+  articleKey: string,
+): Promise<NextResponse | null> {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (user.role === 'architect') return null;
+  const assignee = await getArticleBacklogAssignee(slug, articleKey);
+  if (!assignee || !user.email || assignee !== user.email) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+  return null;
 }

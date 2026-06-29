@@ -27,7 +27,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { extractCodes } from '@/app/planning/_components/code-utils';
 import { env } from '@/env';
-import { requireUserResponse } from '@/lib/auth';
+import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { listArticleBacklog } from '@/lib/data/article-backlog';
 import {
   attachPipelineRunToLitSearchRunsAsAdmin,
@@ -101,6 +101,18 @@ export async function POST(req: NextRequest) {
 
   if (eligible.length === 0) {
     return NextResponse.json({ skipped: true, articles: 0 });
+  }
+
+  // Architects may search any article; editors only ones assigned to them.
+  // `backlog` is keyed by stable articleKey and carries assigneeEmail.
+  const user = await getCurrentUser();
+  if (user?.role !== 'architect') {
+    const allMine = eligible.every(
+      (r) => r.articleKey && backlog[r.articleKey]?.assigneeEmail === user?.email,
+    );
+    if (!allMine) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
   }
 
   const claimed: Array<{

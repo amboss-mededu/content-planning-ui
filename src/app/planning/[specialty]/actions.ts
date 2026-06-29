@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getCurrentUser } from '@/lib/auth';
+import { assertArchitect, assertCanWorkArticle, getCurrentUser } from '@/lib/auth';
 import {
   clearArticleBacklog,
   clearArticleBacklogAsAdmin,
@@ -108,6 +108,18 @@ function emptyResult(): ApprovalActionResult {
   return { articleReviewKeys: [], sectionReviewKeys: [], backlogKeys: [] };
 }
 
+/**
+ * Permission guard for source-level actions that only carry a `sourceId`:
+ * resolve the source to its owning article, then apply the assignee check
+ * (architects pass; editors must own the backlog row). Throws on a missing
+ * source or an unauthorized caller.
+ */
+async function assertCanWorkSource(slug: string, sourceId: string): Promise<void> {
+  const source = await getArticleSourceByIdAsAdmin(sourceId);
+  if (!source?.articleKey) throw new Error('Source not found.');
+  await assertCanWorkArticle(slug, source.articleKey);
+}
+
 export async function refreshSpecialty(slug: string) {
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -126,6 +138,7 @@ export async function submitArticleReview(
   status: ArticleReviewStatus,
   notes?: string,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const user = await getCurrentUser();
   const reviewKey = await setArticleReview(
     slug,
@@ -157,6 +170,7 @@ export async function resetArticleReview(
   slug: string,
   articleKey: string,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const reviewKey = await clearArticleReview(slug, articleKey);
   const backlogKey = await clearArticleBacklog(slug, articleKey);
   const result = emptyResult();
@@ -175,6 +189,7 @@ export async function submitSourceReview(
   sourceId: string,
   status: 'approved' | 'rejected' | null,
 ): Promise<void> {
+  await assertCanWorkSource(slug, sourceId);
   const user = await getCurrentUser();
   await setArticleSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
   revalidatePath(`/planning/${slug}`, 'layout');
@@ -190,6 +205,7 @@ export async function submitCodeLitSourceReview(
   sourceId: string,
   status: 'approved' | 'rejected' | null,
 ): Promise<void> {
+  await assertArchitect();
   const user = await getCurrentUser();
   await setCodeLitSourceReviewAsAdmin(sourceId, status, user?.email ?? '');
   revalidatePath(`/planning/${slug}`, 'layout');
@@ -220,6 +236,7 @@ export async function addCodeLitSource(
   if (url && !isSafeUrl(url)) {
     return { error: 'URL must start with http:// or https://' };
   }
+  await assertArchitect();
   const user = await getCurrentUser();
   const source = await createCodeLitSourceAsAdmin(slug, codeId, code, {
     title,
@@ -243,6 +260,8 @@ export async function submitSourcesOrder(
   sourceIds: string[],
 ): Promise<void> {
   if (sourceIds.length === 0) return;
+  // All reordered sources belong to the same article drawer — check the first.
+  await assertCanWorkSource(slug, sourceIds[0]);
   await setSourcesPriorityAsAdmin(sourceIds);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -257,6 +276,7 @@ export async function submitSourceCortexId(
   sourceId: string,
   value: string,
 ): Promise<void> {
+  await assertCanWorkSource(slug, sourceId);
   await markSourceCortexRegisteredAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -269,6 +289,7 @@ export async function submitSourceUrl(
   if (value && !isSafeUrl(value)) {
     throw new Error('URL must start with http:// or https://');
   }
+  await assertCanWorkSource(slug, sourceId);
   await setSourceUrlAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -278,6 +299,7 @@ export async function submitSourceDoi(
   sourceId: string,
   value: string,
 ): Promise<void> {
+  await assertCanWorkSource(slug, sourceId);
   await setSourceDoiAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -287,6 +309,7 @@ export async function submitSourceNotes(
   sourceId: string,
   value: string,
 ): Promise<void> {
+  await assertCanWorkSource(slug, sourceId);
   await setSourceNotesAsAdmin(sourceId, value);
   revalidatePath(`/planning/${slug}`, 'layout');
 }
@@ -300,6 +323,7 @@ export async function registerSourceInCortex(
   slug: string,
   sourceId: string,
 ): Promise<{ ok: boolean; cortexSourceId?: string; error?: string }> {
+  await assertCanWorkSource(slug, sourceId);
   const user = await getCurrentUser();
   try {
     const result = await runCortexRegistrationForSource(
@@ -325,7 +349,8 @@ export async function fetchSourceMetadataForSource(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const source = await getArticleSourceByIdAsAdmin(sourceId);
-    if (!source) return { ok: false, error: 'Source not found' };
+    if (!source?.articleKey) return { ok: false, error: 'Source not found' };
+    await assertCanWorkArticle(slug, source.articleKey);
     if (source.cortexSourceId) {
       return { ok: false, error: 'Already registered — fetch is disabled' };
     }
@@ -372,6 +397,7 @@ export async function addArticleSource(
   if (url && !isSafeUrl(url)) {
     return { error: 'URL must start with http:// or https://' };
   }
+  await assertCanWorkArticle(slug, articleKey);
   const user = await getCurrentUser();
   await createArticleSourceAsAdmin(slug, articleRecordId, articleKey, {
     sourceId,
@@ -429,6 +455,7 @@ export async function bulkApproveArticleReviews(
   slug: string,
   rows: Array<{ articleKey: string; articleRecordId: string }>,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   if (rows.length === 0) return result;
   const user = await getCurrentUser();
@@ -473,6 +500,7 @@ export async function submitSectionReview(
   status: ArticleReviewStatus,
   notes?: string,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const user = await getCurrentUser();
   const reviewKey = await setSectionReview(
     slug,
@@ -513,6 +541,7 @@ export async function bulkApproveSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   if (rows.length === 0) return result;
   const user = await getCurrentUser();
@@ -567,6 +596,7 @@ export async function bulkUnapproveArticleReviews(
   slug: string,
   rows: Array<{ articleKey: string }>,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   if (rows.length === 0) return result;
   for (const r of rows) {
@@ -589,6 +619,7 @@ export async function bulkUnapproveSectionReviews(
   slug: string,
   rows: Array<{ sectionKey: string; sectionRecordId: string }>,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   if (rows.length === 0) return result;
   const seenBacklogKeys = new Set<string>();
@@ -622,6 +653,7 @@ export async function resetSectionReview(
   sectionKey: string,
   sectionRecordId: string,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   const parentArticleId = await getConsolidatedSectionParentArticleId(sectionRecordId);
   const reviewKey = await clearSectionReview(slug, sectionKey);
@@ -679,6 +711,7 @@ export async function setBacklogStatus(
   status: ArticleBacklogStatus,
   notes?: string,
 ): Promise<void> {
+  await assertCanWorkArticle(slug, articleKey);
   const user = await getCurrentUser();
   await setArticleBacklogStatus(
     slug,
@@ -697,6 +730,7 @@ export async function setBacklogAssignee(
   articleRecordId: string,
   assigneeEmail: string | null,
 ): Promise<void> {
+  await assertArchitect();
   const user = await getCurrentUser();
   await setArticleBacklogAssignee(
     slug,
@@ -720,6 +754,7 @@ export async function setBacklogDraftFolderUrl(
   if (trimmed && !isSafeUrl(trimmed)) {
     throw new Error('URL must start with http:// or https://');
   }
+  await assertCanWorkArticle(slug, articleKey);
   const user = await getCurrentUser();
   await setArticleBacklogDraftFolderUrl(
     slug,
@@ -735,6 +770,7 @@ export async function clearBacklogRow(
   slug: string,
   articleKey: string,
 ): Promise<ApprovalActionResult> {
+  await assertArchitect();
   const result = emptyResult();
   if (articleKey.startsWith('upd::')) {
     const deletedSectionKeys = await clearApprovedSectionReviewsForParent(
@@ -769,6 +805,7 @@ export async function resetArticle(
   articleKey: string,
   articleRecordId: string,
 ): Promise<void> {
+  await assertCanWorkArticle(slug, articleKey);
   const user = await getCurrentUser();
   await deleteWritingRunsForArticleAsAdmin(slug, articleRecordId);
   await deleteArticleSourcesByArticleKeyAsAdmin(slug, articleKey);
@@ -806,6 +843,7 @@ export async function setConsolidationCategoryReview(
   status: ConsolidationCategoryReviewStatus | null,
   notes?: string,
 ): Promise<void> {
+  await assertArchitect();
   const user = await getCurrentUser();
   await setConsolidationCategoryReviewData(
     slug,
@@ -833,6 +871,7 @@ export async function saveMilestones(
   slug: string,
   text: string,
 ): Promise<{ error?: string }> {
+  await assertArchitect();
   const user = await getCurrentUser();
   if (!user) return { error: 'You must be signed in to edit milestones.' };
 
@@ -857,6 +896,7 @@ export async function saveMilestones(
 export async function loadDefaultStudentMilestones(
   slug: string,
 ): Promise<{ error?: string }> {
+  await assertArchitect();
   const user = await getCurrentUser();
   if (!user) return { error: 'You must be signed in to edit milestones.' };
   await updateMilestonesAsAdmin({ slug, milestones: DEFAULT_CURRICULUM_MILESTONES });
@@ -880,6 +920,7 @@ export async function setTabOverride(
   segment: string,
   value: boolean,
 ): Promise<void> {
+  await assertArchitect();
   if (!KNOWN_TAB_SEGMENTS.has(segment)) {
     throw new Error(`Unknown tab segment: ${segment}`);
   }
@@ -892,6 +933,7 @@ export async function setPipelineStageState(
   stageName: string,
   state: PipelineCardState,
 ): Promise<void> {
+  await assertArchitect();
   if (!isPipelineStageName(stageName)) {
     throw new Error(`Unknown pipeline stage: ${stageName}`);
   }
@@ -915,6 +957,7 @@ export async function addManualArticle(
 ): Promise<{ articleKey: string; error?: string }> {
   const trimmed = title.trim();
   if (!trimmed) return { articleKey: '', error: 'Title is required.' };
+  await assertArchitect();
 
   const effectiveSlug = slug || PERSONAL_BACKLOG_SLUG;
 
@@ -952,6 +995,7 @@ export async function deleteManualArticle(
   slug: string,
   articleKey: string,
 ): Promise<void> {
+  await assertArchitect();
   const effectiveSlug = slug || PERSONAL_BACKLOG_SLUG;
   await Promise.all([
     deleteConsolidatedArticleByKeyAsAdmin(effectiveSlug, articleKey),
@@ -976,6 +1020,7 @@ export async function renameArticle(
   articleKey: string,
   newTitle: string,
 ): Promise<{ articleKey: string; conflict?: boolean; error?: string }> {
+  await assertArchitect();
   const user = await getCurrentUser();
   if (!user) return { articleKey, error: 'You must be signed in to edit articles.' };
   const title = newTitle.trim();
@@ -1010,6 +1055,7 @@ export async function updateArticleCodes(
   articleKey: string,
   codes: unknown[],
 ): Promise<{ error?: string }> {
+  await assertArchitect();
   const user = await getCurrentUser();
   if (!user) return { error: 'You must be signed in to edit articles.' };
   try {
@@ -1032,6 +1078,7 @@ export async function mergeArticles(
   targetKey: string,
   sourceKeys: string[],
 ): Promise<{ mergedCodes?: number; error?: string }> {
+  await assertArchitect();
   const user = await getCurrentUser();
   if (!user) return { error: 'You must be signed in to merge articles.' };
   if (!targetKey) return { error: 'Pick a merge target.' };
