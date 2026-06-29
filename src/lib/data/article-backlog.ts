@@ -68,9 +68,17 @@ export async function getArticleBacklogAssignee(
   if (!articleKey) return null;
   const pb = await createAdminClient();
   try {
+    // Parameterized filter — `slug`/`articleKey` come from editor-controlled
+    // request bodies and this is an authorization boundary, so the values MUST
+    // be bound (pb.filter escapes them) rather than interpolated, or a crafted
+    // articleKey could alter which row the check matches.
+    const filter = pb.filter('specialtySlug = {:slug} && articleKey = {:articleKey}', {
+      slug,
+      articleKey,
+    });
     const row = await pb
       .collection<ArticleBacklogRecord>('articleBacklog')
-      .getFirstListItem(`specialtySlug = "${slug}" && articleKey = "${articleKey}"`);
+      .getFirstListItem(filter);
     return row.assigneeEmail && row.assigneeEmail.length > 0 ? row.assigneeEmail : null;
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) return null;
