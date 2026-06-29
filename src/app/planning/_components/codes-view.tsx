@@ -3,6 +3,7 @@
 import { Badge, Inline, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
+import { coverageScoreOf } from '@/lib/data/coverage-stats-compute';
 import {
   COVERAGE_LEVELS,
   type Code,
@@ -27,7 +28,7 @@ import type { CodeLitSearchSnapshot } from './use-running-code-lit-search';
 const LIT_SEARCH_THRESHOLD = 3;
 
 function coverageScore(r: Code): number {
-  return r.overallDepthOfCoverage ?? r.depthOfCoverage ?? 0;
+  return coverageScoreOf(r);
 }
 
 /** Edit one code via the parent's PATCH handler (table merges the returned

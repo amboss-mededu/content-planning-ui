@@ -10,21 +10,16 @@
 
 import type { CodeRecord } from '@/lib/pb/types';
 import type { CurriculumMeta } from '@/lib/types';
+import { coverageScoreOf } from './coverage-stats-compute';
 import { topBlockOf, UNCATEGORIZED } from './curriculum-category';
 
 // --- Coverage helpers (shared by Gap report + Timeline tinting) ------------
 
 /** Coverage score clamped to 0–5. Prefers the synthesized overall score, with a
- *  `?? depthOfCoverage` fallback for rows mapped before the overall track — the
- *  same precedence as `coverage-stats-compute.ts`. Unmapped/unset → 0. */
+ *  `depthOfCoverage` fallback for rows mapped before the overall track — the
+ *  canonical precedence lives in `coverageScoreOf`. Unmapped/unset → 0. */
 export function depthOf(c: CodeRecord): number {
-  const raw =
-    typeof c.overallDepthOfCoverage === 'number'
-      ? c.overallDepthOfCoverage
-      : typeof c.depthOfCoverage === 'number'
-        ? c.depthOfCoverage
-        : 0;
-  return Math.min(5, Math.max(0, Math.round(raw)));
+  return coverageScoreOf(c);
 }
 
 /** The coverage-level label to show — overall when present, else the AMBOSS

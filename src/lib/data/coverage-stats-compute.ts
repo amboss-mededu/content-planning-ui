@@ -117,16 +117,28 @@ function isMapped(c: CodeRecord): boolean {
   return (c.mappedAt ?? 0) > 0;
 }
 
-/** Coverage score clamped to 0–5; unset treated as 0. Prefers the overall
- *  (synthesized / active-source) score, falling back to the AMBOSS score for
- *  rows mapped before the guidelines feature (no `overallDepthOfCoverage`). */
-function scoreOf(c: CodeRecord): number {
-  const raw =
-    typeof c.overallDepthOfCoverage === 'number'
-      ? c.overallDepthOfCoverage
-      : typeof c.depthOfCoverage === 'number'
-        ? c.depthOfCoverage
-        : 0;
+/**
+ * Coverage score clamped to 0–5; unset treated as 0. Prefers the overall
+ * (synthesized / active-source) score, falling back to the AMBOSS score for
+ * rows mapped before the overall track existed.
+ *
+ * The fallback is gated on `overallCoverageLevel` (written alongside the overall
+ * score), NOT on `typeof overallDepthOfCoverage === 'number'`: that column is a
+ * PocketBase NUMERIC that defaults to 0, so legacy AMBOSS-only rows carry
+ * `overallDepthOfCoverage === 0` rather than `undefined`. A plain numeric/`??`
+ * check therefore reads those rows as "scored 0" and never falls back, which
+ * zeroed out the whole coverage distribution. Mirrors `coverageLevelOf` in
+ * `curriculum-analytics.ts`.
+ */
+export function coverageScoreOf(
+  c: Pick<
+    CodeRecord,
+    'overallCoverageLevel' | 'overallDepthOfCoverage' | 'depthOfCoverage'
+  >,
+): number {
+  const raw = c.overallCoverageLevel
+    ? (c.overallDepthOfCoverage ?? 0)
+    : (c.depthOfCoverage ?? 0);
   return Math.min(SCORE_MAX, Math.max(SCORE_MIN, Math.round(raw)));
 }
 
@@ -159,7 +171,7 @@ export function computeCoverageStats(
   const scoreCounts = new Array(SCORE_MAX + 1).fill(0) as number[];
   for (const c of mapped) {
     if (c.isInAMBOSS === true) inAmboss++;
-    const s = scoreOf(c);
+    const s = coverageScoreOf(c);
     depthSum += s;
     scoreCounts[s]++;
     if (s >= COVERAGE_THRESHOLD) countGte3++;
