@@ -14,7 +14,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { ClientResponseError } from 'pocketbase';
-import { requireUserResponse } from '@/lib/auth';
+import { getCurrentUser, requireUserResponse } from '@/lib/auth';
 import { getCode, type PatchCodeFields, patchCode } from '@/lib/data/codes';
 import { getConsolidationActivity, isBucketEditBlocked } from '@/lib/data/pipeline';
 import { errorMessage } from '@/lib/error-message';
@@ -77,7 +77,12 @@ export async function PATCH(
   log('codes').info('PATCH', { slug, code: codeId, fields: Object.keys(fields) });
 
   try {
-    const updated = await patchCode(slug, codeId, fields);
+    // Reviewer email is stamped server-side for the curriculum approval gate.
+    const reviewer =
+      fields.curriculumReviewStatus !== undefined
+        ? ((await getCurrentUser())?.email ?? null)
+        : null;
+    const updated = await patchCode(slug, codeId, fields, reviewer);
     return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
@@ -114,5 +119,7 @@ function toPatchFields(body: CodePatchInput): PatchCodeFields {
     out.existingArticleUpdates = body.existingArticleUpdates;
   if (body.newArticlesNeeded !== undefined)
     out.newArticlesNeeded = body.newArticlesNeeded;
+  if (body.curriculumReviewStatus !== undefined)
+    out.curriculumReviewStatus = body.curriculumReviewStatus;
   return out;
 }

@@ -9,7 +9,22 @@ import {
 import type { MappingSource, PipelineMode } from '@/lib/types';
 
 const MAPPING_SOURCES: readonly MappingSource[] = ['amboss', 'guidelines', 'both'];
-const PIPELINE_MODES: readonly PipelineMode[] = ['full', 'mapping-only', 'rag-corpus'];
+const PIPELINE_MODES: readonly PipelineMode[] = [
+  'full',
+  'mapping-only',
+  'rag-corpus',
+  'curriculum-mapping',
+];
+
+/**
+ * Modes that pin the mapping source server-side, overriding whatever the client
+ * sent: `rag-corpus` always maps against guidelines; `curriculum-mapping` always
+ * assesses coverage against AMBOSS.
+ */
+const FORCED_SOURCE: Partial<Record<PipelineMode, MappingSource>> = {
+  'rag-corpus': 'guidelines',
+  'curriculum-mapping': 'amboss',
+};
 
 function parseMappingSource(value: unknown): MappingSource | undefined {
   return typeof value === 'string' &&
@@ -49,10 +64,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
   const pipelineMode = parsePipelineMode(args.pipelineMode);
-  // rag-corpus always maps against guidelines — pin it server-side regardless
-  // of what the client sent.
-  const mappingSource =
-    pipelineMode === 'rag-corpus' ? 'guidelines' : parseMappingSource(args.mappingSource);
+  // Some modes pin the mapping source server-side (rag-corpus → guidelines,
+  // curriculum-mapping → amboss) regardless of what the client sent.
+  const forced = pipelineMode ? FORCED_SOURCE[pipelineMode] : undefined;
+  const mappingSource = forced ?? parseMappingSource(args.mappingSource);
   const id = await createSpecialty({
     slug,
     name,
@@ -73,11 +88,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * Accepts any of these fields (at least one required):
  *   body: {
  *     slug: string;
- *     pipelineMode?: 'full'|'mapping-only'|'rag-corpus';
+ *     pipelineMode?: 'full'|'mapping-only'|'rag-corpus'|'curriculum-mapping';
  *     mappingOnly?: boolean;          // legacy; superseded by pipelineMode
  *     mappingSource?: 'amboss'|'guidelines'|'both';
  *   }
- * Switching to 'rag-corpus' also pins the mapping source to 'guidelines'.
+ * Switching to 'rag-corpus' pins the mapping source to 'guidelines';
+ * 'curriculum-mapping' pins it to 'amboss'.
  */
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const guard = await requireUserResponse();
@@ -111,7 +127,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     args.pipelineMode !== undefined ? parsePipelineMode(args.pipelineMode) : undefined;
   if (args.pipelineMode !== undefined && !pipelineMode) {
     return NextResponse.json(
-      { error: 'pipelineMode must be one of: full, mapping-only, rag-corpus' },
+      {
+        error:
+          'pipelineMode must be one of: full, mapping-only, rag-corpus, curriculum-mapping',
+      },
       { status: 400 },
     );
   }
@@ -124,8 +143,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   if (pipelineMode) await setSpecialtyPipelineMode(slug, pipelineMode);
   if (hasMappingOnly) await setSpecialtyMappingOnly(slug, args.mappingOnly as boolean);
-  // rag-corpus pins the source to guidelines, overriding any explicit source.
-  const effectiveSource = pipelineMode === 'rag-corpus' ? 'guidelines' : mappingSource;
+  // Modes that pin the source (rag-corpus → guidelines, curriculum-mapping →
+  // amboss) override any explicit source the client sent.
+  const effectiveSource =
+    (pipelineMode ? FORCED_SOURCE[pipelineMode] : undefined) ?? mappingSource;
   if (effectiveSource) await setSpecialtyMappingSource(slug, effectiveSource);
   return NextResponse.json({ ok: true });
 }

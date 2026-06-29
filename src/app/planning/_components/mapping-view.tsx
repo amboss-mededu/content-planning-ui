@@ -12,6 +12,7 @@ import type { CodeLitSearchRunRecord } from '@/lib/pb/types';
 import type { MappingSource, PipelineMode } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
 import { StartCodesModal } from '../[specialty]/pipeline/_components/start-codes-modal';
+import { CancelMappingButton } from './cancel-mapping-button';
 import { CodesActionsToolbar } from './codes-actions-toolbar';
 import { CodesViewClient } from './codes-view-client';
 import {
@@ -127,23 +128,30 @@ export function MappingView({
             ]}
           />
           {/* Active map/remap indicator — count ticks down live as codes
-              finish, then the badge clears when the run completes. */}
+              finish, then the badge clears when the run completes. A Cancel
+              control sits alongside so a stuck or unwanted run can be stopped
+              without leaving the sheet (universal across pipeline modes). */}
           {mappingActive ? (
-            <Badge
-              color="blue"
-              icon="loader"
-              text={
-                inFlightCodes.length === 1
-                  ? 'Mapping 1 code'
-                  : `Mapping ${inFlightCodes.length} codes`
-              }
-              data-e2e-test-id="mapping-active-badge"
-            />
+            <>
+              <Badge
+                color="blue"
+                icon="loader"
+                text={
+                  inFlightCodes.length === 1
+                    ? 'Mapping 1 code'
+                    : `Mapping ${inFlightCodes.length} codes`
+                }
+                data-e2e-test-id="mapping-active-badge"
+              />
+              <CancelMappingButton slug={slug} leftIcon="x" />
+            </>
           ) : null}
         </Inline>
         {/* Bulk code actions live inline with the view selector, clustered on
             the right. Only relevant to the Codes view. */}
-        {mode === 'codes' ? <CodesActionsToolbar slug={slug} /> : null}
+        {mode === 'codes' ? (
+          <CodesActionsToolbar slug={slug} pipelineMode={pipelineMode} />
+        ) : null}
       </Inline>
       {/* Codes stays mounted across switches so its progressive pagination
           and live-collection polling survive a detour to the other views. The
@@ -163,7 +171,13 @@ export function MappingView({
       {mode === 'consolidation' && !mappingOnly ? (
         <ConsolidationBucketsView rows={rows} slug={slug} />
       ) : null}
-      {mode === 'source' ? <SourceCategoriesTable rows={sourceRows} slug={slug} /> : null}
+      {mode === 'source' ? (
+        <SourceCategoriesTable
+          rows={sourceRows}
+          slug={slug}
+          pipelineMode={pipelineMode}
+        />
+      ) : null}
       {codeCount === 0 && codeSources ? (
         <StartCodesModal
           specialtySlug={slug}
@@ -172,6 +186,7 @@ export function MappingView({
           completed={extractionState?.completed ?? false}
           hasDownstream={extractionState?.hasDownstream ?? false}
           runId={extractionState?.runId ?? null}
+          pipelineMode={pipelineMode}
         />
       ) : null}
     </Stack>

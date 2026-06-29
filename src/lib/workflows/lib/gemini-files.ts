@@ -105,6 +105,25 @@ export async function uploadPdfToGemini(input: {
 }
 
 /**
+ * Fetch a PDF from `url` (server-side — so localhost / private upload URLs that
+ * Google's url_context can't reach still work) and upload it to the Gemini
+ * Files API. Returns the uploaded-file handle to attach as a `fileData` part.
+ */
+export async function uploadUrlToGemini(input: {
+  apiKey: string;
+  url: string;
+  displayName: string;
+}): Promise<UploadedGeminiFile> {
+  const { bytes, mimeType } = await fetchPdfBytes(input.url);
+  return uploadPdfToGemini({
+    apiKey: input.apiKey,
+    bytes,
+    mimeType,
+    displayName: input.displayName,
+  });
+}
+
+/**
  * Best-effort delete a previously uploaded file. Used when re-uploading
  * to swap out an expired URI. Errors are swallowed — the file may have
  * already expired or never existed.

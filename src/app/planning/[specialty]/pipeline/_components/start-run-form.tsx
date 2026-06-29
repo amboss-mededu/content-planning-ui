@@ -3,6 +3,7 @@
 import { Button, Callout, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import type { PipelineMode } from '@/lib/types';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import {
   DEFAULT_EXTRACT_SYSTEM_PROMPT,
@@ -23,12 +24,16 @@ const newRow = newInputRow;
 export function StartRunForm({
   specialtySlug,
   sources,
+  pipelineMode = 'full',
 }: {
   specialtySlug: string;
   sources: CodeSource[];
+  pipelineMode?: PipelineMode;
 }) {
   const router = useRouter();
   const defaultSource = sources[0]?.slug ?? 'ab';
+  // Curriculum runs drop the source prefix from the code id (see extract-codes).
+  const isCurriculum = pipelineMode === 'curriculum-mapping';
   const [rows, setRows] = useState<Row[]>([newRow(defaultSource)]);
   const [identifyInstructions, setIdentifyInstructions] = useState('');
   const [extractInstructions, setExtractInstructions] = useState('');
@@ -128,12 +133,21 @@ export function StartRunForm({
         <Stack space="xs">
           <Text weight="bold">Inputs</Text>
           <Text color="secondary">
-            Each row is a content outline to extract codes from. The source slug becomes
-            the code prefix (e.g.{' '}
-            <code>
-              {defaultSource}_{specialtySlug}_0001
-            </code>
-            ).
+            {isCurriculum ? (
+              <>
+                Each row is a curriculum outline to extract blocks from. Codes are
+                numbered per specialty (e.g. <code>{specialtySlug}_0001</code>).
+              </>
+            ) : (
+              <>
+                Each row is a content outline to extract codes from. The source slug
+                becomes the code prefix (e.g.{' '}
+                <code>
+                  {defaultSource}_{specialtySlug}_0001
+                </code>
+                ).
+              </>
+            )}
           </Text>
           {rows.map((row, idx) => (
             <InputRow

@@ -21,7 +21,10 @@ import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireUserResponse } from '@/lib/auth';
-import { listUnmappedCodesAsAdmin } from '@/lib/data/codes';
+import {
+  listApprovedMappedCodesAsAdmin,
+  listUnmappedCodesAsAdmin,
+} from '@/lib/data/codes';
 import {
   createPipelineRun,
   initPipelineStage,
@@ -31,7 +34,7 @@ import { getSpecialty } from '@/lib/data/specialties';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
 import { log } from '@/lib/log';
 import { approvalToken } from '@/lib/workflows/lib/approval';
-import type { MappingFilter } from '@/lib/workflows/lib/db-writes';
+import { clearMappingForCode, type MappingFilter } from '@/lib/workflows/lib/db-writes';
 import { parseModelSpec } from '@/lib/workflows/lib/parse-model';
 import { resolveApiKeysForRun } from '@/lib/workflows/lib/resolve-keys';
 import { mapCodesWorkflow } from '@/lib/workflows/mapping/map-codes';
@@ -44,6 +47,10 @@ const Body = z.object({
   checkAgainstLibrary: z.boolean().optional(),
   categories: z.unknown().optional(),
   codes: z.unknown().optional(),
+  // Curriculum-mapping only: clear the existing mapping for the approved,
+  // already-mapped codes in scope before mapping, so they get re-mapped
+  // ("remap"). Ignored for other pipeline modes.
+  clearMappedFirst: z.boolean().optional(),
   primaryModel: z.unknown().optional(),
   backupModel: z.unknown().optional(),
 });
@@ -112,6 +119,21 @@ export async function POST(req: NextRequest) {
     filterCategories || filterCodes
       ? { categories: filterCategories, codes: filterCodes }
       : null;
+
+  // Remap: in curriculum-mapping mode, clear the existing mapping for the
+  // approved + already-mapped codes in scope so the unmapped count below picks
+  // them up and the workflow re-maps them. Approval is preserved (clearing only
+  // touches coverage + mappedAt).
+  if (body.clearMappedFirst && spec.pipelineMode === 'curriculum-mapping') {
+    const toClear = await listApprovedMappedCodesAsAdmin(slug, filter);
+    for (const code of toClear) {
+      await clearMappingForCode(slug, code);
+    }
+    log('map-codes').info('remap cleared mapped codes', {
+      slug,
+      cleared: toClear.length,
+    });
+  }
 
   const unmappedCount = await countUnmappedWithFilter(slug, filter);
   if (unmappedCount === 0) {

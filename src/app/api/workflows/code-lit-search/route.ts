@@ -28,6 +28,7 @@ import {
   reapStaleCodeLitSearchRunsAsAdmin,
 } from '@/lib/data/code-lit-search-runs';
 import { listCodes } from '@/lib/data/codes';
+import { coverageScoreOf } from '@/lib/data/coverage-stats-compute';
 import { createPipelineRun, initPipelineStage } from '@/lib/data/pipeline';
 import { getSpecialty } from '@/lib/data/specialties';
 import { errorMessage } from '@/lib/error-message';
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     if (!c.id || !c.mappedAt) return false;
     if (filterIds) return filterIds.has(c.id);
     if (includeAll) return true;
-    const score = c.overallDepthOfCoverage ?? c.depthOfCoverage ?? 0;
+    const score = coverageScoreOf(c);
     return score < COVERAGE_THRESHOLD;
   });
 

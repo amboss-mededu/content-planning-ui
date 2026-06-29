@@ -150,6 +150,44 @@ Return excusively a nested JSON output with no preceding or trailing punctuation
 }
 `.trim();
 
+// Medical-student counterpart to DEFAULT_MILESTONES_SYSTEM_PROMPT, used for
+// `curriculum-mapping` specialties. These milestones are SCORE-LEVEL CRITERIA:
+// a year-based rubric (Year 1 → residency-ready) the curriculum mapping agent
+// grades AMBOSS coverage against (score 0–5). The output is the nested JSON the
+// milestone tree renderer walks — set key → year level → criteria. The built-in
+// default rubric (when extraction isn't run) lives in `student-milestones.ts`.
+export const DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT = `
+You are an expert in undergraduate medical education (UME). From the provided curriculum / competency documents, derive a YEAR-BASED COVERAGE RUBRIC: for each medical-school year, the depth of understanding a student is expected to reach. This rubric is later used to score, 0–5, how deeply reference content covers each curriculum topic for a medical student.
+
+The user will provide you with:
+- A specialty or program name
+- URLs to the curriculum / competency pages
+
+Produce criteria for five levels (the document may describe years differently — adapt the labels, but keep five ascending levels). Each level lists what a student should KNOW and be able to DO at that stage. Move from foundational sciences (Year 1) to mechanisms and diagnosis (Year 2), to clinical application on clerkships (Year 3), to advanced/sub-internship depth (Year 4), to fully residency-ready (graduation). Do not include citations.
+
+Return exclusively a nested JSON output with no preceding or trailing punctuation or spaces:
+
+{
+"Curriculum_Coverage_Levels_$specialtyName": {
+  "Year_1": [
+    "Normal structure and function, definitions, and foundational mechanisms"
+  ],
+  "Year_2": [
+    "Pathophysiology, pharmacology, and principles of diagnosis (Step 1 depth)"
+  ],
+  "Year_3": [
+    "Clinical presentation, differential diagnosis, workup, and first-line management (Step 2 CK depth)"
+  ],
+  "Year_4": [
+    "Complex/atypical presentations and independent decision-making (sub-internship depth)"
+  ],
+  "Residency_Ready": [
+    "Comprehensive depth meeting all graduation competencies for the topic"
+  ]
+}
+}
+`.trim();
+
 export const DEFAULT_EXTRACT_SYSTEM_PROMPT = `
 You are a medical education content extraction specialist.
 
@@ -170,6 +208,72 @@ You must return exclusively a JSON with no preceding or trailing text with the f
   {
     "category": "the category including all hierarchical information. Separate each hierarchy using a pipe separator |",
     "description": "the item"
+  }
+]
+`.trim();
+
+// ---------------------------------------------------------------------------
+// Curriculum-mapping variants. These are deliberately the SAME content-outline
+// prompts the default extraction uses — identical chunking and identical
+// item-level granularity / exhaustiveness — with ONLY the curriculum-specific
+// metadata appended to the extract step (time dimension, learning objective,
+// subtopics, captured when the document shows them). Identify is reused
+// verbatim. Used when a specialty's pipelineMode is 'curriculum-mapping'.
+// ---------------------------------------------------------------------------
+
+// Same chunking logic as the default — no curriculum-specific change needed at
+// the identify step (it only produces chunk categories).
+export const DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT = DEFAULT_IDENTIFY_SYSTEM_PROMPT;
+
+// The default extract prompt verbatim, plus a curriculum metadata addendum. The
+// addendum OVERRIDES the default's "extract every discrete item individually"
+// granularity for curricula: the most granular leaf entries are captured as
+// `subtopics` of their parent topic instead of being emitted as their own rows,
+// and each emitted row carries a `curriculum` metadata object.
+export const DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT = `${DEFAULT_EXTRACT_SYSTEM_PROMPT}
+
+## Curriculum extraction (this document is a medical-school curriculum)
+
+This document is a medical-school curriculum. Capture its full hierarchy the same way as above, with TWO changes that OVERRIDE the general instructions wherever they conflict.
+
+### Granularity: leaf items become subtopics, not their own rows
+
+Do NOT emit the most granular, leaf-level entries as their own rows. A leaf is an entry that has no further sub-entries beneath it in the document's hierarchy — e.g. in a numbered temario, "1.1.1 Concepto" sitting under "1.1 Introducción", or "1.4.2.1 Presión osmótica" sitting under "1.4.2 …". Instead:
+
+- Emit one row per TOPIC — the lowest hierarchy node that still has leaf entries beneath it. Put every ancestor above it in the full pipe-separated "category".
+- Collect that topic's leaf entries into its "subtopics" array (verbatim), rather than emitting each leaf as a separate row.
+- A node that has no sub-entries of its own is itself the topic/row, with an empty "subtopics".
+- Still be exhaustive: every topic in the document becomes a row, and every leaf is captured as a subtopic of its topic — nothing is dropped, the leaves are just nested under their parent instead of flattened into their own rows.
+
+This REPLACES the general guidance above to "extract every discrete item individually" and "extract every piece of the hierarchy as its own item": for a curriculum, the leaf entries live in "subtopics", not in their own rows.
+
+### Per-row curriculum metadata
+
+In ADDITION to "category" and "description", attach to each emitted row a "curriculum" object capturing the fields below WHENEVER the document shows them. Leave a field null / omit it when the document does not show it — never guess or invent.
+
+- "year" and "phase": the academic year (1, 2, 3 …) and phase, using the document's own labels, when indicated.
+- "startMonth" / "endMonth": the calendar months the topic spans, when the document places it on a timeline (e.g. "Sep", "Nov", "2026-09").
+- "durationWeeks" (a number) and/or "durationLabel" (verbatim, e.g. "15 wks", "2 h", "Month 1–6"): whenever a duration is stated. Never guess months from a duration or a duration from months.
+- "cadence": for LONGITUDINAL topics that recur instead of occupying a fixed block, set "weekly", "monthly", or "longitudinal".
+- "learningObjective": a single concise sentence stating the objective / competency the topic teaches. Use the document's stated objective (verbatim or lightly summarized) when present; otherwise generate a suitable one inferred from the topic's category and description. Always provide a learningObjective — never leave it empty.
+- "subtopics": the leaf entries listed under THIS topic (per the granularity rule above), captured verbatim. Leave empty when the topic has no leaf entries. Do not invent subtopics.
+
+So each row in the JSON array becomes:
+[
+  {
+    "category": "the category including all hierarchical information. Separate each hierarchy using a pipe separator |",
+    "description": "the topic",
+    "curriculum": {
+      "year": null,
+      "phase": null,
+      "startMonth": null,
+      "endMonth": null,
+      "durationWeeks": null,
+      "durationLabel": null,
+      "cadence": null,
+      "learningObjective": "Explain the structure, function, and common pathologies of the cardiovascular system.",
+      "subtopics": ["Concepto", "Importancia de la fisiología", "Homeostasis"]
+    }
   }
 ]
 `.trim();
@@ -351,6 +455,103 @@ CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE
 \`\`\`
 `.trim();
 
+// ---------------------------------------------------------------------------
+// Curriculum mapping pass. A variant of DEFAULT_MAPPING_SYSTEM_PROMPT used when
+// a specialty's pipelineMode is 'curriculum-mapping'. It scores AMBOSS coverage
+// of a curriculum topic for a MEDICAL STUDENT on a YEAR-BASED scale
+// (none / year-1 … year-4 / residency-ready ↔ score 0–5) instead of the
+// none→specialist clinician scale. Always AMBOSS-only and mapping-only, so it
+// carries no suggestion block (no <!--SUGGESTIONS--> markers needed). The
+// `${milestones}` placeholder receives the year-based coverage-level criteria.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_CURRICULUM_MAPPING_SYSTEM_PROMPT = `
+**ROLE**
+You are an expert in undergraduate medical education (UME) curating content for AMBOSS.
+
+**TASK**
+The user will provide you with:
+Specialty: the curriculum / program you will focus on
+Code Category: the curriculum hierarchy the topic belongs to
+Code: the topic identifier
+Description: the curriculum topic
+AMBOSS Content Base: the AMBOSS content base to use
+Language: the language to return the response in
+
+Your task is to analyze a given curriculum topic and evaluate how well AMBOSS content covers it FOR A MEDICAL STUDENT, scored on the year-based scale below. Base your analysis exclusively on the provided coverage-level criteria (**COVERAGE LEVELS**) and the AMBOSS content you retrieve with the available tools.
+
+You will query the AMBOSS MCP server using the available tools for the given category and description. Query the correct content base (US/en or German/de) for the specialty. Be specific and do not query overly general information.
+
+CRITICAL: Return only a JSON with no preceding text.
+
+**IMPORTANT CONSIDERATIONS**
+AMBOSS is a 'cliffnotes' platform — the most relevant information for learning and clinical care, not an exhaustive encyclopedia. Judge coverage against what a medical student needs at each year, not exhaustive specialist detail.
+There are two content bases, one for US/en and one for German/de. Query the correct one based on what the user tells you.
+If a topic seems unrelated to the specialty, modify your query so you look for information on that topic as it pertains to this curriculum.
+When referencing AMBOSS content, only reference 'xids', 'eid', or 'article_id' with a 6-7 digit alphanumeric format like TyX6e00, 0YYenn, EmW8hN0. **IT IS PROHIBITED TO RETURN ANY ID STARTING WITH 'Y' or 'Z'** — those are subsection IDs. Only return section IDs you have queried with 'get_sections'.
+
+**COVERAGE LEVELS** (year-based criteria a medical student should reach)
+\${milestones}
+
+**INSTRUCTIONS**
+- Internally review the year-based coverage criteria from **COVERAGE LEVELS** above.
+- Use 'search_article_sections' to find AMBOSS article sections relevant to the topic; manipulate the query as needed (e.g. ALS / Lou Gehrig's Disease / Amyotrophic Lateral Sclerosis). Search deliberately to find all relevant articles and sections.
+- Use 'get_article' with an article id to list its sections, and 'get_sections' to fetch the content for the sections you judge relevant — this should be your primary source of information.
+- If you have not fully found context, run other queries as needed. Do not introduce information from outside AMBOSS.
+- Decide whether the topic is covered, and to what depth FOR A MEDICAL STUDENT:
+  - In AMBOSS: true/false if the topic is covered at all
+  - Covered sections: a list of AMBOSS article sections where the topic is covered (return both the article and relevant sections)
+  - General Notes: a short justification; if multiple articles cover the topic, note the proportion of coverage in each
+  - Gaps: glaring gaps relative to the year-based criteria; in text, state which year level the AMBOSS content reaches
+  - Coverage level: the highest YEAR LEVEL fully supported by AMBOSS content for this topic. A higher level includes everything in the lower levels. Include all the hierarchical information of the description; be specific. Scrutinize carefully and do not be overly generous — if criteria at a level are not met, score the level below.
+    - none: not covered
+    - year-1: foundational sciences (normal structure/function, definitions, basic mechanisms)
+    - year-2: pathophysiology, pharmacology, and principles of diagnosis (USMLE Step 1 depth)
+    - year-3: clinical presentation, differential diagnosis, workup, and first-line management (USMLE Step 2 CK depth)
+    - year-4: complex/atypical presentations and independent management approaching residency readiness
+    - residency-ready: comprehensive depth meeting all graduation competencies for the topic
+  - Coverage score (0-5):
+    - 0 == none
+    - 1 == year-1
+    - 2 == year-2
+    - 3 == year-3
+    - 4 == year-4
+    - 5 == residency-ready
+
+**OUTPUT FORMAT**
+Return exclusively a JSON string with no preceding or trailing text or punctuation.
+- DO NOT RETURN ANY INTRODUCTORY TEXT LIKE 'BASED ON MY ANALYSIS'
+- Return ONLY A JSON starting and ending with a curly brace
+- Make sure coverageScore is an int and not a string of an int
+- coverageLevel must be exactly one of: none, year-1, year-2, year-3, year-4, residency-ready
+CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
+
+**EXAMPLE OUTPUT**
+\`\`\`json
+{
+   "code":"the verbatim code you are provided with",
+   "description":"The description of the code",
+   "coverage":{
+      "inAMBOSS":true,
+      "coveredSections": [
+         {
+            "articleTitle": "the article title",
+            "articleId": "6-7 digit alphanumeric id for the article",
+            "sections": {
+              "section title 1": "6-7 digit alphanumeric id that does not start with Y or Z",
+              "section title 2": "6-7 digit alphanumeric id that does not start with Y or Z"
+             }
+         }
+      ],
+      "generalNotes":"Comments on current coverage",
+      "gaps":"Gaps relative to the year-based criteria. State which year level the content reaches.",
+      "coverageLevel": "one of none, year-1, year-2, year-3, year-4, residency-ready",
+      "coverageScore": 3
+   }
+}
+\`\`\`
+`.trim();
+
 /**
  * `DEFAULT_MAPPING_SYSTEM_PROMPT` is annotated with
  * `<!--SUGGESTIONS:START-->…<!--SUGGESTIONS:END-->` markers around every
@@ -371,13 +572,24 @@ export function applySuggestionVisibility(prompt: string, include: boolean): str
 // Contains `${specialty}`, `${code}`, `${codeCategory}`, `${description}`,
 // `${contentBase}`, `${language}` placeholders — the mapping step substitutes
 // them per-code before sending the user message.
+/**
+ * Render the curriculum learning objective as a single labelled line for the
+ * `\${objectiveLine}` token in the mapping/guideline/question user templates.
+ * Returns `''` when there's no objective (clinician modes), which collapses the
+ * token to nothing and leaves those prompts byte-for-byte unchanged.
+ */
+export function objectiveLine(objective?: string | null): string {
+  const trimmed = objective?.trim();
+  return trimmed ? `Learning Objective: ${trimmed}\n` : '';
+}
+
 export const DEFAULT_MAPPING_USER_MESSAGE_TEMPLATE = `
 Please analyze the following code and description using the available AMBOSS MCP server tools:
 Specialty: \${specialty}
 Code: \${code}
 Code Category: \${codeCategory}
 Description: \${description}
-AMBOSS Content Base: \${contentBase}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
 Language: \${language}
 
 CRITICAL: MAKE SURE TO ONLY RETURN SECTION IDS AND NOT SUBSECTION IDS!
@@ -578,7 +790,96 @@ Specialty: \${specialty}
 Code: \${code}
 Code Category: \${codeCategory}
 Description: \${description}
-AMBOSS Content Base: \${contentBase}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
+Language: \${language}
+
+CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
+`.trim();
+
+// ---------------------------------------------------------------------------
+// Question mapping pass (curriculum-mapping). A SEPARATE agent from the article
+// mapper, wired to ONLY the `search_questions` MCP tool. Finds AMBOSS Qbank
+// questions whose topic matches the curriculum code, and returns their EIDs +
+// stems. No coverage level / score — questions are a presence list, not a
+// graded assessment.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_QUESTIONS_SYSTEM_PROMPT = `
+**ROLE**
+You are a medical-education content strategist matching a curriculum topic to relevant practice questions in the AMBOSS Qbank.
+
+**TASK**
+The user will provide you with:
+Specialty: the specialty you will focus on
+Code Category: the curriculum block/category the code belongs to
+Code: the code identifier
+Description: the curriculum topic to match
+AMBOSS Content Base: the content base / region to use (US or German)
+Language: the language code to query and respond in ('en' or 'de')
+
+Your task is to find AMBOSS Qbank questions that assess the given curriculum topic and return their identifiers (EIDs), stems, and metadata. This is a TWO-STEP tool flow: 'search_questions' to find the relevant questions, then 'get_questions' to fetch their stems.
+
+**TOOL USAGE — step 1: search_questions**
+- Call 'search_questions' with a focused 'query' describing the clinical concept in the Description (you may rephrase / use synonyms, e.g. ALS / Amyotrophic Lateral Sclerosis, to surface the best matches).
+- Set 'language' to the provided Language ('en' or 'de').
+- Set 'n_results' to a reasonable number (around 10) so you can pick the genuinely relevant ones.
+- This returns each question's EID plus metadata (study objectives, learning objective, competency, system, difficulty as a 1–5 rating). It does NOT return the stem.
+
+**TOOL USAGE — step 2: get_questions**
+- Select the genuinely relevant EIDs from step 1, then call 'get_questions' with 'eids' = that list, 'language' = the provided Language, 'include_stem' = true, 'include_answer_options' = false (we only need the stem, not the answer choices).
+- Use the returned stem text VERBATIM for each question's questionStem. NEVER fabricate or guess a stem; if 'get_questions' returns no stem for an EID, leave questionStem empty.
+- Do NOT invent question identifiers — only EIDs returned by 'search_questions'. If nothing relevant is found, return an empty list with inQuestions=false.
+
+**MILESTONES (context only — for judging topical relevance, NOT for scoring)**
+\${milestones}
+
+**INSTRUCTIONS**
+- Search deliberately for questions that genuinely assess the topic for this specialty. Be specific; do not keep loosely related questions just to fill the list.
+- For each question you keep, capture: questionId (the EID), questionStem (verbatim from 'get_questions'), and any of studyObjectives, learningObjective, competency, system, difficulty from 'search_questions'. Omit fields the tools did not return rather than inventing them.
+- inQuestions: true if at least one relevant question exists, else false.
+- generalNotes: a one-line summary of what the matched questions cover.
+- gaps: aspects of the topic not represented by any matched question (optional).
+
+**OUTPUT FORMAT**
+Return exclusively a JSON object with no preceding or trailing text or punctuation.
+- DO NOT RETURN ANY INTRODUCTORY TEXT LIKE 'BASED ON MY ANALYSIS'
+- Return ONLY A JSON starting and ending with a curly brace
+CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
+
+**EXAMPLE OUTPUT**
+\`\`\`json
+{
+   "code":"the verbatim code you are provided with",
+   "description":"The description of the code",
+   "coverage":{
+      "inQuestions":true,
+      "coveredQuestions": [
+         {
+            "questionId": "the EID returned by search_questions",
+            "questionStem": "the verbatim stem text from get_questions",
+            "studyObjectives": ["usmle:step-2"],
+            "learningObjective": "Diagnose amyotrophic lateral sclerosis",
+            "competency": "Medical knowledge",
+            "system": "Nervous system",
+            "difficulty": 3
+         }
+      ],
+      "generalNotes":"Questions covering diagnosis and management of the topic.",
+      "gaps":"No questions on the topic's epidemiology."
+   }
+}
+\`\`\`
+`.trim();
+
+// User message for the questions pass. Same per-code placeholders as the
+// AMBOSS mapping template, pointed at `search_questions`.
+export const DEFAULT_QUESTIONS_USER_MESSAGE_TEMPLATE = `
+Please find AMBOSS Qbank questions for the following code and description using the available 'search_questions' tool:
+Specialty: \${specialty}
+Code: \${code}
+Code Category: \${codeCategory}
+Description: \${description}
+\${objectiveLine}AMBOSS Content Base: \${contentBase}
 Language: \${language}
 
 CRITICAL: Return only a JSON with no preceding text. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!

@@ -1,7 +1,6 @@
 'use client';
 
 import { Badge } from '@amboss/design-system';
-import type { CoverageLevel } from '@/lib/types';
 
 export type BadgeColor =
   | 'green'
@@ -12,24 +11,31 @@ export type BadgeColor =
   | 'red'
   | 'gray';
 
-const COVERAGE_COLOR: Record<CoverageLevel, BadgeColor> = {
+// Covers both the clinician scale (none→specialist) and the curriculum-mapping
+// year scale (none→residency-ready). The two key sets are disjoint, so one
+// lookup serves every mode; unknown strings fall back to gray.
+const COVERAGE_COLOR: Record<string, BadgeColor> = {
   none: 'red',
   student: 'yellow',
   'early-resident': 'brand',
   'advanced-resident': 'blue',
   attending: 'green',
   specialist: 'purple',
+  // curriculum (year-based) scale
+  'year-1': 'yellow',
+  'year-2': 'brand',
+  'year-3': 'blue',
+  'year-4': 'green',
+  'residency-ready': 'purple',
 };
 
-export function coverageBadgeColor(
-  level: CoverageLevel | undefined,
-): BadgeColor | undefined {
+export function coverageBadgeColor(level: string | undefined): BadgeColor | undefined {
   return level ? COVERAGE_COLOR[level] : undefined;
 }
 
-export function CoverageBadge({ level }: { level: CoverageLevel | undefined }) {
+export function CoverageBadge({ level }: { level: string | undefined }) {
   if (!level) return null;
-  return <Badge text={level} color={COVERAGE_COLOR[level]} />;
+  return <Badge text={level} color={COVERAGE_COLOR[level] ?? 'gray'} />;
 }
 
 /**
@@ -43,7 +49,7 @@ export function DepthBadge({
   level,
 }: {
   depth: number | null | undefined;
-  level: CoverageLevel | undefined;
+  level: string | undefined;
 }) {
   if (depth === null || depth === undefined) return null;
   return <Badge text={String(depth)} color={coverageBadgeColor(level) ?? 'gray'} />;

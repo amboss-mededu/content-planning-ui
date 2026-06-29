@@ -3,6 +3,7 @@
 import { Button, Inline, Tooltip } from '@amboss/design-system';
 import { useCallback, useEffect, useState } from 'react';
 import type { CodeCategorySummary, UnmappedCodePickerRow } from '@/lib/data/codes';
+import type { PipelineMode } from '@/lib/types';
 import { ImportCodesModal } from './import-codes-modal';
 import { RemapModal } from './remap-modal';
 
@@ -15,12 +16,26 @@ import { RemapModal } from './remap-modal';
  * activity) so the buttons can enable/disable without threading state up from
  * the codes table. The button stays mounted at all times — it's disabled, never
  * hidden, so it doesn't pop in and out while the table's pages stream in.
+ *
+ * Curriculum plans use the same category search/selector here; the per-category
+ * approve + map/remap surface lives behind a Source-categories row click
+ * (`SourceCategoriesTable` → `CurriculumCategoryManagerModal`). For curriculum,
+ * the map workflow maps only approved codes (the `approvedOnly` gate).
  */
-export function CodesActionsToolbar({ slug }: { slug: string }) {
+export function CodesActionsToolbar({
+  slug,
+  pipelineMode = 'full',
+}: {
+  slug: string;
+  pipelineMode?: PipelineMode;
+}) {
   const [supportReady, setSupportReady] = useState(false);
   const [unmappedCount, setUnmappedCount] = useState(0);
   // Bulk mapping only needs to pause during a full-specialty consolidation.
   const [runningAll, setRunningAll] = useState(false);
+  // Whether a map/remap run is currently in flight — surfaces the "Cancel
+  // mapping" control inside the Map-codes modal.
+  const [mappingActive, setMappingActive] = useState(false);
 
   const [remapOpen, setRemapOpen] = useState(false);
   const [remapData, setRemapData] = useState<{
@@ -37,10 +52,12 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       if (!res.ok) return;
       const data = (await res.json()) as {
         unmappedCount: number;
+        inFlightCodes?: string[];
         activity: { runningAll: boolean; runningBuckets: string[] };
       };
       setUnmappedCount(data.unmappedCount);
       setRunningAll(data.activity.runningAll);
+      setMappingActive((data.inFlightCodes?.length ?? 0) > 0);
       setSupportReady(true);
     } catch {
       /* buttons stay disabled until the next refetch */
@@ -81,11 +98,14 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
       size="m"
       disabled={!canRemap || remapLoading}
       onClick={async () => {
+        // Refresh the in-flight signal so the modal's Cancel control reflects
+        // a run that may have started since the last mount/focus fetch.
+        void refetchSummary();
         await loadRemapData();
         setRemapOpen(true);
       }}
     >
-      {remapLoading ? 'Loading…' : 'Map by category…'}
+      {remapLoading ? 'Loading…' : 'Map'}
     </Button>
   );
 
@@ -107,9 +127,11 @@ export function CodesActionsToolbar({ slug }: { slug: string }) {
           refetchSummary();
         }}
         specialtySlug={slug}
+        pipelineMode={pipelineMode}
         categories={remapData?.categories ?? []}
         unmappedCodes={remapData?.unmappedCodes ?? []}
         unmappedCount={unmappedCount}
+        mappingActive={mappingActive}
       />
     </Inline>
   );

@@ -40,6 +40,7 @@ export type EventMetrics = {
     | 'milestones'
     | 'map'
     | 'map_guidelines'
+    | 'map_questions'
     | 'synthesize_overall';
   /** Raw parsed LLM output for this call. */
   completion?: unknown;

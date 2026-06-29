@@ -24,6 +24,13 @@ export const GROUP_STYLES: Record<
     border: 'rgba(15, 23, 42, 0.25)',
     stripe: 'rgba(15, 23, 42, 0.035)',
   },
+  curriculum: {
+    label: 'Curriculum',
+    bg: 'rgb(247, 240, 228)',
+    fg: 'rgb(120, 80, 20)',
+    border: 'rgb(180, 130, 50)',
+    stripe: 'rgba(180, 130, 50, 0.06)',
+  },
   coverage: {
     label: 'AMBOSS coverage',
     bg: 'rgb(228, 241, 234)',
@@ -65,6 +72,15 @@ export const GROUP_STYLES: Record<
     fg: 'rgb(133, 77, 14)',
     border: 'rgb(217, 119, 6)',
     stripe: 'rgba(217, 119, 6, 0.07)',
+  },
+  review: {
+    label: 'Review',
+    // A cooler, slightly deeper grey than the neutral Metadata band so the
+    // approval column reads as its own group sitting beside Metadata.
+    bg: 'rgb(228, 230, 235)',
+    fg: 'rgb(71, 85, 105)',
+    border: 'rgb(148, 163, 184)',
+    stripe: 'rgba(71, 85, 105, 0.06)',
   },
   actions: {
     label: '',

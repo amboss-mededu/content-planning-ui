@@ -16,6 +16,8 @@ import { SpecialtyCard } from './specialty-card';
 
 /** Card-grid groupings, in display order. Specialties bucket on `pipelineMode`
  *  (legacy/undefined → `full`). */
+// Curriculum-mapping specialties are managed under the Teaching tab, so they're
+// intentionally absent here.
 const GROUPS: { mode: PipelineMode; label: string }[] = [
   { mode: 'full', label: 'Full pipeline' },
   { mode: 'rag-corpus', label: 'RAG corpus' },

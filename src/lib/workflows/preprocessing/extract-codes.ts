@@ -20,6 +20,7 @@ import { deleteCodesForSpecialtyAsAdmin } from '@/lib/data/codes';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { CurriculumMeta, PipelineMode } from '@/lib/types';
 import {
   markStageCompleted,
   markStageFailed,
@@ -29,7 +30,12 @@ import {
   writeExtractedCodes,
 } from '../lib/db-writes';
 import { aggregateStageMetrics, logEvent } from '../lib/events';
-import { extractCodesForCategory, identifyModulesForUrl } from '../lib/gemini';
+import {
+  type ExtractionVariant,
+  extractCodesForCategory,
+  identifyModulesForUrl,
+  uploadLocalInputsToGemini,
+} from '../lib/gemini';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import type { ContentInput } from '../lib/sources';
@@ -46,6 +52,9 @@ export type ExtractCodesInput = {
   extractInstructions?: string;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  /** Specialty run mode. `'curriculum-mapping'` swaps in the curriculum
+   *  extraction prompts and captures a per-block time dimension. */
+  pipelineMode?: PipelineMode;
 };
 
 export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void> {
@@ -55,6 +64,9 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     inputs: input.inputs.length,
   });
 
+  const variant: ExtractionVariant =
+    input.pipelineMode === 'curriculum-mapping' ? 'curriculum' : 'default';
+
   try {
     await markStageRunning(input.runId, 'extract_codes');
     await logEvent({
@@ -62,6 +74,17 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       stage: 'extract_codes',
       level: 'info',
       message: `Run started for ${input.inputs.length} input(s)`,
+    });
+
+    // Uploaded PDFs are served from a private/localhost URL that Google's
+    // url_context can't fetch — attach those directly to the model instead.
+    // Public URLs aren't in the map and keep using url_context.
+    const fileMap = await uploadLocalInputsToGemini({
+      inputs: input.inputs,
+      model: input.model,
+      apiKeys: input.apiKeys,
+      runId: input.runId,
+      stage: 'extract_codes',
     });
 
     // Phase 1: identify modules per (url, source), batched fan-out.
@@ -78,6 +101,8 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             stage: 'extract_codes',
             model: input.model,
             apiKeys: input.apiKeys,
+            variant,
+            file: fileMap.get(inp.url),
           }),
         ),
       );
@@ -103,6 +128,7 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       description: string;
       source: string;
       consolidationCategory: string;
+      curriculumMeta?: CurriculumMeta;
     }[] = [];
     for (const batch of chunk(perUrlCategories, CATEGORY_CONCURRENCY)) {
       const results = await Promise.all(
@@ -117,6 +143,8 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
             stage: 'extract_codes',
             model: input.model,
             apiKeys: input.apiKeys,
+            variant,
+            file: fileMap.get(p.url),
           }),
         ),
       );
@@ -126,17 +154,34 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
       });
     }
 
-    // Number codes per-source so each namespace starts at 0001.
+    // Number codes within the specialty. Curriculum runs use a single
+    // specialty-scoped counter and drop the source segment from the id —
+    // a curriculum has one logical source, so `<slug>_<nnnn>` is enough and the
+    // `none_`/`ab_` prefix is just noise. Other modes keep per-source namespaces
+    // (`<source>_<slug>_<nnnn>`) so codes from different ontologies
+    // (ICD10/HCUP/ABIM/Orpha) never collide. The `source` field is still stored
+    // either way — only the id format differs.
+    const isCurriculum = variant === 'curriculum';
     const perSourceCounts: Record<string, number> = {};
+    let curriculumCount = 0;
     const rawCodes = extracted.map((c) => {
-      const n = (perSourceCounts[c.source] ?? 0) + 1;
-      perSourceCounts[c.source] = n;
+      let code: string;
+      if (isCurriculum) {
+        curriculumCount += 1;
+        code = `${input.specialtySlug}_${String(curriculumCount).padStart(4, '0')}`;
+      } else {
+        const n = (perSourceCounts[c.source] ?? 0) + 1;
+        perSourceCounts[c.source] = n;
+        code = `${c.source}_${input.specialtySlug}_${String(n).padStart(4, '0')}`;
+      }
       return {
-        code: `${c.source}_${input.specialtySlug}_${String(n).padStart(4, '0')}`,
+        code,
         category: c.category,
         consolidationCategory: c.consolidationCategory,
         description: c.description,
         source: c.source,
+        // Only curriculum runs populate this; default extraction leaves it unset.
+        curriculumMeta: c.curriculumMeta,
       };
     });
 
@@ -162,7 +207,9 @@ export async function extractCodesPhase1(input: ExtractCodesInput): Promise<void
     // codes appear in Mapping/Categories immediately. Clear the specialty's
     // existing codes first so a re-run replaces rather than duplicates — the
     // `codes` schema has no unique constraint on `code`, and bulk insert is
-    // create-only.
+    // create-only. Note: for curriculum-mapping this intentionally resets each
+    // item's `curriculumReviewStatus` to pending — re-extracted items are new
+    // content and must be re-approved before they map.
     await deleteCodesForSpecialtyAsAdmin(input.specialtySlug);
     await promoteExtractedCodesToCodes(input.runId, input.specialtySlug);
     await markStageCompleted(input.runId, 'extract_codes', undefined, summary);

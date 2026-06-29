@@ -12,7 +12,7 @@ import {
   Text,
 } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import type { CodeRunMetadata } from '@/lib/data/code-run-metadata';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
@@ -23,7 +23,11 @@ import type {
   NewArticle as NewArticleRow,
   SectionUpdate as SectionUpdateRow,
 } from '@/lib/pb/types';
-import type { Code, MappingSource, PipelineMode } from '@/lib/types';
+import type { Code, CurriculumMeta, MappingSource, PipelineMode } from '@/lib/types';
+import {
+  formatDurationOrCadence,
+  formatTimeframe,
+} from '@/lib/workflows/lib/curriculum-meta';
 import type { ProviderId } from '@/lib/workflows/lib/llm';
 import { submitCodeLitSourceReview } from '../[specialty]/actions';
 import { missingApiKeyProvider } from '../[specialty]/pipeline/_components/missing-api-key';
@@ -35,6 +39,7 @@ import {
   readSpecForStage,
 } from '../[specialty]/pipeline/_components/model-selection-storage';
 import { AddCodeLitSourceModal } from './add-code-lit-source-modal';
+import { CancelMappingButton } from './cancel-mapping-button';
 import {
   ArticleUpdatesEditor,
   CoverageArticlesEditor,
@@ -69,6 +74,16 @@ type SectionUpdate = {
 type NewArticleSuggestion = {
   articleTitle?: string;
   importance?: number;
+};
+
+type CoveredQuestion = {
+  questionId?: string;
+  questionStem?: string;
+  studyObjectives?: string[];
+  learningObjective?: string;
+  competency?: string;
+  system?: string;
+  difficulty?: string;
 };
 
 type GuidelineCoverageItem = {
@@ -120,7 +135,9 @@ export type DetailTarget =
   | 'suggestion-updates'
   | 'suggestion-new-articles'
   | 'guideline-coverage'
+  | 'questions'
   | 'literature'
+  | 'curriculum'
   | 'metadata';
 
 type TabDef = { target: DetailTarget; label: string };
@@ -142,7 +159,9 @@ function buildVisibleTabs(opts: {
   showAmboss: boolean;
   showGuidelines: boolean;
   showSuggestions: boolean;
+  showQuestions: boolean;
   showLiterature: boolean;
+  showCurriculum: boolean;
 }): TabDef[] {
   const tabs: TabDef[] = [
     { target: 'coverage-articles', label: 'Coverage' },
@@ -158,8 +177,14 @@ function buildVisibleTabs(opts: {
   if (opts.showGuidelines && opts.showAmboss) {
     tabs.push({ target: 'guideline-coverage', label: 'Guidelines' });
   }
+  if (opts.showQuestions) {
+    tabs.push({ target: 'questions', label: 'Questions' });
+  }
   if (opts.showLiterature) {
     tabs.push({ target: 'literature', label: 'Literature' });
+  }
+  if (opts.showCurriculum) {
+    tabs.push({ target: 'curriculum', label: 'Curriculum' });
   }
   tabs.push({ target: 'metadata', label: 'Metadata' });
   return tabs;
@@ -180,6 +205,39 @@ const EDITABLE_TARGETS = new Set<DetailTarget>([
   'suggestion-new-articles',
 ]);
 
+// Curriculum approval footer buttons. Fixed appearance regardless of the
+// current decision — Approve is always green-filled, Reject is always an
+// unfilled (outlined) button. The header badge conveys which one is selected.
+const labeledDecisionBase: CSSProperties = {
+  borderRadius: 4,
+  padding: '8px 12px',
+  fontSize: 14,
+  fontWeight: 700,
+  fontFamily: 'inherit',
+  lineHeight: 1.1428571429,
+};
+function approveButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    ...labeledDecisionBase,
+    // The AMBOSS Learning/Library primary-navigation green (dark green).
+    background: '#0a5c45',
+    border: '1px solid #0a5c45',
+    color: '#fff',
+    opacity: disabled ? 0.5 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  };
+}
+function rejectButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    ...labeledDecisionBase,
+    background: '#fff',
+    border: '1px solid rgba(0, 0, 0, 0.2)',
+    color: 'inherit',
+    opacity: disabled ? 0.5 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  };
+}
+
 export function CodeDetailModal({
   row,
   target,
@@ -192,6 +250,10 @@ export function CodeDetailModal({
   inFlight,
   onPatchRow,
   onClose,
+  navList,
+  navIndex,
+  onNavigate,
+  onDecideCurriculum,
 }: {
   row: Code | null;
   target?: DetailTarget;
@@ -206,6 +268,18 @@ export function CodeDetailModal({
    *  Saving PATCHes a full-array replacement and refreshes the detail. */
   onPatchRow?: (code: string, fields: PatchCodeFields) => Promise<CodeTableRow>;
   onClose: () => void;
+  // --- Curriculum approval review (curriculum-mapping only) ----------------
+  /** The sorted+filtered rows, for step-through navigation. */
+  navList?: Code[];
+  /** Index of the current row within `navList` (-1 when filtered out). */
+  navIndex?: number;
+  /** Navigate the modal to another row (prev/next, keyboard). */
+  onNavigate?: (row: Code) => void;
+  /** Approve/reject the current curriculum item ('' clears the decision). */
+  onDecideCurriculum?: (
+    code: string,
+    status: '' | 'approved' | 'rejected',
+  ) => Promise<CodeTableRow> | undefined;
 }) {
   const router = useRouter();
 
@@ -217,10 +291,28 @@ export function CodeDetailModal({
   const guidelineOnly = mappingSource === 'guidelines';
   const showSuggestions = pipelineMode === 'full' && showAmboss;
   const showLiterature = pipelineMode === 'rag-corpus';
+  const showCurriculum = pipelineMode === 'curriculum-mapping';
+  // Questions are mapped only for curriculum-mapping specialties (a separate
+  // search_questions agent runs alongside article mapping there).
+  const showQuestions = pipelineMode === 'curriculum-mapping';
   const visibleTabs = useMemo(
     () =>
-      buildVisibleTabs({ showAmboss, showGuidelines, showSuggestions, showLiterature }),
-    [showAmboss, showGuidelines, showSuggestions, showLiterature],
+      buildVisibleTabs({
+        showAmboss,
+        showGuidelines,
+        showSuggestions,
+        showQuestions,
+        showLiterature,
+        showCurriculum,
+      }),
+    [
+      showAmboss,
+      showGuidelines,
+      showSuggestions,
+      showQuestions,
+      showLiterature,
+      showCurriculum,
+    ],
   );
 
   const [activeTab, setActiveTab] = useState(targetToIndex(visibleTabs, target));
@@ -341,6 +433,66 @@ export function CodeDetailModal({
     };
   }, [activeTarget, rowKey, specialtySlug]);
 
+  // --- Curriculum approval review: navigation + decision --------------------
+  // Step to another item in the table's sorted+filtered order, wrapping around.
+  const navTo = useCallback(
+    (delta: number) => {
+      if (!navList || navList.length <= 1 || navIndex == null || navIndex < 0) return;
+      const next = navList[(navIndex + delta + navList.length) % navList.length];
+      if (next) onNavigate?.(next);
+    },
+    [navList, navIndex, onNavigate],
+  );
+
+  // Approve/reject the current item (toggle off when re-pressing the active
+  // decision), then re-fetch so the modal's status badge reflects the stamp.
+  const decideCurrent = useCallback(
+    (status: 'approved' | 'rejected') => {
+      if (!onDecideCurriculum || !row) return;
+      const current = (fullRow ?? row).curriculumReviewStatus;
+      const next = current === status ? '' : status;
+      const p = onDecideCurriculum(row.code, next);
+      if (p) void p.then(() => setReloadSeq((s) => s + 1));
+    },
+    [onDecideCurriculum, row, fullRow],
+  );
+
+  // Keyboard review: ←/→ navigate, A approve, R reject. Ignored while typing in
+  // an editor field or when an inline edit panel is open. Capture phase so the
+  // DS Modal's focus trap doesn't swallow the keys.
+  useEffect(() => {
+    if (!row || !showCurriculum) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      if (editingTab !== null) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navTo(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navTo(1);
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        decideCurrent('approved');
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        decideCurrent('rejected');
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [row, showCurriculum, editingTab, navTo, decideCurrent]);
+
   if (!row) return null;
 
   // Map/Remap action wired into the modal footer. Mirrors the old in-table
@@ -436,6 +588,8 @@ export function CodeDetailModal({
     []) as unknown as NewArticleSuggestion[];
   const coveredGuidelines = (detailRow.guidelinesWhereCoverageIs ??
     []) as unknown as GuidelineCoverageItem[];
+  const coveredQuestions = (detailRow.questionsWhereCoverageIs ??
+    []) as unknown as CoveredQuestion[];
   const inAmboss = detailRow.isInAMBOSS;
   const specialty = detailRow.specialty ?? '';
   const category = detailRow.category ?? '';
@@ -462,24 +616,68 @@ export function CodeDetailModal({
     canEdit && !!onPatchRow && detailState === 'loaded' && targetEditable;
   const isEditingPanel = editingTab === activeTab;
 
+  // Curriculum: the Map/Remap action moves up beside the AMBOSS badge (the
+  // modal's footer is reserved for the approval review controls).
+  const RemapInlineButton = () => (
+    <Button
+      variant="secondary"
+      size="s"
+      disabled={!actionEnabled}
+      loading={submitting}
+      onClick={() => runMap()}
+    >
+      {actionLabel}
+    </Button>
+  );
+
   return (
     <Modal
       header={detailRow.description ?? detailRow.code}
       subHeader={detailRow.description ? detailRow.code : undefined}
       size="l"
       isDismissible
-      actionButton={{
-        text: actionLabel,
-        disabled: !actionEnabled,
-        loading: submitting,
-      }}
-      secondaryButton={{ text: 'Close' }}
+      // Curriculum review has its own footer (prev/next + approve/reject) in the
+      // body and moves Map/Remap up beside the AMBOSS badge, so the modal's
+      // built-in footer buttons are dropped (the X still dismisses it).
+      actionButton={
+        showCurriculum
+          ? undefined
+          : { text: actionLabel, disabled: !actionEnabled, loading: submitting }
+      }
+      secondaryButton={showCurriculum ? undefined : { text: 'Close' }}
       onAction={(action) => {
         if (action === 'cancel') onClose();
         else if (action === 'action') runMap();
       }}
     >
       <Modal.Stack>
+        {/* Curriculum approval status floats top-right, up by the close (X)
+            button, rather than sitting below the header. Only a made decision
+            shows a badge; pending stays unbadged. */}
+        {showCurriculum &&
+        (detailRow.curriculumReviewStatus === 'approved' ||
+          detailRow.curriculumReviewStatus === 'rejected') ? (
+          // Flex-center within the header band (top 0..height) so the badge lines
+          // up vertically with the title + the close (X) button, regardless of
+          // badge height. `height` ≈ the modal header band; nudge if needed.
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 56,
+              height: 64,
+              display: 'flex',
+              alignItems: 'center',
+              zIndex: 1,
+            }}
+          >
+            {detailRow.curriculumReviewStatus === 'approved' ? (
+              <Badge text="Approved" color="green" />
+            ) : (
+              <Badge text="Rejected" color="red" />
+            )}
+          </div>
+        ) : null}
         <Stack space="m">
           <Inline space="s" vAlignItems="center">
             {specialty ? (
@@ -500,9 +698,20 @@ export function CodeDetailModal({
             ) : null}
           </Inline>
 
+          {inFlight ? (
+            <Inline space="s" vAlignItems="center">
+              <Badge text="Mapping…" color="blue" icon="loader" />
+              <Text size="s" color="secondary">
+                This code is currently being mapped.
+              </Text>
+              <CancelMappingButton slug={specialtySlug} onCancelled={onClose} />
+            </Inline>
+          ) : null}
+
           {isUnmapped ? (
             <Inline space="s" vAlignItems="center">
               <Badge text="Unmapped" color="gray" />
+              {showCurriculum ? <RemapInlineButton /> : null}
             </Inline>
           ) : (
             <>
@@ -513,15 +722,19 @@ export function CodeDetailModal({
                   ) : (
                     <Badge text="Not in AMBOSS" color="red" />
                   )}
-                  {detailRow.coverageLevel ? (
+                  {/* Curriculum mapping drops the coverage-level (year) and
+                      depth (score) badges — scoring isn't used for curricula. */}
+                  {!showCurriculum && detailRow.coverageLevel ? (
                     <CoverageBadge level={detailRow.coverageLevel} />
                   ) : null}
-                  {typeof detailRow.depthOfCoverage === 'number' ? (
+                  {!showCurriculum && typeof detailRow.depthOfCoverage === 'number' ? (
                     <DepthBadge
                       depth={detailRow.depthOfCoverage}
                       level={detailRow.coverageLevel}
                     />
                   ) : null}
+                  {/* Curriculum: Map/Remap lives beside the AMBOSS badge. */}
+                  {showCurriculum ? <RemapInlineButton /> : null}
                 </Inline>
               ) : null}
               {showGuidelines ? (
@@ -580,7 +793,7 @@ export function CodeDetailModal({
             tabs={visibleTabs.map((t) => ({ label: t.label }))}
           >
             <div>
-              {canEditPanel && !isEditingPanel ? (
+              {canEditPanel && !isEditingPanel && !showCurriculum ? (
                 <Inline alignItems="right" fullWidth>
                   <Button
                     variant="secondary"
@@ -669,6 +882,8 @@ export function CodeDetailModal({
                   notes={detailRow.guidelineNotes ?? null}
                   gaps={detailRow.guidelineGaps ?? null}
                 />
+              ) : activeTarget === 'questions' ? (
+                <QuestionsPanel questions={coveredQuestions} />
               ) : activeTarget === 'literature' ? (
                 <LiteratureCodePanel
                   specialtySlug={specialtySlug}
@@ -676,6 +891,8 @@ export function CodeDetailModal({
                   code={detailRow.code ?? ''}
                   active={activeTarget === 'literature'}
                 />
+              ) : activeTarget === 'curriculum' ? (
+                <CurriculumPanel meta={detailRow.curriculumMeta ?? null} />
               ) : (
                 <MetadataPanel
                   state={metadataState}
@@ -685,6 +902,58 @@ export function CodeDetailModal({
               )}
             </div>
           </Tabs>
+
+          {/* Curriculum approval footer: prev/next on the left, approve/reject
+              floated to the right. The selection is reflected by the header
+              badge, so the buttons keep a fixed appearance. */}
+          {showCurriculum ? (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                {navList && navList.length > 1 ? (
+                  <>
+                    <Button variant="tertiary" size="s" onClick={() => navTo(-1)}>
+                      ‹ Prev
+                    </Button>
+                    <Text size="s" color="secondary">
+                      {navIndex != null && navIndex >= 0
+                        ? `${navIndex + 1} of ${navList.length}`
+                        : `${navList.length}`}
+                    </Text>
+                    <Button variant="tertiary" size="s" onClick={() => navTo(1)}>
+                      Next ›
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+              {onDecideCurriculum ? (
+                <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    disabled={inFlight}
+                    style={approveButtonStyle(inFlight)}
+                    onClick={() => decideCurrent('approved')}
+                  >
+                    Approve (A)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={inFlight}
+                    style={rejectButtonStyle(inFlight)}
+                    onClick={() => decideCurrent('rejected')}
+                  >
+                    Reject (R)
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </Stack>
       </Modal.Stack>
       <MissingKeyModal
@@ -693,6 +962,52 @@ export function CodeDetailModal({
         onClose={() => setMissingKey(null)}
       />
     </Modal>
+  );
+}
+
+function CurriculumRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Inline space="s" vAlignItems="center">
+      <div style={{ minWidth: 150 }}>
+        <Text weight="bold">{label}</Text>
+      </div>
+      <Text>{value}</Text>
+    </Inline>
+  );
+}
+
+/** Read-only view of a curriculum block's time dimension (curriculum-mapping). */
+function CurriculumPanel({ meta }: { meta: CurriculumMeta | null }) {
+  if (!meta || Object.keys(meta).length === 0) {
+    return (
+      <Text size="s" color="tertiary">
+        No curriculum timing captured for this block.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="s">
+      <CurriculumRow label="Year" value={meta.year != null ? `Year ${meta.year}` : '—'} />
+      <CurriculumRow label="Phase" value={meta.phase ?? '—'} />
+      <CurriculumRow label="Timeframe" value={formatTimeframe(meta)} />
+      <CurriculumRow label="Duration / cadence" value={formatDurationOrCadence(meta)} />
+      <Stack space="xxs">
+        <Text weight="bold">Learning objective</Text>
+        <Text>{meta.learningObjective ?? '—'}</Text>
+      </Stack>
+      <Stack space="xxs">
+        <Text weight="bold">Subtopics</Text>
+        {meta.subtopics && meta.subtopics.length > 0 ? (
+          <Inline space="xxs" vAlignItems="center">
+            {meta.subtopics.map((s) => (
+              <Badge key={s} text={s} color="gray" />
+            ))}
+          </Inline>
+        ) : (
+          <Text>—</Text>
+        )}
+      </Stack>
+    </Stack>
   );
 }
 
@@ -806,6 +1121,49 @@ function GuidelineCoveragePanel({
         </Stack>
       ) : null}
       {notes || gaps ? <CoverageNotesPanel notes={notes} gaps={gaps} /> : null}
+    </Stack>
+  );
+}
+
+/**
+ * Read-only view of the AMBOSS Qbank questions matched to this code
+ * (curriculum-mapping question track). The stem (fetched via `get_questions`)
+ * is the title; below it the EID, the learning objective, and the
+ * competency / system / difficulty / study-objective metadata.
+ */
+function QuestionsPanel({ questions }: { questions: CoveredQuestion[] }) {
+  if (questions.length === 0) {
+    return (
+      <Text size="s" color="tertiary">
+        No matched questions.
+      </Text>
+    );
+  }
+  return (
+    <Stack space="s">
+      {questions.map((q) => (
+        <div
+          key={q.questionId ?? q.questionStem ?? q.learningObjective ?? 'question'}
+          style={{ borderLeft: '2px solid rgb(13, 148, 136)', paddingLeft: 10 }}
+        >
+          <Text weight="bold">
+            {q.questionStem ?? q.learningObjective ?? '(no stem)'}
+          </Text>
+          {q.learningObjective ? (
+            <Text size="s">Learning Objective: {q.learningObjective}</Text>
+          ) : null}
+          {q.questionId ? (
+            <Text size="xs" color="tertiary">
+              Question ID: {q.questionId}
+            </Text>
+          ) : null}
+          {q.difficulty ? (
+            <Inline space="xs" vAlignItems="center">
+              <Badge text={`Difficulty ${q.difficulty}/5`} color="yellow" />
+            </Inline>
+          ) : null}
+        </div>
+      ))}
     </Stack>
   );
 }

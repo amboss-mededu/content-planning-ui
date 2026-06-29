@@ -10,34 +10,42 @@ import {
   Stack,
   Text,
 } from '@amboss/design-system';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, useTransition } from 'react';
+import type { PipelineMode } from '@/lib/types';
 import type { CodeSource } from '@/lib/workflows/lib/sources';
+import { loadDefaultStudentMilestones } from '../[specialty]/actions';
 import { StartMilestonesModal } from '../[specialty]/pipeline/_components/start-milestones-modal';
 import { MilestonesEditor } from './milestones-editor';
 import { useRefreshWhileRunning } from './use-refresh-while-running';
 
 /**
- * Read-only Milestones tab — renders the ACGME-style output written at
+ * Read-only Milestones tab — renders the milestone output written at
  * extract-milestones approval time. The workflow stores whatever the model
- * returns (typically a JSON string of the shape
- * `{"ACGME_Milestones_<specialty>": {"Patient_Care": {"Level_1": [...], …}, …}}`),
- * so we try to parse + render it as a hierarchical tree and fall back to a
- * raw `<pre>` block when the string isn't valid JSON.
+ * returns, in one of two nested-JSON shapes the tree renderer handles:
+ *   - clinician (ACGME): `{"ACGME_Milestones_<x>": {"Patient_Care": {"Level_1": [...]}}}`
+ *   - curriculum (year-based): `{"Curriculum_Coverage_Levels_<x>": {"Year_1": [...], …}}`
+ * Non-JSON strings fall back to a raw `<pre>` block.
  */
 export function MilestonesView({
   milestones,
   specialtySlug,
   sources,
   extractionState,
+  pipelineMode,
 }: {
   milestones: string | null;
   specialtySlug: string;
   sources: CodeSource[];
   extractionState: { running: boolean; completed: boolean; runId: string | null };
+  pipelineMode?: PipelineMode;
 }) {
   useRefreshWhileRunning(extractionState.running);
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [loadingDefault, startLoadDefault] = useTransition();
   const running = extractionState.running;
+  const isCurriculum = pipelineMode === 'curriculum-mapping';
 
   if (!milestones) {
     return (
@@ -54,6 +62,21 @@ export function MilestonesView({
             completed={extractionState.completed}
             runId={extractionState.runId}
           />
+          {isCurriculum ? (
+            <Button
+              type="button"
+              variant="tertiary"
+              disabled={running || loadingDefault}
+              onClick={() =>
+                startLoadDefault(async () => {
+                  await loadDefaultStudentMilestones(specialtySlug);
+                  router.refresh();
+                })
+              }
+            >
+              {loadingDefault ? 'Loading…' : 'Load default coverage levels'}
+            </Button>
+          ) : null}
           {!editing ? (
             <Button
               type="button"
@@ -111,7 +134,7 @@ export function MilestonesView({
         <CardBox>
           <Stack space="m">
             <Text color="secondary">
-              Approved ACGME-style output from the latest extract-milestones run.
+              Approved milestones from the latest extract-milestones run.
             </Text>
             {tree ? <MilestonesTree tree={tree} /> : <RawText text={milestones} />}
           </Stack>
@@ -122,7 +145,9 @@ export function MilestonesView({
 }
 
 type Competency = {
-  name: string; // "Patient Care" / "Medical Knowledge"
+  name: string; // "Patient Care" / "Medical Knowledge" (ACGME) or an EPA name
+  // For ACGME, one entry per level (label = "Level 1" …); for the flat EPA
+  // shape, a single entry with an empty label (items rendered without a header).
   levels: Array<{ label: string; items: string[] }>;
 };
 
@@ -144,9 +169,13 @@ function tryParse(raw: string): unknown {
 }
 
 /**
- * Expected shape: `{ "ACGME_Milestones_<slug>": { "<Competency>": { "Level_1": [...], … } } }`.
- * Accepts any top-level key (`ACGME_Milestones_…`) and any competency key; Level
- * keys sort numerically so Level_10 (if it ever appears) lands after Level_2.
+ * Handles both milestone shapes:
+ *   - ACGME (3 levels): `{ "ACGME_Milestones_<x>": { "<Competency>": { "Level_1": [...], … } } }`
+ *   - Core EPAs (2 levels): `{ "Core_EPAs_<x>": { "EPA1_…": [...], … } }`
+ * Any top-level key is accepted. A group whose value is an array renders as a
+ * flat list (one level, no header); a group whose value is an object renders
+ * its array children as labelled levels, sorted numerically (so Level_10 lands
+ * after Level_2).
  */
 function extractTree(data: unknown): MilestonesTree | null {
   if (!data || typeof data !== 'object') return null;
@@ -157,24 +186,31 @@ function extractTree(data: unknown): MilestonesTree | null {
   if (!topKey) return null;
   const body = obj[topKey] as Record<string, unknown>;
   const competencies: Competency[] = [];
-  for (const [compKey, compVal] of Object.entries(body)) {
-    if (!compVal || typeof compVal !== 'object') continue;
+  for (const [groupKey, groupVal] of Object.entries(body)) {
+    if (!groupVal || typeof groupVal !== 'object') continue;
     const levels: Array<{ label: string; items: string[] }> = [];
-    for (const [levelKey, levelVal] of Object.entries(
-      compVal as Record<string, unknown>,
-    )) {
-      if (!Array.isArray(levelVal)) continue;
-      const items = levelVal.filter((x): x is string => typeof x === 'string');
-      levels.push({ label: prettify(levelKey), items });
+    if (Array.isArray(groupVal)) {
+      // Flat group (e.g. an EPA → list of descriptors): one unlabelled level.
+      const items = groupVal.filter((x): x is string => typeof x === 'string');
+      if (items.length > 0) levels.push({ label: '', items });
+    } else {
+      // Nested group (e.g. competency → Level_N → list).
+      for (const [levelKey, levelVal] of Object.entries(
+        groupVal as Record<string, unknown>,
+      )) {
+        if (!Array.isArray(levelVal)) continue;
+        const items = levelVal.filter((x): x is string => typeof x === 'string');
+        levels.push({ label: prettify(levelKey), items });
+      }
+      // Sort by the trailing number in `Level_N`.
+      levels.sort(
+        (a, b) =>
+          (parseInt(a.label.replace(/\D+/g, ''), 10) || 0) -
+          (parseInt(b.label.replace(/\D+/g, ''), 10) || 0),
+      );
     }
-    // Sort by the trailing number in `Level_N`
-    levels.sort(
-      (a, b) =>
-        (parseInt(a.label.replace(/\D+/g, ''), 10) || 0) -
-        (parseInt(b.label.replace(/\D+/g, ''), 10) || 0),
-    );
     if (levels.length > 0) {
-      competencies.push({ name: prettify(compKey), levels });
+      competencies.push({ name: prettify(groupKey), levels });
     }
   }
   if (competencies.length === 0) return null;
@@ -183,7 +219,7 @@ function extractTree(data: unknown): MilestonesTree | null {
 
 function prettify(key: string): string {
   return key
-    .replace(/^ACGME_Milestones_/i, '')
+    .replace(/^(?:ACGME_Milestones_|Core_EPAs_|Milestones_)/i, '')
     .replace(/_/g, ' ')
     .trim();
 }
@@ -196,8 +232,8 @@ function MilestonesTree({ tree }: { tree: MilestonesTree }) {
         <Stack key={c.name} space="s">
           <Text weight="bold">{c.name}</Text>
           {c.levels.map((l) => (
-            <div key={l.label} style={{ paddingLeft: 12 }}>
-              <Text weight="bold">{l.label}</Text>
+            <div key={l.label || c.name} style={{ paddingLeft: 12 }}>
+              {l.label ? <Text weight="bold">{l.label}</Text> : null}
               <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
                 {l.items.map((item) => (
                   <li key={item} style={{ margin: '2px 0', lineHeight: 1.5 }}>

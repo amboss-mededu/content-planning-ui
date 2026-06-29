@@ -15,6 +15,7 @@ import { getStageAsAdmin } from '@/lib/data/pipeline';
 import { setPipelineStageStateAsAdmin } from '@/lib/data/specialties';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { PipelineMode } from '@/lib/types';
 import {
   markStageAwaitingApproval,
   markStageCompleted,
@@ -24,7 +25,7 @@ import {
   writeApprovedMilestones,
 } from '../lib/db-writes';
 import { aggregateStageMetrics, logEvent } from '../lib/events';
-import { extractMilestonesForInputs } from '../lib/gemini';
+import { type ExtractionVariant, extractMilestonesForInputs } from '../lib/gemini';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import type { ContentInput } from '../lib/sources';
@@ -36,6 +37,9 @@ export type ExtractMilestonesInput = {
   milestonesInstructions?: string;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  /** Specialty run mode. `'curriculum-mapping'` swaps in the medical-student
+   *  (Core EPAs) milestone prompt instead of the ACGME clinician one. */
+  pipelineMode?: PipelineMode;
 };
 
 export async function extractMilestonesPhase1(
@@ -56,6 +60,8 @@ export async function extractMilestonesPhase1(
       message: `Run started for ${input.inputs.length} input(s)`,
     });
 
+    const variant: ExtractionVariant =
+      input.pipelineMode === 'curriculum-mapping' ? 'curriculum' : 'default';
     const milestones = await extractMilestonesForInputs({
       inputs: input.inputs,
       specialtySlug: input.specialtySlug,
@@ -64,6 +70,7 @@ export async function extractMilestonesPhase1(
       stage: 'extract_milestones',
       model: input.model,
       apiKeys: input.apiKeys,
+      variant,
     });
 
     const totals = await aggregateStageMetrics(input.runId, 'extract_milestones');

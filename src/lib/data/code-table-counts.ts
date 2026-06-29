@@ -2,6 +2,7 @@ import type {
   CoveredSection,
   GuidelineCoverage,
   NewArticle,
+  QuestionRef,
   SectionUpdate,
 } from '@/lib/pb/types';
 
@@ -10,12 +11,14 @@ export type CodeTableCountInput = {
   existingArticleUpdates?: SectionUpdate[] | string;
   newArticlesNeeded?: NewArticle[] | string;
   guidelinesWhereCoverageIs?: GuidelineCoverage[] | string;
+  questionsWhereCoverageIs?: QuestionRef[] | string;
   coverageArticleCount?: number;
   coverageSectionCount?: number;
   existingArticleUpdateCount?: number;
   newArticleSuggestionCount?: number;
   guidelineCount?: number;
   guidelineRecommendationCount?: number;
+  questionCount?: number;
 };
 
 export function deriveCodeTableCounts(input: CodeTableCountInput): {
@@ -25,11 +28,13 @@ export function deriveCodeTableCounts(input: CodeTableCountInput): {
   newArticleSuggestionCount: number;
   guidelineCount: number;
   guidelineRecommendationCount: number;
+  questionCount: number;
 } {
   const coverage = asArray<CoveredSection>(input.articlesWhereCoverageIs);
   const updates = asArray<SectionUpdate>(input.existingArticleUpdates);
   const newArticles = asArray<NewArticle>(input.newArticlesNeeded);
   const guidelines = asArray<GuidelineCoverage>(input.guidelinesWhereCoverageIs);
+  const questions = asArray<QuestionRef>(input.questionsWhereCoverageIs);
   return {
     coverageArticleCount: coverage?.length ?? input.coverageArticleCount ?? 0,
     coverageSectionCount: coverage
@@ -42,6 +47,7 @@ export function deriveCodeTableCounts(input: CodeTableCountInput): {
     guidelineRecommendationCount: guidelines
       ? countGuidelineRecommendations(guidelines)
       : (input.guidelineRecommendationCount ?? 0),
+    questionCount: questions?.length ?? input.questionCount ?? 0,
   };
 }
 

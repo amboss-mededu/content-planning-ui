@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { getSpecialty } from '@/lib/data/specialties';
 import { getTabsComplete } from '@/lib/data/tab-status';
@@ -12,6 +13,12 @@ export default async function SpecialtyLayout({
   params: Promise<{ specialty: string }>;
 }) {
   const { specialty: slug } = await params;
+  // Curriculum plans are managed under their own Content Planner subtab — send
+  // old /planning/<slug> links/bookmarks to the curriculum-plans surface.
+  const specialty = await getSpecialty(slug);
+  if (specialty?.pipelineMode === 'curriculum-mapping') {
+    redirect(`/planning/curriculum-plans/${slug}`);
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
       <RememberSpecialty slug={slug} />

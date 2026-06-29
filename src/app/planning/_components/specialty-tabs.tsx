@@ -76,6 +76,7 @@ export function SpecialtyTabs({
   slug,
   tabsComplete,
   hiddenSegments,
+  basePath = '/planning',
 }: {
   slug: string;
   tabsComplete: Record<string, boolean>;
@@ -83,10 +84,14 @@ export function SpecialtyTabs({
    *  consolidation / backlog / drift tabs). Filtering happens before step
    *  numbering, so the remaining numbered tabs renumber contiguously. */
   hiddenSegments?: Set<string>;
+  /** URL prefix the tabs route under (without trailing slash). Defaults to the
+   *  Content Planner `/planning`; curriculum plans pass
+   *  `/planning/curriculum-plans` so the same shell mounts there. */
+  basePath?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? '';
-  const base = `/planning/${slug}`;
+  const base = `${basePath}/${slug}`;
   const rest = pathname.startsWith(base)
     ? pathname.slice(base.length).replace(/^\//, '')
     : '';

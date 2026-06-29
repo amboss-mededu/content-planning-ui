@@ -10,8 +10,8 @@ import { PipelineModeControl } from './pipeline-mode-control';
  * Header "Settings" button → modal holding the per-specialty workflow controls
  * (workflow mode + mapping source). Both controls persist on change via their
  * own PATCH handlers, so the modal needs no save button — closing it just
- * dismisses. RAG-corpus pins the source to guidelines, so the source control is
- * disabled while that mode is selected.
+ * dismisses. RAG-corpus pins the source to guidelines and curriculum-mapping
+ * pins it to AMBOSS, so the source control is disabled while either is selected.
  */
 export function SpecialtySettingsButton({
   slug,
@@ -24,7 +24,7 @@ export function SpecialtySettingsButton({
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PipelineMode>(pipelineMode);
-  const sourceLocked = mode === 'rag-corpus';
+  const sourceLocked = mode === 'rag-corpus' || mode === 'curriculum-mapping';
   return (
     <>
       <Button
@@ -49,8 +49,9 @@ export function SpecialtySettingsButton({
               <Stack space="xs">
                 <Text weight="bold">Workflow</Text>
                 <Text size="s" color="secondary">
-                  Mapping only, RAG corpus expansion (mapping → literature search), or
-                  full content pipeline (mapping → articles).
+                  Mapping only, RAG corpus expansion (mapping → literature search),
+                  curriculum mapping (curriculum → AMBOSS coverage), or full content
+                  pipeline (mapping → articles).
                 </Text>
                 <PipelineModeControl
                   slug={slug}
@@ -61,9 +62,11 @@ export function SpecialtySettingsButton({
               <Stack space="xs">
                 <Text weight="bold">Mapping source</Text>
                 <Text size="s" color="secondary">
-                  {sourceLocked
+                  {mode === 'rag-corpus'
                     ? 'RAG corpus always assesses coverage against clinical guidelines.'
-                    : "Which content this specialty's coverage is assessed against — AMBOSS articles, clinical guidelines, or both."}
+                    : mode === 'curriculum-mapping'
+                      ? 'Curriculum mapping always assesses coverage against AMBOSS.'
+                      : "Which content this specialty's coverage is assessed against — AMBOSS articles, clinical guidelines, or both."}
                 </Text>
                 <MappingSourceControl
                   slug={slug}

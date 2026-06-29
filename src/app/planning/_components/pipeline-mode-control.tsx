@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { PipelineMode } from '@/lib/types';
 
-const MODES: readonly PipelineMode[] = ['full', 'mapping-only', 'rag-corpus'];
+const MODES: readonly PipelineMode[] = [
+  'full',
+  'mapping-only',
+  'rag-corpus',
+  'curriculum-mapping',
+];
 
 function coerce(value: string): PipelineMode {
   return (MODES as readonly string[]).includes(value) ? (value as PipelineMode) : 'full';
@@ -15,8 +20,9 @@ function coerce(value: string): PipelineMode {
  * Settings control for a specialty's workflow mode. PATCHes the specialty and
  * refreshes so the tabs / dashboard / mapping sheet re-render for the new mode.
  * Mirrors {@link MappingSourceControl}'s optimistic persistence. Switching to
- * `'rag-corpus'` pins the mapping source to guidelines server-side; `onChange`
- * lets the parent gate the source control in the same render.
+ * `'rag-corpus'` pins the mapping source to guidelines and `'curriculum-mapping'`
+ * pins it to AMBOSS, server-side; `onChange` lets the parent gate the source
+ * control in the same render.
  */
 export function PipelineModeControl({
   slug,
@@ -76,6 +82,12 @@ export function PipelineModeControl({
           name: 'pipelineMode',
           value: 'rag-corpus',
           label: 'RAG corpus',
+          disabled: saving,
+        },
+        {
+          name: 'pipelineMode',
+          value: 'curriculum-mapping',
+          label: 'Curriculum',
           disabled: saving,
         },
         { name: 'pipelineMode', value: 'full', label: 'Full pipeline', disabled: saving },

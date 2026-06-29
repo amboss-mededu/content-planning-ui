@@ -15,26 +15,42 @@
  */
 
 import { google } from '@ai-sdk/google';
-import { generateText, stepCountIs } from 'ai';
+import { generateText, type ModelMessage, stepCountIs } from 'ai';
 import { z } from 'zod';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { CurriculumMeta } from '@/lib/types';
+import { normalizeCurriculumMeta } from './curriculum-meta';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
+import { uploadUrlToGemini } from './gemini-files';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
 import { estimateCostUsd } from './pricing';
 import {
+  DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT,
+  DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_EXTRACT_SYSTEM_PROMPT,
   DEFAULT_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_MILESTONES_SYSTEM_PROMPT,
+  DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT,
 } from './prompts';
 import type { ContentInput } from './sources';
 
 export {
+  DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT,
+  DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_EXTRACT_SYSTEM_PROMPT,
   DEFAULT_IDENTIFY_SYSTEM_PROMPT,
   DEFAULT_MILESTONES_SYSTEM_PROMPT,
+  DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT,
 };
+
+/**
+ * Which prompt family the extraction steps use. `'curriculum'` swaps in the
+ * curriculum-mapping prompts (year→phase→block hierarchy, time dimension,
+ * student milestones); `'default'` keeps the clinical content-outline prompts.
+ */
+export type ExtractionVariant = 'default' | 'curriculum';
 
 // --- shared schemas ---------------------------------------------------------
 
@@ -45,6 +61,9 @@ export const ExtractedCodeSchema = z.object({
   description: z.string().optional(),
   source: z.string().optional(),
   metadata: z.unknown().optional(),
+  // Curriculum-mapping time dimension; normalized upstream by
+  // `normalizeCurriculumMeta` before it reaches here. Absent for other modes.
+  curriculumMeta: z.custom<CurriculumMeta>().optional(),
 });
 
 export type RawExtractedCode = z.infer<typeof ExtractedCodeSchema>;
@@ -56,6 +75,31 @@ const IdentifyModulesElementSchema = z.object({ category: z.string() });
 const ExtractCodesElementSchema = z.object({
   category: z.string(),
   description: z.string(),
+});
+
+// Curriculum-mapping extract element: codes carry a loosely-typed `curriculum`
+// timing object. Every timing field is permissive (the model may emit numbers
+// as strings) and `normalizeCurriculumMeta` does the real coercion. The whole
+// `curriculum` object is `.catch(undefined)` so a malformed timing blob falls
+// back to "no timing" rather than dropping the entire batch's array parse.
+const CurriculumExtractElementSchema = z.object({
+  category: z.string(),
+  description: z.string(),
+  curriculum: z
+    .object({
+      year: z.union([z.number(), z.string()]).nullish(),
+      phase: z.string().nullish(),
+      startMonth: z.union([z.string(), z.number()]).nullish(),
+      endMonth: z.union([z.string(), z.number()]).nullish(),
+      durationWeeks: z.union([z.number(), z.string()]).nullish(),
+      durationLabel: z.string().nullish(),
+      cadence: z.string().nullish(),
+      learningObjective: z.string().nullish(),
+      subtopics: z.array(z.string()).nullish(),
+    })
+    .passthrough()
+    .nullish()
+    .catch(undefined),
 });
 
 /**
@@ -181,6 +225,127 @@ function composePrompt(defaultPrompt: string, additional?: string): string {
   return `${defaultPrompt}\n\n## Additional instructions\n\n${extra}`;
 }
 
+// --- Local-file uploads (so url_context-unreachable PDFs still work) ---------
+//
+// Gemini's `url_context` tool fetches URLs from Google's own servers, so a PDF
+// served from a private/localhost address (e.g. an uploaded file at
+// `http://localhost:8090/api/files/...`) is invisible to the model — it returns
+// fabricated output. For those inputs we fetch the bytes server-side (we *can*
+// reach localhost) and attach them as a Gemini Files API `fileData` part
+// instead. Public URLs are left to `url_context`.
+
+/** A PDF already uploaded to the Gemini Files API, ready to attach as a part. */
+export type AttachedFile = { uri: string; mimeType: string };
+/** url → attached Gemini file, for inputs we had to upload. */
+export type InputFileMap = Map<string, AttachedFile>;
+
+/**
+ * True when Google's url_context could fetch this URL itself. Private hosts
+ * (localhost, link-local, RFC-1918 ranges) and non-http(s) URLs are not
+ * reachable and must be uploaded instead.
+ */
+function isPubliclyFetchableUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') {
+    return false;
+  }
+  if (h.endsWith('.local')) return false;
+  if (/^10\./.test(h)) return false;
+  if (/^192\.168\./.test(h)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+  return true;
+}
+
+/**
+ * Pre-upload every input whose URL Google can't fetch to the Gemini Files API,
+ * once per unique URL, returning a url → file map the identify/extract steps
+ * attach as file parts. Google-only and best-effort: a failed upload simply
+ * isn't in the map, so that input falls back to url_context (which then surfaces
+ * the real failure rather than silently fabricating).
+ */
+export async function uploadLocalInputsToGemini(input: {
+  inputs: ContentInput[];
+  model: ModelSpec;
+  apiKeys: ProviderApiKeys;
+  runId: string;
+  stage: StageName;
+}): Promise<InputFileMap> {
+  const map: InputFileMap = new Map();
+  if (input.model.provider !== 'google') return map;
+  const apiKey = input.apiKeys.google;
+  if (!apiKey) return map;
+
+  const localUrls = [...new Set(input.inputs.map((i) => i.url))].filter(
+    (u) => !isPubliclyFetchableUrl(u),
+  );
+  for (const url of localUrls) {
+    try {
+      const uploaded = await uploadUrlToGemini({
+        apiKey,
+        url,
+        displayName: decodeURIComponent(url.split('/').pop() || 'document.pdf'),
+      });
+      map.set(url, { uri: uploaded.uri, mimeType: uploaded.mimeType });
+      await logEvent({
+        runId: input.runId,
+        stage: input.stage,
+        level: 'info',
+        message: `Attached uploaded PDF directly to the model (url_context can't reach it): ${url}`,
+      });
+    } catch (e) {
+      await logEvent({
+        runId: input.runId,
+        stage: input.stage,
+        level: 'warn',
+        message: `Could not attach local PDF (${url}); falling back to url_context: ${errorMessage(e)}`,
+      });
+    }
+  }
+  return map;
+}
+
+/**
+ * The differing `generateText` args for the two source-delivery modes: an
+ * attached Gemini file part (with no url_context tool) vs. a URL handed to
+ * url_context. `system`, `providerOptions`, etc. are added by the caller.
+ */
+function sourceCallArgs(input: {
+  userMessage: string;
+  provider: string;
+  file?: AttachedFile;
+}):
+  | { prompt: string; tools: ReturnType<typeof googleUrlContextTool> }
+  | { messages: ModelMessage[] } {
+  if (input.file) {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: input.userMessage },
+            {
+              type: 'file' as const,
+              data: new URL(input.file.uri),
+              mediaType: input.file.mimeType,
+            },
+          ],
+        },
+      ],
+    };
+  }
+  return {
+    prompt: input.userMessage,
+    tools: googleUrlContextTool(input.provider),
+  };
+}
+
 // --- Phase 1: identify modules per PDF --------------------------------------
 
 export async function identifyModulesForUrl(input: {
@@ -192,24 +357,42 @@ export async function identifyModulesForUrl(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  variant?: ExtractionVariant;
+  /** When set, the PDF is attached directly instead of via url_context. */
+  file?: AttachedFile;
 }): Promise<{ category: string }[]> {
   log('pipeline').info('identifyModulesForUrl', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_IDENTIFY_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_CURRICULUM_IDENTIFY_SYSTEM_PROMPT
+      : DEFAULT_IDENTIFY_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = `
+  // Same user message for both variants — the curriculum behavior lives in the
+  // system prompt (the curriculum identify prompt is the default verbatim).
+  // When the PDF is attached directly, reference it instead of a URL.
+  const userMessage = (
+    input.file
+      ? `
+Please load and analyze the attached document.
+
+Identify the base hierarchies in the document and return exclusively an output in JSON array format, with no other text.
+`
+      : `
 Please load and analyze the content at the following URL(s):
 ${input.url}
 
 Identify the base hierarchies in the document and return exclusively an output in JSON array format, with no other text.
-`.trim();
+`
+  ).trim();
 
   const resolved = resolveModel(input.model, input.apiKeys);
 
@@ -232,8 +415,11 @@ Identify the base hierarchies in the document and return exclusively an output i
     const result = await generateText({
       model: resolved.sdkModel,
       system,
-      prompt: userMessage,
-      tools: googleUrlContextTool(input.model.provider),
+      ...sourceCallArgs({
+        userMessage,
+        provider: input.model.provider,
+        file: input.file,
+      }),
       stopWhen: stepCountIs(MAX_STEPS),
       providerOptions: resolved.providerOptions,
       temperature: 1,
@@ -296,20 +482,44 @@ export async function extractCodesForCategory(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
-}): Promise<{ category: string; description: string }[]> {
+  variant?: ExtractionVariant;
+  /** When set, the PDF is attached directly instead of via url_context. */
+  file?: AttachedFile;
+}): Promise<
+  { category: string; description: string; curriculumMeta?: CurriculumMeta }[]
+> {
   log('pipeline').info('extractCodesForCategory', {
     specialtySlug: input.specialtySlug,
     url: input.url,
     source: input.source,
     category: input.category,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_EXTRACT_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_CURRICULUM_EXTRACT_SYSTEM_PROMPT
+      : DEFAULT_EXTRACT_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
-  const userMessage = `
+  // Same user message for both variants — the curriculum metadata requirement
+  // lives in the system prompt (default extract prompt + curriculum addendum).
+  // When the PDF is attached directly, reference it instead of a URL.
+  const userMessage = (
+    input.file
+      ? `
+You are extracting medical items for the medical specialty: ${input.specialtySlug}.
+
+Please load and analyze the attached document.
+
+Extract only codes in the chunk and do not invent any codes or descriptions that are not explicitly mentioned:
+${input.category}
+
+Extract all medical items from the document and return exclusively an output in JSON format, with no other text.
+`
+      : `
 You are extracting medical items for the medical specialty: ${input.specialtySlug}.
 
 Please load and analyze the content at the following URL(s):
@@ -319,7 +529,8 @@ Extract only codes in the chunk and do not invent any codes or descriptions that
 ${input.category}
 
 Extract all medical items from the document and return exclusively an output in JSON format, with no other text.
-`.trim();
+`
+  ).trim();
 
   const resolved = resolveModel(input.model, input.apiKeys);
 
@@ -343,14 +554,27 @@ Extract all medical items from the document and return exclusively an output in 
     const result = await generateText({
       model: resolved.sdkModel,
       system,
-      prompt: userMessage,
-      tools: googleUrlContextTool(input.model.provider),
+      ...sourceCallArgs({
+        userMessage,
+        provider: input.model.provider,
+        file: input.file,
+      }),
       stopWhen: stepCountIs(MAX_STEPS),
       providerOptions: resolved.providerOptions,
       temperature: 1,
     });
 
-    const codes = parseJsonArray(result.text, ExtractCodesElementSchema);
+    const codes: {
+      category: string;
+      description: string;
+      curriculumMeta?: CurriculumMeta;
+    }[] = isCurriculum
+      ? parseJsonArray(result.text, CurriculumExtractElementSchema).map((el) => ({
+          category: el.category,
+          description: el.description,
+          curriculumMeta: normalizeCurriculumMeta(el.curriculum),
+        }))
+      : parseJsonArray(result.text, ExtractCodesElementSchema);
     const durationMs = Date.now() - started;
     const usage = {
       inputTokens: result.usage?.inputTokens,
@@ -413,19 +637,33 @@ export async function extractMilestonesForInputs(input: {
   stage: StageName;
   model: ModelSpec;
   apiKeys: ProviderApiKeys;
+  variant?: ExtractionVariant;
 }): Promise<string> {
   log('pipeline').info('extractMilestonesForInputs', {
     specialtySlug: input.specialtySlug,
     inputs: input.inputs.length,
     model: input.model.model,
+    variant: input.variant,
   });
 
+  const isCurriculum = input.variant === 'curriculum';
   const system = composePrompt(
-    DEFAULT_MILESTONES_SYSTEM_PROMPT,
+    isCurriculum
+      ? DEFAULT_STUDENT_MILESTONES_SYSTEM_PROMPT
+      : DEFAULT_MILESTONES_SYSTEM_PROMPT,
     input.additionalInstructions,
   );
   const urlList = input.inputs.map((i) => `- ${i.url} (source: ${i.source})`).join('\n');
-  const userMessage = `
+  const userMessage = isCurriculum
+    ? `
+You are extracting medical-student milestones for the curriculum: ${input.specialtySlug}.
+
+Please load and analyze the content at the following URL(s):
+${urlList}
+
+Extract the medical-student entrustable professional activities / competencies from the document and return them as the structured nested JSON described.
+`.trim()
+    : `
 You are extracting milestones for the medical specialty: ${input.specialtySlug}.
 
 Please load and analyze the content at the following URL(s):

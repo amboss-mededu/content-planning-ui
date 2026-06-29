@@ -18,6 +18,7 @@ import type {
   GuidelineCoverage,
   MappingInFlightRecord,
   NewArticle,
+  QuestionRef,
   SectionUpdate,
 } from '@/lib/pb/types';
 import { filterCodesByConsolidationCategories } from '@/lib/workflows/consolidation/buckets';
@@ -53,9 +54,12 @@ export type CodeTableRow = Pick<
   | 'overallCoverageLevel'
   | 'overallDepthOfCoverage'
   | 'mappingSourceUsed'
+  | 'questionCount'
   | 'litSearchStatus'
   | 'litSearchSourceCount'
   | 'litSearchedAt'
+  | 'curriculumMeta'
+  | 'curriculumReviewStatus'
 >;
 
 type CodeTableRowSource = CodeTableRow &
@@ -65,6 +69,7 @@ type CodeTableRowSource = CodeTableRow &
     | 'existingArticleUpdates'
     | 'newArticlesNeeded'
     | 'guidelinesWhereCoverageIs'
+    | 'questionsWhereCoverageIs'
   >;
 
 const CODE_TABLE_FIELDS = [
@@ -97,13 +102,17 @@ const CODE_TABLE_FIELDS = [
   'overallCoverageLevel',
   'overallDepthOfCoverage',
   'mappingSourceUsed',
+  'questionCount',
   'litSearchStatus',
   'litSearchSourceCount',
   'litSearchedAt',
+  'curriculumMeta',
+  'curriculumReviewStatus',
   'articlesWhereCoverageIs',
   'existingArticleUpdates',
   'newArticlesNeeded',
   'guidelinesWhereCoverageIs',
+  'questionsWhereCoverageIs',
 ].join(',');
 
 function buildMappingCounts(mapping: {
@@ -111,6 +120,7 @@ function buildMappingCounts(mapping: {
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   guidelinesWhereCoverageIs?: GuidelineCoverage[];
+  questionsWhereCoverageIs?: QuestionRef[];
 }): {
   coverageArticleCount: number;
   coverageSectionCount: number;
@@ -118,6 +128,7 @@ function buildMappingCounts(mapping: {
   newArticleSuggestionCount: number;
   guidelineCount: number;
   guidelineRecommendationCount: number;
+  questionCount: number;
 } {
   return deriveCodeTableCounts(mapping);
 }
@@ -128,6 +139,7 @@ function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
     existingArticleUpdates,
     newArticlesNeeded,
     guidelinesWhereCoverageIs,
+    questionsWhereCoverageIs,
     ...rest
   } = row;
   return {
@@ -137,12 +149,14 @@ function toCodeTableRow(row: CodeTableRowSource): CodeTableRow {
       existingArticleUpdates,
       newArticlesNeeded,
       guidelinesWhereCoverageIs,
+      questionsWhereCoverageIs,
       coverageArticleCount: row.coverageArticleCount,
       coverageSectionCount: row.coverageSectionCount,
       existingArticleUpdateCount: row.existingArticleUpdateCount,
       newArticleSuggestionCount: row.newArticleSuggestionCount,
       guidelineCount: row.guidelineCount,
       guidelineRecommendationCount: row.guidelineRecommendationCount,
+      questionCount: row.questionCount,
     }),
   };
 }
@@ -267,6 +281,9 @@ export type UnmappedCodePickerRow = {
   code: string;
   description: string | null;
   category: string | null;
+  /** Curriculum approval gate state — lets the picker offer an "approved only"
+   *  scope. Empty string for plans without an approval step. */
+  reviewStatus: '' | 'approved' | 'rejected';
 };
 
 export async function listUnmappedCodesForPicker(
@@ -282,6 +299,7 @@ export async function listUnmappedCodesForPicker(
     code: r.code,
     description: r.description ?? null,
     category: r.category ?? null,
+    reviewStatus: r.curriculumReviewStatus ?? '',
   }));
 }
 
@@ -311,6 +329,9 @@ export type PatchCodeFields = {
   articlesWhereCoverageIs?: CoveredSection[];
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
+  /** Curriculum-mapping approval gate. The reviewer email + timestamp are
+   *  stamped server-side in `patchCode`, never client-supplied. */
+  curriculumReviewStatus?: '' | 'approved' | 'rejected';
 };
 
 // Editing any of these on an unmapped row implies a (manual) mapping verdict —
@@ -366,6 +387,7 @@ export async function patchCode(
   slug: string,
   code: string,
   fields: PatchCodeFields,
+  reviewerEmail?: string | null,
 ): Promise<CodeTableRow> {
   const pb = await userClient();
   const row = await pb
@@ -375,6 +397,19 @@ export async function patchCode(
     );
 
   const update: Record<string, unknown> = { ...fields };
+
+  // Curriculum approval gate: stamp reviewer + time when a decision is made,
+  // and clear both when the decision is reset to pending (''). This never
+  // touches mappedAt — approval is not a mapping verdict.
+  if (fields.curriculumReviewStatus !== undefined) {
+    if (fields.curriculumReviewStatus === '') {
+      update.curriculumReviewedAt = 0;
+      update.curriculumReviewedBy = '';
+    } else {
+      update.curriculumReviewedAt = Date.now();
+      update.curriculumReviewedBy = reviewerEmail ?? '';
+    }
+  }
 
   const touchesArrays =
     fields.articlesWhereCoverageIs !== undefined ||
@@ -389,11 +424,13 @@ export async function patchCode(
         existingArticleUpdates:
           fields.existingArticleUpdates ?? row.existingArticleUpdates,
         newArticlesNeeded: fields.newArticlesNeeded ?? row.newArticlesNeeded,
-        // The patch route never edits guideline coverage — preserve the
-        // stored guideline counts rather than letting them fall back to 0.
+        // The patch route never edits guideline coverage or questions —
+        // preserve their stored counts rather than letting them fall back to 0.
         guidelinesWhereCoverageIs: row.guidelinesWhereCoverageIs,
         guidelineCount: row.guidelineCount,
         guidelineRecommendationCount: row.guidelineRecommendationCount,
+        questionsWhereCoverageIs: row.questionsWhereCoverageIs,
+        questionCount: row.questionCount,
       }),
     );
   }
@@ -428,16 +465,122 @@ export async function patchCode(
 }
 
 /**
+ * Curriculum approval gate — admin write for a single code. Mirrors the
+ * stamping in `patchCode` (set reviewer + time on a decision, clear both when
+ * reset to pending ''). Never touches `mappedAt` — approval is not a mapping
+ * verdict. No-ops on a missing code so callers can fire in bulk safely.
+ */
+export async function setCurriculumReviewAsAdmin(
+  slug: string,
+  code: string,
+  status: '' | 'approved' | 'rejected',
+  reviewerEmail?: string | null,
+): Promise<void> {
+  const pb = await createAdminClient();
+  let row: CodeRecord;
+  try {
+    row = await pb
+      .collection<CodeRecord>('codes')
+      .getFirstListItem(
+        pb.filter('specialtySlug = {:slug} && code = {:code}', { slug, code }),
+      );
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return;
+    throw e;
+  }
+  await pb.collection('codes').update(row.id, {
+    curriculumReviewStatus: status,
+    curriculumReviewedAt: status === '' ? 0 : Date.now(),
+    curriculumReviewedBy: status === '' ? '' : (reviewerEmail ?? ''),
+  });
+}
+
+/**
+ * Bulk variant of {@link setCurriculumReviewAsAdmin} — applies one decision to
+ * every listed code (the category manager's "Approve all / Reject all").
+ * Operates on explicit code strings rather than a category filter so it's
+ * immune to category whitespace/quoting and the "Uncategorized" bucket.
+ * Returns the count actually updated.
+ */
+export async function setCurriculumReviewForCodesAsAdmin(
+  slug: string,
+  codes: string[],
+  status: '' | 'approved' | 'rejected',
+  reviewerEmail?: string | null,
+): Promise<number> {
+  const pb = await createAdminClient();
+  const at = status === '' ? 0 : Date.now();
+  const by = status === '' ? '' : (reviewerEmail ?? '');
+  let updated = 0;
+  for (const code of codes) {
+    try {
+      const row = await pb
+        .collection<CodeRecord>('codes')
+        .getFirstListItem(
+          pb.filter('specialtySlug = {:slug} && code = {:code}', { slug, code }),
+        );
+      await pb.collection('codes').update(row.id, {
+        curriculumReviewStatus: status,
+        curriculumReviewedAt: at,
+        curriculumReviewedBy: by,
+      });
+      updated += 1;
+    } catch (e) {
+      if (e instanceof ClientResponseError && e.status === 404) continue;
+      throw e;
+    }
+  }
+  return updated;
+}
+
+/**
+ * Codes that are currently mapped AND curriculum-approved, narrowed by the
+ * same `{ categories?, codes? }` filter the map-codes route uses. The remap
+ * path clears these (`clearMappingAsAdmin`) so the workflow re-maps exactly the
+ * approved, already-mapped slice. Unapproved codes are left alone.
+ */
+export async function listApprovedMappedCodesAsAdmin(
+  slug: string,
+  filter?: { categories?: string[]; codes?: string[] } | null,
+): Promise<string[]> {
+  const pb = await createAdminClient();
+  const rows = await pb.collection<CodeRecord>('codes').getFullList({
+    filter: `specialtySlug = "${slug}" && mappedAt > 0 && curriculumReviewStatus = "approved"`,
+  });
+  const catSet = filter?.categories?.length ? new Set(filter.categories) : null;
+  const codeSet = filter?.codes?.length ? new Set(filter.codes) : null;
+  return rows
+    .filter((r) => {
+      if (!catSet && !codeSet) return true;
+      if (catSet && r.category && catSet.has(r.category)) return true;
+      if (codeSet?.has(r.code)) return true;
+      return false;
+    })
+    .map((r) => r.code);
+}
+
+/**
  * Workflow-side lean read of unmapped codes, optionally narrowed by
  * category or by exact code.
  */
 export async function listUnmappedCodesAsAdmin(
   slug: string,
-  filter?: { categories?: string[]; codes?: string[] } | null,
-): Promise<Array<{ code: string; category: string | null; description: string | null }>> {
+  filter?: { categories?: string[]; codes?: string[]; approvedOnly?: boolean } | null,
+): Promise<
+  Array<{
+    code: string;
+    category: string | null;
+    description: string | null;
+    objective: string | null;
+  }>
+> {
   const pb = await createAdminClient();
+  // Curriculum-mapping gate: only human-approved curriculum items are mapped.
+  const approvedClause = filter?.approvedOnly
+    ? ' && curriculumReviewStatus = "approved"'
+    : '';
   const rows = await pb.collection<CodeRecord>('codes').getFullList({
-    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)`,
+    filter: `specialtySlug = "${slug}" && (mappedAt = 0 || mappedAt = null)${approvedClause}`,
   });
   const catSet = filter?.categories?.length ? new Set(filter.categories) : null;
   const codeSet = filter?.codes?.length ? new Set(filter.codes) : null;
@@ -452,6 +595,9 @@ export async function listUnmappedCodesAsAdmin(
       code: r.code,
       category: r.category ?? null,
       description: r.description ?? null,
+      // The curriculum learning objective travels with the code so the mapping
+      // agents can factor it into the AMBOSS/question coverage assessment.
+      objective: r.curriculumMeta?.learningObjective ?? null,
     }));
 }
 
@@ -605,6 +751,10 @@ export type WriteCodeMappingArgs = {
   overallCoverageLevel?: string;
   overallDepthOfCoverage?: number;
   mappingSourceUsed?: string;
+  // --- Question mapping track (curriculum-mapping) -------------------------
+  /** Matched AMBOSS Qbank questions; `questionCount` is derived by
+   *  `buildMappingCounts` on write. */
+  questionsWhereCoverageIs?: QuestionRef[];
   /** Stamp the suggestion-processed marker (combined full-mode write). Left
    *  unset by coverage-only writes so the backfill stage can find the code. */
   suggestionsGeneratedAt?: number;
@@ -719,6 +869,9 @@ export async function clearAllMappingsForSpecialtyAsAdmin(slug: string): Promise
       overallCoverageLevel: null,
       overallDepthOfCoverage: null,
       mappingSourceUsed: null,
+      // Question mapping track (curriculum-mapping).
+      questionsWhereCoverageIs: null,
+      questionCount: 0,
       // Unmapping removes the code from consolidation input — stale its bucket.
       consolidationInputChangedAt: now,
     });
@@ -799,6 +952,9 @@ export async function clearMappingAsAdmin(slug: string, code: string): Promise<v
     overallCoverageLevel: null,
     overallDepthOfCoverage: null,
     mappingSourceUsed: null,
+    // Question mapping track (curriculum-mapping).
+    questionsWhereCoverageIs: null,
+    questionCount: 0,
     // Unmapping removes the code from consolidation input — stale its bucket.
     consolidationInputChangedAt: Date.now(),
   });
@@ -933,5 +1089,19 @@ export async function clearInFlightForRunAsAdmin(runId: string): Promise<void> {
   const rows = await pb
     .collection<MappingInFlightRecord>('mappingsInFlight')
     .getFullList({ filter: `runId = "${runId}"` });
+  await Promise.all(rows.map((r) => pb.collection('mappingsInFlight').delete(r.id)));
+}
+
+/**
+ * Clear every in-flight marker for a specialty, regardless of run. Backs the
+ * universal "Cancel mapping" button: deleting the markers makes the sheet's
+ * "Mapping…" pulses disappear at once instead of waiting for the cancelled
+ * workflow to reach its next status poll and clear them itself.
+ */
+export async function clearInFlightForSpecialtyAsAdmin(slug: string): Promise<void> {
+  const pb = await createAdminClient();
+  const rows = await pb
+    .collection<MappingInFlightRecord>('mappingsInFlight')
+    .getFullList({ filter: `specialtySlug = "${slug}"` });
   await Promise.all(rows.map((r) => pb.collection('mappingsInFlight').delete(r.id)));
 }

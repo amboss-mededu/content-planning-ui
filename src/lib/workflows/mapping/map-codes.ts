@@ -13,7 +13,7 @@
 
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
-import type { MappingSource } from '@/lib/types';
+import type { MappingSource, PipelineMode } from '@/lib/types';
 import { type MappingOutput, mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -31,6 +31,7 @@ import {
 import { aggregateStageMetrics, logEvent } from '../lib/events';
 import { mapGuidelinesForCode, synthesizeOverallCoverage } from '../lib/guidelines-mcp';
 import type { ModelSpec, ProviderApiKeys } from '../lib/llm';
+import { mapQuestionsForCode } from '../lib/questions-mcp';
 import { revalidateSpecialtyCache } from '../lib/revalidate';
 import { chunk } from '../lib/util';
 
@@ -117,6 +118,9 @@ async function mapAndWriteOne(input: {
   code: string;
   description: string;
   category: string;
+  /** Curriculum learning objective, included in the mapping prompt context
+   *  (curriculum-mapping only; empty string otherwise). */
+  objective: string;
   specialty: string;
   contentBase: string;
   language: string;
@@ -125,20 +129,32 @@ async function mapAndWriteOne(input: {
   checkAgainstLibrary: boolean;
   includeSuggestions: boolean;
   mappingSource: MappingSource;
+  pipelineMode: PipelineMode;
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
-}): Promise<{ code: string; attempts: number; model: string; unresolved: boolean }> {
+}): Promise<{
+  code: string;
+  attempts: number;
+  model: string;
+  escalated: boolean;
+  unresolved: boolean;
+}> {
   const source = input.mappingSource;
   const runAmboss = source === 'amboss' || source === 'both';
   const runGuidelines = source === 'guidelines' || source === 'both';
+  // Curriculum-mapping additionally maps each code against AMBOSS Qbank
+  // questions, as a SEPARATE agent call (its own MCP `search_questions` tool),
+  // run concurrently with the article/guideline agents. Other modes skip it.
+  const runQuestions = input.pipelineMode === 'curriculum-mapping';
 
-  const [ambossResult, guidelineResult] = await Promise.all([
+  const [ambossResult, guidelineResult, questionsResult] = await Promise.all([
     runAmboss
       ? mapAndValidateCode({
           code: input.code,
           description: input.description,
           category: input.category,
+          objective: input.objective,
           specialty: input.specialty,
           contentBase: input.contentBase,
           language: input.language,
@@ -146,6 +162,7 @@ async function mapAndWriteOne(input: {
           additionalInstructions: input.additionalInstructions,
           checkAgainstLibrary: input.checkAgainstLibrary,
           includeSuggestions: input.includeSuggestions,
+          pipelineMode: input.pipelineMode,
           runId: input.runId,
           stage: 'map_codes',
           primaryModel: input.primaryModel,
@@ -158,6 +175,25 @@ async function mapAndWriteOne(input: {
           code: input.code,
           description: input.description,
           category: input.category,
+          objective: input.objective,
+          specialty: input.specialty,
+          contentBase: input.contentBase,
+          language: input.language,
+          milestones: input.milestones,
+          additionalInstructions: input.additionalInstructions,
+          runId: input.runId,
+          stage: 'map_codes',
+          primaryModel: input.primaryModel,
+          backupModel: input.backupModel,
+          apiKeys: input.apiKeys,
+        })
+      : Promise.resolve(null),
+    runQuestions
+      ? mapQuestionsForCode({
+          code: input.code,
+          description: input.description,
+          category: input.category,
+          objective: input.objective,
           specialty: input.specialty,
           contentBase: input.contentBase,
           language: input.language,
@@ -205,6 +241,7 @@ async function mapAndWriteOne(input: {
     runAmboss ? input.includeSuggestions : false,
     {
       guideline: guidelineResult?.mapping.coverage ?? null,
+      questions: questionsResult?.mapping.coverage ?? null,
       overall,
       mappingSourceUsed: source,
     },
@@ -212,9 +249,22 @@ async function mapAndWriteOne(input: {
 
   return {
     code: input.code,
-    attempts: (ambossResult?.attempts ?? 0) + (guidelineResult?.attempts ?? 0),
-    model: ambossResult?.model ?? guidelineResult?.model ?? 'none',
-    unresolved: Boolean(ambossResult?.unresolved) || Boolean(guidelineResult?.unresolved),
+    attempts:
+      (ambossResult?.attempts ?? 0) +
+      (guidelineResult?.attempts ?? 0) +
+      (questionsResult?.attempts ?? 0),
+    model:
+      ambossResult?.model ?? guidelineResult?.model ?? questionsResult?.model ?? 'none',
+    // Any agent that fell through to the (claude) backup counts as an
+    // escalation — including the questions agent, whose model the single
+    // `model` field above never surfaces for curriculum runs.
+    escalated: [ambossResult, guidelineResult, questionsResult].some((r) =>
+      Boolean(r?.model.startsWith('claude-')),
+    ),
+    unresolved:
+      Boolean(ambossResult?.unresolved) ||
+      Boolean(guidelineResult?.unresolved) ||
+      Boolean(questionsResult?.unresolved),
   };
 }
 
@@ -228,13 +278,21 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
   try {
     await markStageRunning(input.runId, 'map_codes');
 
-    const [spec, unmapped] = await Promise.all([
-      loadSpecialtyForMapping(input.specialtySlug),
-      listUnmappedCodes(input.specialtySlug, input.filter ?? null),
-    ]);
+    // Load the specialty first: curriculum-mapping gates mapping on the
+    // per-item human approval, so we must know the mode before listing codes.
+    const spec = await loadSpecialtyForMapping(input.specialtySlug);
+    const approvedOnly = spec.pipelineMode === 'curriculum-mapping';
+    const unmapped = await listUnmappedCodes(
+      input.specialtySlug,
+      input.filter ?? null,
+      approvedOnly,
+    );
     const contentBase = input.contentBase || deriveContentBase(spec.region);
     const language = input.language || deriveLanguage(spec.language);
-    const milestones = spec.milestones ?? '';
+    // Milestones are disabled for curriculum-mapping: the curriculum prompt
+    // bakes the year-based 0–5 scale inline, so the extracted rubric must not
+    // feed scoring. Other modes keep milestones as their scoring rubric.
+    const milestones = approvedOnly ? '' : (spec.milestones ?? '');
     // Source is a per-specialty setting — read from the specialty, not the run.
     const mappingSource = spec.mappingSource;
 
@@ -277,6 +335,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               code: c.code,
               description: c.description ?? '',
               category: c.category ?? '',
+              objective: c.objective ?? '',
               specialty: input.specialtySlug,
               contentBase,
               language,
@@ -285,6 +344,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               checkAgainstLibrary: input.checkAgainstLibrary,
               includeSuggestions: input.includeSuggestions ?? true,
               mappingSource,
+              pipelineMode: spec.pipelineMode,
               primaryModel: input.primaryModel,
               backupModel: input.backupModel,
               apiKeys: input.apiKeys,
@@ -292,13 +352,22 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
           ),
         );
         for (const r of results) {
-          if (r.model.startsWith('claude-')) escalations += 1;
+          if (r.escalated) escalations += 1;
           if (r.unresolved) unresolvedCount += 1;
         }
         // Surface incremental progress so polling clients can pick it up
         // before the workflow reaches the final stage write.
         await revalidateSpecialtyCache(input.specialtySlug);
       }
+
+      // Final cancellation check before the terminal writes. The per-batch and
+      // per-code polls can't catch a cancel that lands after the last code
+      // resolves but before completion is written — and markStageCompleted /
+      // updatePipelineRunStatus are plain updates with no status precondition,
+      // so without this a late cancel would be silently resurrected to
+      // 'completed'. Bail into the RunCancelledError path instead.
+      const finalStatus = await getPipelineRunStatus(input.runId);
+      if (shouldAbort(finalStatus)) throw new RunCancelledError(finalStatus);
 
       const totals = await aggregateStageMetrics(input.runId, 'map_codes');
       // Stash the run-level summary on the stage row alongside completion so

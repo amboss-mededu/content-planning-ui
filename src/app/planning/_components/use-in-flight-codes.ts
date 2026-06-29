@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const POLL_MS = 3000;
+const POLL_MS = 2000;
 
 /**
  * Live set of codes currently being (re)mapped, by polling the cookie-authed

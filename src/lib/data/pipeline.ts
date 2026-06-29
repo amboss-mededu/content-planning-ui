@@ -16,6 +16,7 @@ import type {
 } from '@/lib/pb/types';
 import { derivePhase, type Phase } from '@/lib/phase';
 import { isStageRunningFresh } from '@/lib/pipeline-stage-state';
+import type { CurriculumMeta } from '@/lib/types';
 import type { StageName } from '@/lib/workflows/lib/db-writes';
 
 // Pipeline runs/stages/events live in PocketBase. RSC pages and route
@@ -768,6 +769,7 @@ export type ExtractedCodeInput = {
   description?: string;
   source?: string;
   metadata?: unknown;
+  curriculumMeta?: CurriculumMeta;
 };
 
 export async function writeExtractedCodesAsAdmin(args: {
@@ -809,6 +811,7 @@ export type ExtractedCodeRow = {
   description?: string;
   source?: string;
   metadata?: unknown;
+  curriculumMeta?: CurriculumMeta;
 };
 
 export async function listExtractedCodesForRunAsAdmin(
@@ -828,6 +831,7 @@ export async function listExtractedCodesForRunAsAdmin(
     description: r.description,
     source: r.source,
     metadata: r.metadata,
+    curriculumMeta: r.curriculumMeta,
   }));
 }
 
@@ -866,6 +870,55 @@ async function cancelStaleRuns(
       updatedAt: now,
     });
     cancelled += 1;
+  }
+  return { cancelled };
+}
+
+/**
+ * Cancel the active mapping for a specialty — backs the universal "Cancel
+ * mapping" button (Mapping sheet badge, Map-codes modal, code-detail modal).
+ * Scoped to the mapping stages (`map_codes` / `map_suggestions`): for every
+ * non-terminal run that owns a *running* mapping stage, mark the run cancelled
+ * (so the fire-and-forget workflow aborts on its next status poll) and return
+ * that stage's row to `pending` so the pipeline card is re-runnable. A
+ * concurrent extraction (or any non-mapping run) is left untouched.
+ *
+ * Non-destructive: coverage/mappings already written to `codes` survive — only
+ * the stage's event log is cleared, mirroring `/api/workflows/cancel`. Clearing
+ * the in-flight markers is the route's job (see clearInFlightForSpecialtyAsAdmin)
+ * so the sheet's pulses clear immediately.
+ */
+const MAPPING_STAGES = new Set<string>(['map_codes', 'map_suggestions']);
+
+export async function cancelMappingForSpecialty(
+  slug: string,
+): Promise<{ cancelled: number }> {
+  const pb = await userClient();
+  const runs = await pb.collection<PipelineRunRecord>('pipelineRuns').getFullList({
+    filter: pb.filter('specialtySlug = {:slug}', { slug }),
+  });
+  const now = Date.now();
+  let cancelled = 0;
+  for (const r of runs) {
+    if (TERMINAL_STATUSES.has(r.status)) continue;
+    const stages = await pb
+      .collection<PipelineStageRecord>('pipelineStages')
+      .getFullList({ filter: pb.filter('runId = {:runId}', { runId: r.id }) });
+    const runningMappingStages = stages.filter(
+      (st) => MAPPING_STAGES.has(st.stage) && st.status === 'running',
+    );
+    // Only cancel runs that are actually mapping right now.
+    if (runningMappingStages.length === 0) continue;
+    await pb.collection('pipelineRuns').update(r.id, {
+      status: 'cancelled',
+      finishedAt: now,
+      updatedAt: now,
+    });
+    cancelled += 1;
+    for (const st of runningMappingStages) {
+      // st.stage is filtered to a known mapping stage above.
+      await resetStageInternal(pb, r.id, st.stage as StageName);
+    }
   }
   return { cancelled };
 }

@@ -6,6 +6,10 @@
 // Record envelope: every PocketBase record has these system fields in
 // addition to the user-defined ones.
 
+// `curriculumMeta` is stored verbatim as JSON (no storage/UI transform), so
+// both the record and the UI `Code` share the one `CurriculumMeta` shape.
+import type { CurriculumMeta } from '@/lib/types';
+
 export interface PbRecord {
   id: string;
   created: string; // ISO 8601
@@ -67,6 +71,18 @@ export interface SpecialtyRecord extends PbRecord {
   pipelineStageStates?: Record<string, string>;
 }
 
+// --- Collection: studyPlans ------------------------------------------------
+
+export interface StudyPlanRecord extends PbRecord {
+  /** Owning curriculum plan slug (same value as `codes.specialtySlug`). */
+  specialtySlug: string;
+  name: string;
+  /** Curriculum `category` strings this plan includes. */
+  selectedCategories?: string[];
+  /** Creator email (best effort; '' when unknown). */
+  createdBy?: string;
+}
+
 // --- Collection: codes -----------------------------------------------------
 
 export interface CodeRecord extends PbRecord {
@@ -100,6 +116,12 @@ export interface CodeRecord extends PbRecord {
   existingArticleUpdates?: SectionUpdate[];
   newArticlesNeeded?: NewArticle[];
   improvements?: string;
+  // --- Question mapping track (curriculum-mapping) -------------------------
+  // AMBOSS Qbank questions that cover this code, found by a separate agent via
+  // the `search_questions` MCP tool. `questionCount` is the derived length for
+  // the table column (the JSON blob is fetched only for the detail modal).
+  questionsWhereCoverageIs?: QuestionRef[];
+  questionCount?: number;
   // --- Guideline coverage track (source includes 'guidelines') -------------
   // Mirror of the AMBOSS coverage columns above, populated by the guidelines
   // mapping agent. Null/unset for amboss-only rows.
@@ -130,6 +152,15 @@ export interface CodeRecord extends PbRecord {
   litSearchSourceCount?: number;
   /** ms since epoch — when the last successful lit search completed. */
   litSearchedAt?: number;
+  // --- Curriculum-mapping time dimension -----------------------------------
+  // Populated only for `curriculum-mapping` specialties; the curriculum
+  // extractor records year/phase/timing for each block. JSON field.
+  curriculumMeta?: CurriculumMeta;
+  // --- Curriculum-mapping human-in-the-loop approval gate -------------------
+  // Curriculum-mapping only; only `'approved'` codes are mapped. '' = pending.
+  curriculumReviewStatus?: '' | 'approved' | 'rejected';
+  curriculumReviewedAt?: number;
+  curriculumReviewedBy?: string;
 }
 
 // --- Collection: codeCategories --------------------------------------------
@@ -702,6 +733,8 @@ export interface ExtractedCodeRecord extends PbRecord {
   description?: string;
   source?: string;
   metadata?: unknown;
+  /** Curriculum block timing — staged here, promoted to `codes.curriculumMeta`. */
+  curriculumMeta?: CurriculumMeta;
   createdAt: number;
 }
 
@@ -800,6 +833,19 @@ export interface CoveredSection {
   articleTitle?: string;
   articleId?: string;
   sections?: SectionRef[];
+}
+
+/** One AMBOSS Qbank question matched to a code by the question-mapping agent.
+ *  `questionId` is the AMBOSS EID; the rest is the `search_questions` metadata
+ *  (all optional — the agent fills what the tool returns). */
+export interface QuestionRef {
+  questionId?: string;
+  questionStem?: string;
+  studyObjectives?: string[];
+  learningObjective?: string;
+  competency?: string;
+  system?: string;
+  difficulty?: string;
 }
 
 /** A single recommendation/statement within a guideline the agent cited. */

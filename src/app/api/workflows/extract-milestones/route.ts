@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
       milestonesInstructions: milestonesInstructions ?? undefined,
       model,
       apiKeys,
+      pipelineMode: spec.pipelineMode,
     }).catch((e) => {
       log('extract-milestones').error('Phase1 unhandled rejection', e);
     }),

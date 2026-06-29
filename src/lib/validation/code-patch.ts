@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { COVERAGE_LEVELS } from '@/lib/types';
+import { ALL_COVERAGE_LEVELS } from '@/lib/types';
 
 const SectionRefSchema = z
   .object({
@@ -68,7 +68,7 @@ export const CodePatchBody = z
     category: z.string().optional(),
     consolidationCategory: z.string().optional(),
     isInAMBOSS: z.boolean().optional(),
-    coverageLevel: z.enum(COVERAGE_LEVELS).optional(),
+    coverageLevel: z.enum(ALL_COVERAGE_LEVELS).optional(),
     depthOfCoverage: z.number().min(0).optional(),
     notes: z.string().optional(),
     gaps: z.string().optional(),
@@ -76,6 +76,9 @@ export const CodePatchBody = z
     articlesWhereCoverageIs: z.array(CoveredSectionSchema).optional(),
     existingArticleUpdates: z.array(SectionUpdateSchema).optional(),
     newArticlesNeeded: z.array(NewArticleSchema).optional(),
+    // Curriculum-mapping approval gate. `curriculumReviewedAt`/`...By` are
+    // server-stamped in `patchCode`, never accepted from the client.
+    curriculumReviewStatus: z.enum(['', 'approved', 'rejected']).optional(),
   })
   .strict();
 

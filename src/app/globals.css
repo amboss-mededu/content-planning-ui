@@ -146,6 +146,15 @@ body {
   line-height: 1.4;
 }
 
+/* Curriculum analytics dashboard — make the in-page Tabs sub-nav labels a touch
+   larger than the DS default (14px). Scoped to role="tab" so the tab-panel
+   content is untouched; !important to win over DS's emotion-injected styles,
+   the same approach as the .ds-data-table block above. */
+.curriculum-tabs [role="tab"],
+.curriculum-tabs [role="tab"] * {
+  font-size: 16px !important;
+}
+
 @keyframes skeleton-shimmer {
   0% {
     background-position: 200% 0;

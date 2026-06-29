@@ -34,7 +34,11 @@ import {
   updateMilestonesAsAdmin,
 } from '@/lib/data/specialties';
 import { log } from '@/lib/log';
-import type { GuidelineCoverage, GuidelineRecommendationRef } from '@/lib/pb/types';
+import type {
+  GuidelineCoverage,
+  GuidelineRecommendationRef,
+  QuestionRef,
+} from '@/lib/pb/types';
 import type { MappingSource, PipelineMode } from '@/lib/types';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
@@ -43,6 +47,7 @@ import {
   coerceScore,
   type GuidelineCoverageBlock,
 } from './guidelines-mcp';
+import type { QuestionCoverageBlock } from './questions-mcp';
 
 export type PipelineRunStatus =
   | 'running'
@@ -223,6 +228,7 @@ export async function writeExtractedCodes(
     description: c.description,
     source: c.source,
     metadata: c.metadata,
+    curriculumMeta: c.curriculumMeta,
   }));
   // PocketBase has no per-call write limits the way Convex does, but inserts
   // run sequentially per row. Chunking keeps progress visible in logs.
@@ -240,8 +246,8 @@ export async function writeExtractedCodes(
 /**
  * Promote approved rows from the extracted_codes staging table into the
  * canonical `codes` collection. Mapping-specific fields stay unset so the
- * mapping stage can fill them in. metadata is dropped — the codes schema
- * doesn't carry it.
+ * mapping stage can fill them in. `metadata` is dropped — the codes schema
+ * doesn't carry it — but `curriculumMeta` (the time dimension) is promoted.
  */
 export async function promoteExtractedCodesToCodes(
   runId: string,
@@ -256,6 +262,7 @@ export async function promoteExtractedCodesToCodes(
     consolidationCategory: s.consolidationCategory ?? undefined,
     description: s.description ?? undefined,
     source: s.source ?? undefined,
+    curriculumMeta: s.curriculumMeta ?? undefined,
   }));
   const chunkSize = 25;
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -288,7 +295,8 @@ export type SpecialtyMappingContext = {
   language: string | null;
   milestones: string | null;
   /** Which content source(s) to map against. Empty/unknown → 'amboss'.
-   *  Forced to 'guidelines' for rag-corpus specialties. */
+   *  Forced to 'guidelines' for rag-corpus and to 'amboss' for
+   *  curriculum-mapping specialties. */
   mappingSource: MappingSource;
   /** The specialty's run mode. */
   pipelineMode: PipelineMode;
@@ -307,12 +315,19 @@ export async function loadSpecialtyForMapping(
   const src = row?.mappingSource;
   const storedSource: MappingSource =
     src === 'guidelines' || src === 'both' ? src : 'amboss';
+  // Modes that pin the mapping source override whatever is stored:
+  // rag-corpus → guidelines, curriculum-mapping → amboss.
+  const mappingSource: MappingSource =
+    pipelineMode === 'rag-corpus'
+      ? 'guidelines'
+      : pipelineMode === 'curriculum-mapping'
+        ? 'amboss'
+        : storedSource;
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,
     milestones: row?.milestones ?? null,
-    // rag-corpus always maps against guidelines.
-    mappingSource: pipelineMode === 'rag-corpus' ? 'guidelines' : storedSource,
+    mappingSource,
     pipelineMode,
   };
 }
@@ -323,6 +338,8 @@ export type UnmappedCodeRow = {
   code: string;
   category: string | null;
   description: string | null;
+  /** Curriculum learning objective (curriculum-mapping); null otherwise. */
+  objective: string | null;
 };
 
 /** Optional filter applied to the unmapped-codes query. */
@@ -337,11 +354,14 @@ export type MappingFilter = {
 export async function listUnmappedCodes(
   specialtySlug: string,
   filter?: MappingFilter | null,
+  /** Curriculum-mapping gate: restrict to human-approved codes only. */
+  approvedOnly = false,
 ): Promise<UnmappedCodeRow[]> {
-  log('pipeline').info('listUnmappedCodes', { specialtySlug, filter });
+  log('pipeline').info('listUnmappedCodes', { specialtySlug, filter, approvedOnly });
   const rows = await listUnmappedCodesAsAdmin(specialtySlug, {
     categories: filter?.categories?.filter((s) => typeof s === 'string' && s.length > 0),
     codes: filter?.codes?.filter((s) => typeof s === 'string' && s.length > 0),
+    approvedOnly,
   });
   log('pipeline').info('listUnmappedCodes →', rows.length);
   return rows;
@@ -424,6 +444,27 @@ function normaliseGuidelineCoverage(
   });
 }
 
+/**
+ * Coerce a question agent's `coveredQuestions` block into the stored
+ * `QuestionRef[]` shape. Drops entries with no EID (a question without an id is
+ * not actionable). Mirrors {@link normaliseGuidelineCoverage}.
+ */
+function normaliseQuestions(
+  blocks: QuestionCoverageBlock['coveredQuestions'],
+): QuestionRef[] {
+  return (blocks ?? [])
+    .filter((q) => Boolean(q.questionId))
+    .map((q) => ({
+      questionId: q.questionId,
+      questionStem: q.questionStem,
+      studyObjectives: q.studyObjectives,
+      learningObjective: q.learningObjective,
+      competency: q.competency,
+      system: q.system,
+      difficulty: q.difficulty,
+    }));
+}
+
 export async function writeCodeMapping(
   specialtySlug: string,
   code: string,
@@ -432,6 +473,8 @@ export async function writeCodeMapping(
   extra?: {
     /** Guideline coverage block (source includes 'guidelines'). */
     guideline?: GuidelineCoverageBlock | null;
+    /** Question coverage block (curriculum-mapping question track). */
+    questions?: QuestionCoverageBlock | null;
     /** Synthesized/active overall verdict. */
     overall?: CoverageVerdict | null;
     /** Which source(s) produced this row. Defaults to 'amboss'. */
@@ -446,6 +489,7 @@ export async function writeCodeMapping(
   });
   const coverageScore = coerceScore(mapping.coverage.coverageScore);
   const g = extra?.guideline ?? null;
+  const q = extra?.questions ?? null;
   await writeCodeMappingAsAdmin({
     slug: specialtySlug,
     code,
@@ -466,6 +510,8 @@ export async function writeCodeMapping(
     guidelinesWhereCoverageIs: g
       ? normaliseGuidelineCoverage(g.coveredGuidelines)
       : undefined,
+    // --- Question mapping track (curriculum-mapping) -----------------------
+    questionsWhereCoverageIs: q ? normaliseQuestions(q.coveredQuestions) : undefined,
     // --- Overall coverage track + provenance -------------------------------
     overallCoverageLevel: extra?.overall?.coverageLevel || undefined,
     overallDepthOfCoverage: extra?.overall?.coverageScore,

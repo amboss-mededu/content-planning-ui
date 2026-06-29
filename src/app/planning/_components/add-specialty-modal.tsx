@@ -38,9 +38,16 @@ export function AddSpecialtyModal({
 
   const displayedSlug = slugTouched ? slug : autoSlug(name);
   const canSubmit = !submitting && name.trim().length > 0 && displayedSlug.length > 0;
-  // RAG-corpus always maps against guidelines; lock the source select to it.
-  const sourceLocked = pipelineMode === 'rag-corpus';
-  const effectiveSource: MappingSource = sourceLocked ? 'guidelines' : mappingSource;
+  // Some modes pin the mapping source: RAG-corpus → guidelines,
+  // curriculum-mapping → AMBOSS. Lock the source select accordingly.
+  const sourceLocked =
+    pipelineMode === 'rag-corpus' || pipelineMode === 'curriculum-mapping';
+  const effectiveSource: MappingSource =
+    pipelineMode === 'rag-corpus'
+      ? 'guidelines'
+      : pipelineMode === 'curriculum-mapping'
+        ? 'amboss'
+        : mappingSource;
 
   const reset = () => {
     setName('');
@@ -158,6 +165,10 @@ export function AddSpecialtyModal({
                 value: 'rag-corpus',
                 label: 'RAG corpus expansion (mapping → literature search)',
               },
+              {
+                value: 'curriculum-mapping',
+                label: 'Curriculum mapping (curriculum → AMBOSS coverage)',
+              },
               { value: 'full', label: 'Full content pipeline (mapping → articles)' },
             ]}
           />
@@ -165,9 +176,11 @@ export function AddSpecialtyModal({
             name="specialty-mappingSource"
             label="Mapping source"
             labelHint={
-              sourceLocked
+              pipelineMode === 'rag-corpus'
                 ? 'RAG corpus always assesses coverage against guidelines.'
-                : 'Which content to assess coverage against.'
+                : pipelineMode === 'curriculum-mapping'
+                  ? 'Curriculum mapping always assesses coverage against AMBOSS.'
+                  : 'Which content to assess coverage against.'
             }
             value={effectiveSource}
             disabled={sourceLocked}

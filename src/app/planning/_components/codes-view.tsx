@@ -3,15 +3,22 @@
 import { Badge, Inline, Stack, Text } from '@amboss/design-system';
 import { useCallback, useMemo, useState } from 'react';
 import type { CodeTableRow, PatchCodeFields } from '@/lib/data/codes';
+import { coverageScoreOf } from '@/lib/data/coverage-stats-compute';
 import {
   COVERAGE_LEVELS,
   type Code,
+  CURRICULUM_COVERAGE_LEVELS,
   type MappingSource,
   type PipelineMode,
 } from '@/lib/types';
+import {
+  formatDurationOrCadence,
+  formatTimeframe,
+} from '@/lib/workflows/lib/curriculum-meta';
 import { CancelCodeLitSearchButton } from './cancel-code-lit-search-button';
 import { CodeDetailModal, type DetailTarget } from './code-detail-modal';
 import { type Column, DataTable, type EditableConfig } from './data-table';
+import { DecisionButtons, rowTint } from './decision-buttons';
 import { LitSearchProgressBadge } from './lit-search-progress-badge';
 import { RunCodeLitSearchRowButton } from './run-code-lit-search-row-button';
 import { CoverageBadge, DepthBadge } from './suggestion-badge';
@@ -21,7 +28,7 @@ import type { CodeLitSearchSnapshot } from './use-running-code-lit-search';
 const LIT_SEARCH_THRESHOLD = 3;
 
 function coverageScore(r: Code): number {
-  return r.overallDepthOfCoverage ?? r.depthOfCoverage ?? 0;
+  return coverageScoreOf(r);
 }
 
 /** Edit one code via the parent's PATCH handler (table merges the returned
@@ -46,6 +53,7 @@ function countCoveredSections(items: unknown): number {
 
 // Coverage level has a natural rank (none < student < ... < specialist) that
 // we use for sort ordering, which lines up with how the model scores depth.
+// Includes the curriculum-mapping year scale (disjoint keys) so both modes sort.
 const COVERAGE_RANK: Record<string, number> = {
   none: 0,
   student: 1,
@@ -53,6 +61,12 @@ const COVERAGE_RANK: Record<string, number> = {
   'advanced-resident': 3,
   attending: 4,
   specialist: 5,
+  // curriculum (year-based) scale
+  'year-1': 1,
+  'year-2': 2,
+  'year-3': 3,
+  'year-4': 4,
+  'residency-ready': 5,
 };
 
 // Predefined filter choices for boolean / categorical columns. Numeric columns
@@ -116,6 +130,7 @@ export function CodesView({
 }) {
   const inFlightSet = useMemo(() => new Set(inFlightCodes), [inFlightCodes]);
   const ragCorpus = pipelineMode === 'rag-corpus';
+  const curriculum = pipelineMode === 'curriculum-mapping';
 
   const [selected, setSelected] = useState<{
     row: Code;
@@ -127,7 +142,20 @@ export function CodesView({
     [],
   );
 
+  // The sorted+filtered row set, captured from the table so the detail modal
+  // can step through items in the order the editor is looking at them
+  // (curriculum approval review). Seeded with the full list before first emit.
+  const [visibleRows, setVisibleRows] = useState<Code[]>(codes);
+
   const editingEnabled = canEdit && !!onPatchRow;
+
+  // Curriculum approval decision: reuse the per-code PATCH path (the field is
+  // part of PatchCodeFields). Maps a cleared decision (null) to '' (pending).
+  const decideCurriculum = useCallback(
+    (code: string, status: '' | 'approved' | 'rejected') =>
+      onPatchRow?.(code, { curriculumReviewStatus: status }),
+    [onPatchRow],
+  );
 
   // Source is edited via a select fed by the distinct source values already
   // present in the table (new sources come in through the file import flow).
@@ -150,6 +178,19 @@ export function CodesView({
     // column renders as plain display and the row-level click opens the modal.
     const edit = (cfg: EditableConfig<Code>): EditableConfig<Code> | undefined =>
       editingEnabled ? cfg : undefined;
+
+    // The AMBOSS coverage column scores on the year scale for curriculum
+    // specialties and the clinician scale otherwise. (Guideline/Overall columns
+    // never appear in curriculum mode, so they keep the clinician options.)
+    const ambossCoverageFilterOptions = curriculum
+      ? CURRICULUM_COVERAGE_LEVELS.map((v) => ({ value: v, label: v }))
+      : COVERAGE_FILTER_OPTIONS;
+    const ambossCoverageEditOptions = curriculum
+      ? [
+          { value: '', label: '—' },
+          ...CURRICULUM_COVERAGE_LEVELS.map((v) => ({ value: v, label: v })),
+        ]
+      : COVERAGE_EDIT_OPTIONS;
 
     const cols: Column<Code>[] = [
       {
@@ -182,6 +223,10 @@ export function CodesView({
         align: 'center',
         accessor: (r) => r.code ?? null,
         type: 'string',
+        // Curriculum plans key off the human-readable description, not the
+        // ontology code — hide the Code column by default (re-enable from the
+        // Columns menu). Other modes keep it visible.
+        defaultHidden: curriculum,
         group: 'metadata',
       },
       {
@@ -288,8 +333,9 @@ export function CodesView({
       {
         key: 'coverage',
         label: 'Coverage',
-        description:
-          'Audience level this code is covered for in AMBOSS (none → student → … → specialist)',
+        description: curriculum
+          ? 'Year level this topic is covered for in AMBOSS (none → year-1 → … → residency-ready)'
+          : 'Audience level this code is covered for in AMBOSS (none → student → … → specialist)',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
           if (!r.coverageLevel) return <EmptyChip />;
@@ -297,7 +343,7 @@ export function CodesView({
         },
         editable: edit({
           kind: 'select',
-          options: COVERAGE_EDIT_OPTIONS,
+          options: ambossCoverageEditOptions,
           getValue: (r) => r.coverageLevel ?? '',
           onSave: (r, next) =>
             next === '' ? Promise.resolve() : save(r, { coverageLevel: next }),
@@ -310,10 +356,10 @@ export function CodesView({
           r.coverageLevel ? (COVERAGE_RANK[r.coverageLevel] ?? -1) : null,
         type: 'number',
         // For the filter dropdown we want the level *string* (not the rank),
-        // shown as a fixed list of the six levels rather than unique values.
+        // shown as a fixed list of levels rather than unique values.
         filterable: true,
         filterValue: (r) => r.coverageLevel ?? undefined,
-        filterOptions: COVERAGE_FILTER_OPTIONS,
+        filterOptions: ambossCoverageFilterOptions,
         group: 'coverage',
       },
       {
@@ -628,6 +674,171 @@ export function CodesView({
       },
     ];
 
+    // --- Curriculum time-dimension columns (curriculum-mapping only) -------
+    const curriculumCols: Column<Code>[] = [
+      {
+        key: 'curriculumYear',
+        label: 'Year',
+        description: 'Academic/program year this curriculum block belongs to',
+        width: 70,
+        align: 'center',
+        render: (r) =>
+          r.curriculumMeta?.year != null ? (
+            <Badge text={`Y${r.curriculumMeta.year}`} color="blue" />
+          ) : (
+            <EmptyChip />
+          ),
+        accessor: (r) => r.curriculumMeta?.year ?? null,
+        type: 'number',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumPhase',
+        label: 'Phase',
+        description: 'Curriculum phase (e.g. Pre-Clerkship, Clerkship, Post-Clerkship)',
+        width: 150,
+        render: (r) => <span>{r.curriculumMeta?.phase ?? '—'}</span>,
+        accessor: (r) => r.curriculumMeta?.phase ?? null,
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumTimeframe',
+        label: 'Timeframe',
+        description:
+          'Calendar months this block spans, when the curriculum places it on a timeline',
+        width: 120,
+        align: 'center',
+        render: (r) => <span>{formatTimeframe(r.curriculumMeta)}</span>,
+        accessor: (r) => formatTimeframe(r.curriculumMeta),
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumDuration',
+        label: 'Duration / cadence',
+        description:
+          'Block duration (weeks) or, for longitudinal threads, how often they recur',
+        width: 140,
+        align: 'center',
+        render: (r) => <span>{formatDurationOrCadence(r.curriculumMeta)}</span>,
+        accessor: (r) => formatDurationOrCadence(r.curriculumMeta),
+        type: 'string',
+        filterable: true,
+        group: 'curriculum',
+      },
+      {
+        key: 'curriculumSubtopics',
+        label: 'Subtopics',
+        description: 'Number of subtopics extracted for this curriculum item',
+        width: 100,
+        align: 'center',
+        render: (r) => {
+          const n = r.curriculumMeta?.subtopics?.length ?? 0;
+          if (n === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={`${n} subtopic${n === 1 ? '' : 's'}`}
+              tone="overall"
+              onClick={() => onOpenDetail(r, 'curriculum')}
+            />
+          );
+        },
+        accessor: (r) => r.curriculumMeta?.subtopics?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        group: 'curriculum',
+      },
+    ];
+
+    // --- Curriculum learning-objective column (curriculum-mapping only) ----
+    // Sits right after Description in the metadata group. The objective comes
+    // from the source PDF when stated, else is model-generated from the
+    // category + description during extraction; it's also fed into the mapping
+    // prompt. Read-only display (also shown in the detail modal).
+    const objectiveCol: Column<Code> = {
+      key: 'curriculumObjective',
+      label: 'Objective',
+      description:
+        'Learning objective for this curriculum item (from the source, or model-generated from the category + description)',
+      width: 280,
+      verticalAlign: 'top',
+      render: (r) => (
+        <span style={{ textAlign: 'left' }}>
+          {r.curriculumMeta?.learningObjective ?? '—'}
+        </span>
+      ),
+      accessor: (r) => r.curriculumMeta?.learningObjective ?? null,
+      type: 'string',
+      filterable: true,
+      filterMode: 'contains',
+      group: 'metadata',
+    };
+
+    // --- Curriculum approval gate column (curriculum-mapping only) ---------
+    // First/left column: Approve (✓) / Reject (✗). Only approved items are
+    // mapped. Buttons stop propagation so they don't open the detail modal.
+    const reviewCol: Column<Code> = {
+      key: 'curriculumReview',
+      label: 'Review',
+      description:
+        'Approve or reject this curriculum item. Only approved items are mapped.',
+      width: 90,
+      align: 'center',
+      render: (r) => (
+        <DecisionButtons
+          status={r.curriculumReviewStatus || undefined}
+          disabled={!editingEnabled || inFlightSet.has(r.code)}
+          approveTitle="Approve (A)"
+          rejectTitle="Reject (R)"
+          onDecide={(next) => {
+            void decideCurriculum(r.code, next ?? '');
+          }}
+        />
+      ),
+      accessor: (r) => r.curriculumReviewStatus || 'pending',
+      type: 'string',
+      filterable: true,
+      filterOptions: [
+        { value: 'pending', label: 'Pending' },
+        { value: 'approved', label: 'Approved' },
+        { value: 'rejected', label: 'Rejected' },
+      ],
+      group: 'review',
+    };
+
+    // --- Question mapping column (curriculum-mapping only) -----------------
+    const questionCols: Column<Code>[] = [
+      {
+        key: 'questionsWhereCoverageIs',
+        label: 'Questions',
+        description: 'AMBOSS Qbank questions (EIDs) that cover this code',
+        width: 160,
+        align: 'center',
+        render: (r) => {
+          if (inFlightSet.has(r.code)) return <MappingPulse />;
+          const n = r.questionCount ?? r.questionsWhereCoverageIs?.length ?? 0;
+          if (n === 0) return <EmptyChip />;
+          return (
+            <ChipButton
+              label={`${n} question${n === 1 ? '' : 's'}`}
+              tone="questions"
+              onClick={() => onOpenDetail(r, 'questions')}
+            />
+          );
+        },
+        accessor: (r) => r.questionCount ?? r.questionsWhereCoverageIs?.length ?? 0,
+        type: 'number',
+        filterable: true,
+        // Sits under the existing "AMBOSS coverage" group banner (beside
+        // Articles) rather than getting its own header.
+        group: 'coverage',
+      },
+    ];
+
     // Compose the column set by source. AMBOSS coverage columns are dropped
     // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
     // guideline + overall columns slot in between AMBOSS coverage and the
@@ -656,16 +867,49 @@ export function CodesView({
     // RAG-corpus appends the Literature corpus column (source is pinned to
     // guidelines, so AMBOSS columns are already absent via the branch above).
     if (ragCorpus) result = [...result, ...litCols];
+
+    // Curriculum-mapping reshapes the table around the curriculum item rather
+    // than the ontology code. The Source column is dropped (a curriculum has one
+    // logical source). Scoring isn't useful for curricula, so the AMBOSS
+    // Coverage level + Score columns are dropped; the Articles column stays and
+    // a Questions column is added beside it (codes map to AMBOSS articles AND
+    // questions). Metadata is reordered to: Code (hidden) → Category →
+    // Description → Objective → Subtopics (Subtopics folded out of the
+    // time-dimension group and made the final metadata column). The remaining
+    // time-dimension columns (Year/Phase/Timeframe/Duration) follow.
+    if (curriculum) {
+      const find = (k: string) => result.find((c) => c.key === k);
+      // Subtopics moves into the metadata group as its final column.
+      const subtopicsBase = curriculumCols.find((c) => c.key === 'curriculumSubtopics');
+      const subtopicsCol = subtopicsBase
+        ? { ...subtopicsBase, group: 'metadata' as const }
+        : undefined;
+      const metaCols = [
+        find('code'),
+        find('category'),
+        find('description'),
+        objectiveCol,
+        subtopicsCol,
+      ].filter((c): c is Column<Code> => !!c);
+      // Time-dimension columns, minus Subtopics (now in metadata).
+      const timeCols = curriculumCols.filter((c) => c.key !== 'curriculumSubtopics');
+      const rest = result.filter(
+        (c) => c.group !== 'metadata' && c.key !== 'coverage' && c.key !== 'depth',
+      );
+      result = [reviewCol, ...metaCols, ...timeCols, ...rest, ...questionCols];
+    }
     return result;
   }, [
     onOpenDetail,
     inFlightSet,
     editingEnabled,
     onPatchRow,
+    decideCurriculum,
     sourceOptions,
     mappingOnly,
     mappingSource,
     ragCorpus,
+    curriculum,
     litSearch,
     specialtySlug,
   ]);
@@ -685,9 +929,18 @@ export function CodesView({
         getRowKey={(r, i) => `${r.code}-${i}`}
         emptyText="No codes match the current filters."
         leadingNote={getLoadStatusText(loadState, totalCount, codes.length)}
+        // Curriculum approval: tint rows green (approved) / red (rejected).
+        getRowStyle={curriculum ? (r) => rowTint(r.curriculumReviewStatus) : undefined}
+        // Feed the detail modal the sorted+filtered order so curriculum review
+        // can step through items as they appear in the table.
+        onVisibleRowsChange={curriculum ? setVisibleRows : undefined}
         // The whole row opens the detail modal; editable cells and the
-        // deep-link chips stop propagation so they don't trip this.
-        onRowClick={(r) => onOpenDetail(r, 'coverage-articles')}
+        // deep-link chips stop propagation so they don't trip this. In
+        // curriculum mode, land on the Curriculum tab so the subtopics (and
+        // objective/timing) show on open without an extra click.
+        onRowClick={(r) =>
+          onOpenDetail(r, curriculum ? 'curriculum' : 'coverage-articles')
+        }
         // For rag-corpus, also surface how many mapped topics sit below the
         // lit-search coverage threshold, folded into the row-count parenthetical.
         countAddendum={(filtered) => {
@@ -716,6 +969,20 @@ export function CodesView({
         inFlight={selected ? inFlightSet.has(selected.row.code) : false}
         onPatchRow={onPatchRow}
         onClose={() => setSelected(null)}
+        // Curriculum approval: step through items + approve/reject in the modal.
+        navList={curriculum ? visibleRows : undefined}
+        navIndex={
+          curriculum && selected
+            ? visibleRows.findIndex((r) => r.code === selected.row.code)
+            : undefined
+        }
+        onNavigate={
+          curriculum
+            ? (r) =>
+                setSelected((prev) => (prev ? { row: r, target: prev.target } : prev))
+            : undefined
+        }
+        onDecideCurriculum={curriculum ? decideCurriculum : undefined}
       />
     </Stack>
   );
@@ -734,13 +1001,18 @@ function getLoadStatusText(
 }
 
 const CHIP_TONES: Record<
-  'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions',
+  'coverage' | 'questions' | 'guideline' | 'overall' | 'literature' | 'suggestions',
   { bg: string; fg: string; border: string }
 > = {
   coverage: {
     bg: 'rgba(34, 139, 80, 0.10)',
     fg: 'rgb(15, 95, 50)',
     border: 'rgb(34, 139, 80)',
+  },
+  questions: {
+    bg: 'rgba(13, 148, 136, 0.12)',
+    fg: 'rgb(15, 90, 85)',
+    border: 'rgb(13, 148, 136)',
   },
   guideline: {
     bg: 'rgba(56, 132, 168, 0.12)',
@@ -770,7 +1042,7 @@ function ChipButton({
   onClick,
 }: {
   label: string;
-  tone: 'coverage' | 'guideline' | 'overall' | 'literature' | 'suggestions';
+  tone: 'coverage' | 'questions' | 'guideline' | 'overall' | 'literature' | 'suggestions';
   onClick: () => void;
 }) {
   const c = CHIP_TONES[tone];

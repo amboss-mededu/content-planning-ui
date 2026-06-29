@@ -12,6 +12,7 @@ import {
   type PipelineStageStates,
 } from '@/lib/pipeline-stage-state';
 import type { MappingSource, PipelineMode, Specialty } from '@/lib/types';
+import { DEFAULT_CURRICULUM_MILESTONES } from '@/lib/workflows/lib/student-milestones';
 
 // Specialties live in PocketBase. RSC pages call these helpers and get a
 // snapshot via the cookie-authed PB client. Client components that need
@@ -58,7 +59,13 @@ export function resolvePipelineMode(
   row: Pick<SpecialtyRecord, 'pipelineMode' | 'mappingOnly'> | null | undefined,
 ): PipelineMode {
   const v = row?.pipelineMode;
-  if (v === 'full' || v === 'mapping-only' || v === 'rag-corpus') return v;
+  if (
+    v === 'full' ||
+    v === 'mapping-only' ||
+    v === 'rag-corpus' ||
+    v === 'curriculum-mapping'
+  )
+    return v;
   return row?.mappingOnly ? 'mapping-only' : 'full';
 }
 
@@ -138,11 +145,24 @@ export async function createSpecialty(args: {
   const collection = pb.collection<SpecialtyRecord>('specialties');
   try {
     const existing = await collection.getFirstListItem(`slug = "${args.slug}"`);
+    // Upsert path: never touch milestones here, so re-saving settings can't
+    // clobber an edited/extracted milestone set. The create branch below seeds.
     const updated = await collection.update(existing.id, args);
     return updated.id;
   } catch (e) {
     if (e instanceof ClientResponseError && e.status === 404) {
-      const created = await collection.create(args);
+      // New curriculum-mapping specialties start with the built-in year-based
+      // coverage-level rubric so they're mappable immediately; student-tuned
+      // extraction or a manual upload can override it later.
+      const payload =
+        args.pipelineMode === 'curriculum-mapping'
+          ? {
+              ...args,
+              milestones: DEFAULT_CURRICULUM_MILESTONES,
+              lastSeededAt: Date.now(),
+            }
+          : args;
+      const created = await collection.create(payload);
       return created.id;
     }
     throw e;
@@ -227,12 +247,12 @@ export async function setSpecialtyMappingSource(
 }
 
 /**
- * Set the per-specialty workflow mode ('full' | 'mapping-only' | 'rag-corpus').
- * Source of truth for what the pipeline runs; the data layer derives
- * `mappingOnly` from it. Existing coverage/suggestion data is left untouched —
- * the mode only changes future runs and which surfaces are visible. Callers
- * that switch to 'rag-corpus' should also pin the mapping source to
- * 'guidelines' (the API route does this).
+ * Set the per-specialty workflow mode ('full' | 'mapping-only' | 'rag-corpus'
+ * | 'curriculum-mapping'). Source of truth for what the pipeline runs; the data
+ * layer derives `mappingOnly` from it. Existing coverage/suggestion data is left
+ * untouched — the mode only changes future runs and which surfaces are visible.
+ * Callers that switch to 'rag-corpus' should also pin the mapping source to
+ * 'guidelines', and 'curriculum-mapping' to 'amboss' (the API route does this).
  */
 export async function setSpecialtyPipelineMode(
   slug: string,

@@ -94,6 +94,7 @@ import {
 } from '@/lib/pipeline-stage-state';
 import { isSafeUrl } from '@/lib/url';
 import { runCortexRegistrationForSource } from '@/lib/workflows/cortex-register/run';
+import { DEFAULT_CURRICULUM_MILESTONES } from '@/lib/workflows/lib/student-milestones';
 import type { ApprovalActionResult } from './actions.types';
 
 // NOTE: This file carries the `'use server'` directive, so every *export* must
@@ -842,6 +843,23 @@ export async function saveMilestones(
   }
 
   await updateMilestonesAsAdmin({ slug, milestones: trimmed });
+  revalidatePath(`/planning/${slug}`, 'layout');
+  return {};
+}
+
+/**
+ * Load the built-in year-based curriculum coverage-level rubric onto a
+ * specialty. Backs the "Load default" button on the Milestones tab for
+ * `curriculum-mapping` specialties (a safety net for ones created before the
+ * auto-seed, or whose milestones were cleared). Keeps the default
+ * server-side, out of the client bundle.
+ */
+export async function loadDefaultStudentMilestones(
+  slug: string,
+): Promise<{ error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'You must be signed in to edit milestones.' };
+  await updateMilestonesAsAdmin({ slug, milestones: DEFAULT_CURRICULUM_MILESTONES });
   revalidatePath(`/planning/${slug}`, 'layout');
   return {};
 }

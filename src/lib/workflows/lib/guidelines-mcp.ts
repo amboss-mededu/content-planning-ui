@@ -33,6 +33,7 @@ import {
   DEFAULT_GUIDELINES_USER_MESSAGE_TEMPLATE,
   DEFAULT_OVERALL_SYNTHESIS_SYSTEM_PROMPT,
   DEFAULT_OVERALL_SYNTHESIS_USER_TEMPLATE,
+  objectiveLine,
 } from './prompts';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,7 @@ function composeGuidelinesUser(input: {
   code: string;
   codeCategory: string;
   description: string;
+  objective?: string;
   contentBase: string;
   language: string;
 }): string {
@@ -148,6 +150,7 @@ function composeGuidelinesUser(input: {
     .replaceAll('${code}', input.code)
     .replaceAll('${codeCategory}', input.codeCategory)
     .replaceAll('${description}', input.description)
+    .replaceAll('${objectiveLine}', objectiveLine(input.objective))
     .replaceAll('${contentBase}', input.contentBase)
     .replaceAll('${language}', input.language);
   /* biome-ignore-end lint/suspicious/noTemplateCurlyInString: intentional placeholder */
@@ -176,6 +179,8 @@ export async function mapGuidelinesForCode(input: {
   code: string;
   description: string;
   category: string;
+  /** Curriculum learning objective, passed to the model as context. */
+  objective?: string;
   specialty: string;
   contentBase: string;
   language: string;
@@ -251,6 +256,7 @@ export async function mapGuidelinesForCode(input: {
       code: input.code,
       codeCategory: input.category,
       description: input.description,
+      objective: input.objective,
       contentBase: input.contentBase,
       language: input.language,
     });
@@ -284,13 +290,27 @@ export async function mapGuidelinesForCode(input: {
         },
       });
 
-      const result = await runAgentAttempt({
-        spec: step.spec,
-        apiKeys: input.apiKeys,
-        system,
-        userMessage,
-        tools,
-      });
+      let result: Awaited<ReturnType<typeof runAgentAttempt>>;
+      try {
+        result = await runAgentAttempt({
+          spec: step.spec,
+          apiKeys: input.apiKeys,
+          system,
+          userMessage,
+          tools,
+        });
+      } catch (e) {
+        // Timeout/abort (hung MCP or provider) or transport error — log and
+        // fall through to the next rung instead of rejecting the batch.
+        await logEvent({
+          runId: input.runId,
+          stage: input.stage,
+          level: 'warn',
+          message: `Guidelines attempt ${attempts} (${step.label}) agent call failed for ${input.code}: ${errorMessage(e)}`,
+          metrics: { phase: 'map_guidelines', model: lastModel, code: input.code },
+        });
+        continue;
+      }
       const durationMs = Date.now() - started;
 
       let parsed: GuidelineOutput;
