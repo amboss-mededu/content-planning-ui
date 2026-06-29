@@ -12,6 +12,8 @@
  * before re-running a draft if the file has expired.
  */
 
+import { type FetchPolicy, safeFetch, trustedUploadHostKeys } from './safe-fetch';
+
 const FILES_BASE = 'https://generativelanguage.googleapis.com';
 
 export type UploadedGeminiFile = {
@@ -114,7 +116,12 @@ export async function uploadUrlToGemini(input: {
   url: string;
   displayName: string;
 }): Promise<UploadedGeminiFile> {
-  const { bytes, mimeType } = await fetchPdfBytes(input.url);
+  // Pipeline inputs are only ever fetched from our own upload host. Anything
+  // else (arbitrary internal addresses) is rejected — this is the SSRF guard.
+  const { bytes, mimeType } = await fetchPdfBytes(input.url, {
+    trustedHosts: trustedUploadHostKeys(),
+    allowPublic: false,
+  });
   return uploadPdfToGemini({
     apiKey: input.apiKey,
     bytes,
@@ -156,8 +163,11 @@ export type EnsureUploadOutcome = {
 
 async function fetchPdfBytes(
   url: string,
+  policy: FetchPolicy,
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
-  const res = await fetch(url, { redirect: 'follow' });
+  // SSRF guard: validate the host (and every redirect hop) against `policy`
+  // before fetching. Never a bare fetch(url) — these URLs are user-supplied.
+  const res = await safeFetch(url, policy);
   if (!res.ok) {
     throw new Error(`source URL ${res.status} ${res.statusText}`);
   }
@@ -209,7 +219,12 @@ export async function ensureGeminiUploadsForArticle(input: {
       continue;
     }
     try {
-      const { bytes, mimeType } = await fetchPdfBytes(s.url);
+      // Source PDFs are usually public publisher URLs, but uploaded sources
+      // live on our own host — allow both, reject anything internal/private.
+      const { bytes, mimeType } = await fetchPdfBytes(s.url, {
+        trustedHosts: trustedUploadHostKeys(),
+        allowPublic: true,
+      });
       const uploaded = await uploadPdfToGemini({
         apiKey: input.apiKey,
         bytes,
