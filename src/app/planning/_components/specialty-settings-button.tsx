@@ -2,29 +2,34 @@
 
 import { Button, Modal, Stack, Text } from '@amboss/design-system';
 import { useState } from 'react';
-import type { MappingSource, PipelineMode } from '@/lib/types';
+import type { MappingSource, McpEnv, PipelineMode } from '@/lib/types';
 import { MappingSourceControl } from './mapping-source-control';
+import { McpServerControl } from './mcp-server-control';
 import { PipelineModeControl } from './pipeline-mode-control';
 
 /**
  * Header "Settings" button → modal holding the per-specialty workflow controls
- * (workflow mode + mapping source). Both controls persist on change via their
- * own PATCH handlers, so the modal needs no save button — closing it just
- * dismisses. RAG-corpus pins the source to guidelines and curriculum-mapping
- * pins it to AMBOSS, so the source control is disabled while either is selected.
+ * (workflow mode + mapping source, plus the MCP server for rag-corpus). Each
+ * control persists on change via its own PATCH handler, so the modal needs no
+ * save button — closing it just dismisses. curriculum-mapping pins the source
+ * to AMBOSS, so the source control is disabled while it is selected; rag-corpus
+ * lets the user pick RAG DB / AMBOSS / both and choose the MCP environment.
  */
 export function SpecialtySettingsButton({
   slug,
   pipelineMode,
   mappingSource,
+  mcpEnv,
 }: {
   slug: string;
   pipelineMode: PipelineMode;
   mappingSource: MappingSource;
+  mcpEnv: McpEnv;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PipelineMode>(pipelineMode);
-  const sourceLocked = mode === 'rag-corpus' || mode === 'curriculum-mapping';
+  const sourceLocked = mode === 'curriculum-mapping';
+  const isRagCorpus = mode === 'rag-corpus';
   return (
     <>
       <Button
@@ -60,10 +65,12 @@ export function SpecialtySettingsButton({
                 />
               </Stack>
               <Stack space="xs">
-                <Text weight="bold">Mapping source</Text>
+                <Text weight="bold">
+                  {isRagCorpus ? 'Coverage source' : 'Mapping source'}
+                </Text>
                 <Text size="s" color="secondary">
-                  {mode === 'rag-corpus'
-                    ? 'RAG corpus always assesses coverage against clinical guidelines.'
+                  {isRagCorpus
+                    ? "Which content this specialty's coverage is assessed against — the RAG DB, AMBOSS content, or both."
                     : mode === 'curriculum-mapping'
                       ? 'Curriculum mapping always assesses coverage against AMBOSS.'
                       : "Which content this specialty's coverage is assessed against — AMBOSS articles, clinical guidelines, or both."}
@@ -72,8 +79,18 @@ export function SpecialtySettingsButton({
                   slug={slug}
                   mappingSource={mappingSource}
                   disabled={sourceLocked}
+                  ragCorpus={isRagCorpus}
                 />
               </Stack>
+              {isRagCorpus ? (
+                <Stack space="xs">
+                  <Text weight="bold">MCP server</Text>
+                  <Text size="s" color="secondary">
+                    Which AMBOSS MCP environment RAG corpus runs query.
+                  </Text>
+                  <McpServerControl slug={slug} mcpEnv={mcpEnv} />
+                </Stack>
+              ) : null}
             </Stack>
           </Modal.Stack>
         </Modal>

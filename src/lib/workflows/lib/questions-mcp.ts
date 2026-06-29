@@ -20,10 +20,11 @@
 import { createMCPClient } from '@ai-sdk/mcp';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { env } from '@/env';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { McpEnv } from '@/lib/types';
 import { hasMappingCreds, parseAgentJson, runAgentAttempt } from './amboss-mcp';
+import { resolveAmbossMcp } from './amboss-mcp-config';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import type { ModelSpec, ProviderApiKeys } from './llm';
@@ -143,6 +144,8 @@ export async function mapQuestionsForCode(input: {
   language: string;
   milestones: string;
   additionalInstructions?: string;
+  /** Which AMBOSS MCP environment to query ('production' default). */
+  mcpEnv?: McpEnv;
   runId: string;
   stage: StageName;
   primaryModel: ModelSpec;
@@ -169,8 +172,7 @@ export async function mapQuestionsForCode(input: {
     return { mapping: stub, attempts: 0, model: 'stub', unresolved: false };
   }
 
-  const mcpUrl = env.AMBOSS_MCP_URL;
-  const mcpToken = env.AMBOSS_MCP_TOKEN;
+  const { url: mcpUrl, token: mcpToken } = resolveAmbossMcp(input.mcpEnv);
   if (!mcpUrl || !mcpToken) {
     throw new Error('AMBOSS_MCP_URL and AMBOSS_MCP_TOKEN must be set');
   }

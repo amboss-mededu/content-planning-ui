@@ -1,6 +1,6 @@
 'use client';
 
-import { Callout, H1, Inline, Stack, Text } from '@amboss/design-system';
+import { Callout, H1, Inline, Stack } from '@amboss/design-system';
 import type { Specialty } from '@/lib/types';
 import { Breadcrumbs } from './breadcrumbs';
 import { ChangeSpecialtyButton } from './change-specialty-button';
@@ -12,6 +12,16 @@ import { SpecialtyTabs } from './specialty-tabs';
 // everything downstream of suggestions.
 const MAPPING_ONLY_HIDDEN_SEGMENTS = ['consolidation-review', 'backlog', 'drift'];
 
+// Which dashboard subtab a specialty belongs to, by pipeline mode — so the
+// breadcrumb returns to the tab the specialty lives under instead of the
+// default "Full pipeline".
+const DASHBOARD_HREF: Record<string, string> = {
+  full: '/planning/full-pipeline',
+  'rag-corpus': '/planning/rag-corpus',
+  'mapping-only': '/planning/mapping',
+  'curriculum-mapping': '/planning/curriculum-plans',
+};
+
 export function SpecialtyHeader({
   specialty,
   tabsComplete,
@@ -22,11 +32,13 @@ export function SpecialtyHeader({
   const hiddenSegments = specialty.mappingOnly
     ? new Set(MAPPING_ONLY_HIDDEN_SEGMENTS)
     : undefined;
+  const dashboardHref =
+    DASHBOARD_HREF[specialty.pipelineMode ?? 'full'] ?? '/planning/full-pipeline';
   return (
     <Stack space="l">
       <Breadcrumbs
         crumbs={[
-          { label: 'Specialty Dashboard', href: '/planning' },
+          { label: 'Specialty Dashboard', href: dashboardHref },
           { label: specialty.name },
         ]}
       />
@@ -38,11 +50,9 @@ export function SpecialtyHeader({
           slug={specialty.slug}
           pipelineMode={specialty.pipelineMode ?? 'full'}
           mappingSource={specialty.mappingSource ?? 'amboss'}
+          mcpEnv={specialty.mcpEnv ?? 'production'}
         />
       </Inline>
-      <Text color="secondary">
-        Slug: <code>{specialty.slug}</code>
-      </Text>
       <SpecialtyTabs
         slug={specialty.slug}
         tabsComplete={tabsComplete}

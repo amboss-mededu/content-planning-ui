@@ -11,7 +11,7 @@ import {
   type PipelineCardState,
   type PipelineStageStates,
 } from '@/lib/pipeline-stage-state';
-import type { MappingSource, PipelineMode, Specialty } from '@/lib/types';
+import type { MappingSource, McpEnv, PipelineMode, Specialty } from '@/lib/types';
 import { DEFAULT_CURRICULUM_MILESTONES } from '@/lib/workflows/lib/student-milestones';
 
 // Specialties live in PocketBase. RSC pages call these helpers and get a
@@ -40,6 +40,7 @@ function toSpecialty(row: SpecialtyRecord): Specialty {
     // `mappingOnly` consumer keeps working unchanged.
     mappingOnly: pipelineMode !== 'full',
     mappingSource: normalizeMappingSource(row.mappingSource),
+    mcpEnv: row.mcpEnv === 'staging' ? 'staging' : 'production',
   };
 }
 
@@ -140,6 +141,7 @@ export async function createSpecialty(args: {
   mappingOnly?: boolean;
   mappingSource?: MappingSource;
   pipelineMode?: PipelineMode;
+  mcpEnv?: McpEnv;
 }): Promise<string> {
   const pb = await userClient();
   const collection = pb.collection<SpecialtyRecord>('specialties');
@@ -244,6 +246,20 @@ export async function setSpecialtyMappingSource(
     .collection<SpecialtyRecord>('specialties')
     .getFirstListItem(`slug = "${slug}"`);
   await pb.collection('specialties').update(row.id, { mappingSource: value });
+}
+
+/**
+ * Set which AMBOSS MCP environment ('production' | 'staging') a rag-corpus
+ * specialty's runs query. Backs the MCP server control in the add/settings
+ * modals (POST/PATCH /api/specialties). The mapping workflow resolves the
+ * server URL from this at run time (see `resolveAmbossMcp`).
+ */
+export async function setSpecialtyMcpEnv(slug: string, value: McpEnv): Promise<void> {
+  const pb = await userClient();
+  const row = await pb
+    .collection<SpecialtyRecord>('specialties')
+    .getFirstListItem(`slug = "${slug}"`);
+  await pb.collection('specialties').update(row.id, { mcpEnv: value });
 }
 
 /**

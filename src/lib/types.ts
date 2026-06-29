@@ -52,6 +52,10 @@ export type AnyCoverageLevel = (typeof ALL_COVERAGE_LEVELS)[number];
 
 export type MappingSource = 'amboss' | 'guidelines' | 'both';
 
+/** Which AMBOSS MCP environment a (rag-corpus) specialty's runs query.
+ *  Defaults to `'production'`; `'staging'` targets `AMBOSS_MCP_URL_STAGING`. */
+export type McpEnv = 'production' | 'staging';
+
 /**
  * Which end-to-end workflow a specialty runs, chosen at initialization:
  * - `'full'`              — map → suggestions → consolidate → articles (today's default).
@@ -85,6 +89,9 @@ export type Specialty = {
    *  `'guidelines'` for `'rag-corpus'` and to `'amboss'` for
    *  `'curriculum-mapping'` specialties. */
   mappingSource?: MappingSource;
+  /** Which AMBOSS MCP environment rag-corpus runs query. Defaults to
+   *  `'production'`. Only meaningful for `'rag-corpus'` specialties. */
+  mcpEnv?: McpEnv;
 };
 
 // --- Curriculum mapping ----------------------------------------------------

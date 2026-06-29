@@ -899,6 +899,12 @@ You reconcile two independent coverage assessments of the SAME disease code agai
 **TASK**
 Produce a single OVERALL coverage level and 0-5 score representing the UNION of what a learner would get from BOTH sources combined. Do NOT simply take the maximum of the two scores: reason about overlap vs. complementarity. If the two sources cover different competencies (e.g. AMBOSS covers diagnosis, a guideline covers management), the union may reach a higher milestone level than either alone. If both cover only the same shallow slice, the overall stays low. Score conservatively against gaps — if competencies at a level remain uncovered by both sources, score at the level below.
 
+**REASONING STEPS (follow in this exact order — judge the overall LAST)**
+1. AMBOSS: state what competencies the AMBOSS coverage reaches and where it gaps.
+2. External guidelines: state what competencies the guideline coverage reaches and where it gaps.
+3. ONLY THEN decide the overall: reason about which competencies are covered by both, by only one, or by neither, and from that derive the combined level + score.
+Emit the three steps as the "ambossAssessment", "guidelineAssessment", then "overall" fields below — in that order — so the overall judgement is made only after the two per-source assessments.
+
 **MILESTONES**
 \${milestones}
 
@@ -911,22 +917,24 @@ Produce a single OVERALL coverage level and 0-5 score representing the UNION of 
 - 5 == specialist (Mastery & Leadership)
 
 **OUTPUT FORMAT**
-Return EXCLUSIVELY a JSON object with a single "overall" field, no preceding or trailing text.
+Return EXCLUSIVELY a JSON object with the "ambossAssessment", "guidelineAssessment", and "overall" fields in that order, no preceding or trailing text.
 
 **EXAMPLE OUTPUT**
 \`\`\`json
 {
+   "ambossAssessment": "one or two sentences: what AMBOSS covers and where it gaps",
+   "guidelineAssessment": "one or two sentences: what the external guidelines cover and where they gap",
    "overall": {
       "coverageLevel": "one of none, medical-student, early-resident, advanced-resident, attending, specialist",
       "coverageScore": 3,
-      "rationale": "one or two sentences on how the two sources combine"
+      "rationale": "one or two sentences on how the two sources combine into the overall verdict"
    }
 }
 \`\`\`
 `.trim();
 
 export const DEFAULT_OVERALL_SYNTHESIS_USER_TEMPLATE = `
-Reconcile the two coverage assessments below into a single overall coverage verdict.
+Reconcile the two coverage assessments below into a single overall coverage verdict. Reason step by step: assess AMBOSS first, then the external guidelines, and only then judge the overall.
 
 **AMBOSS COVERAGE**
 \${ambossCoverage}
@@ -934,5 +942,5 @@ Reconcile the two coverage assessments below into a single overall coverage verd
 **GUIDELINE COVERAGE**
 \${guidelineCoverage}
 
-CRITICAL: Return only the "overall" JSON object. NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
+CRITICAL: Return only the JSON object with "ambossAssessment", "guidelineAssessment", and "overall" (in that order). NO TEXT BEFORE OR AFTER THE JSON IS ALLOWED!
 `.trim();

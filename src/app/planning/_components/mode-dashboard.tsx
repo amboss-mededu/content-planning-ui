@@ -29,6 +29,7 @@ async function ModeDashboardData({ mode }: { mode: PipelineMode }) {
   const specialties = (await listSpecialties()).filter(matchesMode(mode));
   return (
     <DashboardEntryView
+      mode={mode}
       specialties={specialties}
       specialtiesGrid={
         <Suspense fallback={<SpecialtiesGridSkeleton />}>

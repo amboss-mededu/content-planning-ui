@@ -46,6 +46,10 @@ export const env = createEnv({
     MAPPING_SHEET_IDS: sheetIdsSchema,
     LOCAL_XLSX_FIXTURES: xlsxFixturesSchema,
     AMBOSS_MCP_URL: z.string().url().optional(),
+    // Staging variant of the AMBOSS MCP server. Selected per-specialty via the
+    // rag-corpus "MCP server" control (see `resolveAmbossMcp`). Falls back to
+    // AMBOSS_MCP_URL when unset. Uses the same AMBOSS_MCP_TOKEN.
+    AMBOSS_MCP_URL_STAGING: z.string().url().optional(),
     AMBOSS_MCP_TOKEN: optionalString,
     GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
     ANTHROPIC_API_KEY: optionalString,
@@ -121,6 +125,7 @@ export const env = createEnv({
     MAPPING_SHEET_IDS: process.env.MAPPING_SHEET_IDS,
     LOCAL_XLSX_FIXTURES: process.env.LOCAL_XLSX_FIXTURES,
     AMBOSS_MCP_URL: process.env.AMBOSS_MCP_URL,
+    AMBOSS_MCP_URL_STAGING: process.env.AMBOSS_MCP_URL_STAGING,
     AMBOSS_MCP_TOKEN: process.env.AMBOSS_MCP_TOKEN,
     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,

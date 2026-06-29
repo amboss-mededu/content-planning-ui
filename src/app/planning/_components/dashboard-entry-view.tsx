@@ -1,14 +1,16 @@
 'use client';
 
 import { H1, H2, Inline, Stack, Text } from '@amboss/design-system';
-import type { Specialty } from '@/lib/types';
+import type { PipelineMode, Specialty } from '@/lib/types';
 import { AddSpecialtyButton } from './add-specialty-button';
 
 export function DashboardEntryView({
+  mode,
   specialties,
   specialtiesGrid,
   overview,
 }: {
+  mode: PipelineMode;
   specialties: Specialty[];
   specialtiesGrid: React.ReactNode;
   overview: React.ReactNode;
@@ -27,7 +29,7 @@ export function DashboardEntryView({
       <Stack space="m">
         <Inline alignItems="spaceBetween" vAlignItems="center">
           <H2>Specialties</H2>
-          <AddSpecialtyButton />
+          <AddSpecialtyButton mode={mode} />
         </Inline>
         {specialtiesGrid}
       </Stack>

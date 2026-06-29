@@ -16,17 +16,20 @@ export function MappingSourceControl({
   slug,
   mappingSource,
   disabled = false,
+  ragCorpus = false,
 }: {
   slug: string;
   mappingSource: MappingSource;
-  /** Locked (rag-corpus pins the source to guidelines). Shows guidelines and
+  /** Locked (curriculum-mapping pins the source to AMBOSS). Shows AMBOSS and
    *  blocks edits. */
   disabled?: boolean;
+  /** RAG corpus relabels the values: the guideline track is the RAG DB. */
+  ragCorpus?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = useState<MappingSource>(mappingSource);
   const [saving, setSaving] = useState(false);
-  const shown = disabled ? 'guidelines' : value;
+  const shown = disabled ? 'amboss' : value;
 
   const onChange = async (next: string) => {
     if (disabled) return;
@@ -65,13 +68,13 @@ export function MappingSourceControl({
         {
           name: 'mappingSource',
           value: 'amboss',
-          label: 'AMBOSS',
+          label: ragCorpus ? 'AMBOSS content' : 'AMBOSS',
           disabled: saving || disabled,
         },
         {
           name: 'mappingSource',
           value: 'guidelines',
-          label: 'Guidelines',
+          label: ragCorpus ? 'RAG DB' : 'Guidelines',
           disabled: saving || disabled,
         },
         {

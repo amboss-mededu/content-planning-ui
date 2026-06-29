@@ -44,6 +44,10 @@ export type EventMetrics = {
     | 'synthesize_overall';
   /** Raw parsed LLM output for this call. */
   completion?: unknown;
+  /** Overall-synthesis chain-of-thought: the per-source assessments the model
+   *  produced (AMBOSS first, then guidelines) before judging the overall. */
+  ambossAssessment?: string;
+  guidelineAssessment?: string;
   /** True when the call used a stricter retry after malformed JSON. */
   jsonRetry?: boolean;
   /** Length of malformed model text observed during JSON recovery. */

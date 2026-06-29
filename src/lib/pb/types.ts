@@ -59,6 +59,10 @@ export interface SpecialtyRecord extends PbRecord {
    *  the data layer derives `mappingOnly` from it (`pipelineMode !== 'full'`).
    *  Legacy rows without this fall back to the `mappingOnly` boolean above. */
   pipelineMode?: string;
+  /** Which AMBOSS MCP environment rag-corpus runs query: `'production'`
+   *  (default) or `'staging'` (→ AMBOSS_MCP_URL_STAGING). Empty/absent reads
+   *  as `'production'`. Only meaningful for rag-corpus specialties. */
+  mcpEnv?: string;
   /** Per-tab manual "mark step complete" override, keyed by tab segment
    *  (e.g. `''` for Overview, `'mapping'`). OR-merged with the
    *  auto-derived completion in `getTabsComplete`. */

@@ -2,13 +2,16 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { requireUserResponse } from '@/lib/auth';
 import {
   createSpecialty,
+  getSpecialty,
   setSpecialtyMappingOnly,
   setSpecialtyMappingSource,
+  setSpecialtyMcpEnv,
   setSpecialtyPipelineMode,
 } from '@/lib/data/specialties';
-import type { MappingSource, PipelineMode } from '@/lib/types';
+import type { MappingSource, McpEnv, PipelineMode } from '@/lib/types';
 
 const MAPPING_SOURCES: readonly MappingSource[] = ['amboss', 'guidelines', 'both'];
+const MCP_ENVS: readonly McpEnv[] = ['production', 'staging'];
 const PIPELINE_MODES: readonly PipelineMode[] = [
   'full',
   'mapping-only',
@@ -18,11 +21,10 @@ const PIPELINE_MODES: readonly PipelineMode[] = [
 
 /**
  * Modes that pin the mapping source server-side, overriding whatever the client
- * sent: `rag-corpus` always maps against guidelines; `curriculum-mapping` always
- * assesses coverage against AMBOSS.
+ * sent: `curriculum-mapping` always assesses coverage against AMBOSS. (RAG corpus
+ * is no longer pinned — it lets the user choose RAG DB / AMBOSS / both.)
  */
 const FORCED_SOURCE: Partial<Record<PipelineMode, MappingSource>> = {
-  'rag-corpus': 'guidelines',
   'curriculum-mapping': 'amboss',
 };
 
@@ -30,6 +32,12 @@ function parseMappingSource(value: unknown): MappingSource | undefined {
   return typeof value === 'string' &&
     (MAPPING_SOURCES as readonly string[]).includes(value)
     ? (value as MappingSource)
+    : undefined;
+}
+
+function parseMcpEnv(value: unknown): McpEnv | undefined {
+  return typeof value === 'string' && (MCP_ENVS as readonly string[]).includes(value)
+    ? (value as McpEnv)
     : undefined;
 }
 
@@ -63,9 +71,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  // Reject duplicates instead of silently upserting over an existing specialty.
+  // The unique index on `slug` is the backstop; this gives a friendly message.
+  if (await getSpecialty(slug)) {
+    return NextResponse.json(
+      { error: 'A specialty with that slug already exists.' },
+      { status: 409 },
+    );
+  }
   const pipelineMode = parsePipelineMode(args.pipelineMode);
-  // Some modes pin the mapping source server-side (rag-corpus → guidelines,
-  // curriculum-mapping → amboss) regardless of what the client sent.
+  // Some modes pin the mapping source server-side (curriculum-mapping → amboss)
+  // regardless of what the client sent.
   const forced = pipelineMode ? FORCED_SOURCE[pipelineMode] : undefined;
   const mappingSource = forced ?? parseMappingSource(args.mappingSource);
   const id = await createSpecialty({
@@ -79,6 +95,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     mappingOnly: typeof args.mappingOnly === 'boolean' ? args.mappingOnly : undefined,
     mappingSource,
     pipelineMode,
+    mcpEnv: parseMcpEnv(args.mcpEnv),
   });
   return NextResponse.json({ id });
 }
@@ -134,19 +151,30 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       { status: 400 },
     );
   }
-  if (!hasMappingOnly && !mappingSource && !pipelineMode) {
+  const mcpEnv = args.mcpEnv !== undefined ? parseMcpEnv(args.mcpEnv) : undefined;
+  if (args.mcpEnv !== undefined && !mcpEnv) {
     return NextResponse.json(
-      { error: 'pipelineMode, mappingOnly (boolean), or mappingSource is required' },
+      { error: 'mcpEnv must be one of: production, staging' },
+      { status: 400 },
+    );
+  }
+  if (!hasMappingOnly && !mappingSource && !pipelineMode && !mcpEnv) {
+    return NextResponse.json(
+      {
+        error:
+          'pipelineMode, mappingOnly (boolean), mappingSource, or mcpEnv is required',
+      },
       { status: 400 },
     );
   }
 
   if (pipelineMode) await setSpecialtyPipelineMode(slug, pipelineMode);
   if (hasMappingOnly) await setSpecialtyMappingOnly(slug, args.mappingOnly as boolean);
-  // Modes that pin the source (rag-corpus → guidelines, curriculum-mapping →
-  // amboss) override any explicit source the client sent.
+  // Modes that pin the source (curriculum-mapping → amboss) override any
+  // explicit source the client sent.
   const effectiveSource =
     (pipelineMode ? FORCED_SOURCE[pipelineMode] : undefined) ?? mappingSource;
   if (effectiveSource) await setSpecialtyMappingSource(slug, effectiveSource);
+  if (mcpEnv) await setSpecialtyMcpEnv(slug, mcpEnv);
   return NextResponse.json({ ok: true });
 }

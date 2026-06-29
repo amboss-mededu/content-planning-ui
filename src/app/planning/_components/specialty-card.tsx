@@ -2,6 +2,7 @@
 
 import { Card, CardBox, Stack, Text } from '@amboss/design-system';
 import NextLink from 'next/link';
+import { useSpecialtyMode } from '@/app/specialty-mode-context';
 import type { PipelineStageStates } from '@/lib/pipeline-stage-state';
 import type { Specialty } from '@/lib/types';
 import { PipelineStageStrip } from './pipeline-stage-strip';
@@ -15,6 +16,7 @@ export function SpecialtyCard({
   stageStates?: PipelineStageStates;
   meta?: { codes?: number; consolidatedArticles?: number; consolidatedSections?: number };
 }) {
+  const { setSpecialtyMode } = useSpecialtyMode();
   const href = `/planning/${specialty.slug}`;
   const hasCounts =
     meta?.codes !== undefined ||
@@ -22,7 +24,11 @@ export function SpecialtyCard({
     meta?.consolidatedSections !== undefined;
   return (
     <div className="card-fill">
-      <NextLink href={href} style={{ textDecoration: 'none' }}>
+      <NextLink
+        href={href}
+        style={{ textDecoration: 'none' }}
+        onClick={() => setSpecialtyMode(specialty.pipelineMode ?? 'full')}
+      >
         <Card title={specialty.name} titleAs="h3" outlined>
           <CardBox>
             <Stack space="s">

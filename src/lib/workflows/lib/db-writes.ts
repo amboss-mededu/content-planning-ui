@@ -39,7 +39,7 @@ import type {
   GuidelineRecommendationRef,
   QuestionRef,
 } from '@/lib/pb/types';
-import type { MappingSource, PipelineMode } from '@/lib/types';
+import type { MappingSource, McpEnv, PipelineMode } from '@/lib/types';
 import type { MappingOutput } from './amboss-mcp';
 import type { RawExtractedCode } from './gemini';
 import {
@@ -295,11 +295,13 @@ export type SpecialtyMappingContext = {
   language: string | null;
   milestones: string | null;
   /** Which content source(s) to map against. Empty/unknown → 'amboss'.
-   *  Forced to 'guidelines' for rag-corpus and to 'amboss' for
-   *  curriculum-mapping specialties. */
+   *  Forced to 'amboss' for curriculum-mapping specialties; otherwise the
+   *  stored setting (rag-corpus lets the user pick RAG DB / AMBOSS / both). */
   mappingSource: MappingSource;
   /** The specialty's run mode. */
   pipelineMode: PipelineMode;
+  /** Which AMBOSS MCP environment to query ('production' default). */
+  mcpEnv: McpEnv;
 };
 
 /**
@@ -315,20 +317,18 @@ export async function loadSpecialtyForMapping(
   const src = row?.mappingSource;
   const storedSource: MappingSource =
     src === 'guidelines' || src === 'both' ? src : 'amboss';
-  // Modes that pin the mapping source override whatever is stored:
-  // rag-corpus → guidelines, curriculum-mapping → amboss.
+  // curriculum-mapping pins the mapping source to AMBOSS; rag-corpus and the
+  // other modes honor the stored setting (rag-corpus defaults to RAG DB /
+  // guidelines but the user can pick AMBOSS or both).
   const mappingSource: MappingSource =
-    pipelineMode === 'rag-corpus'
-      ? 'guidelines'
-      : pipelineMode === 'curriculum-mapping'
-        ? 'amboss'
-        : storedSource;
+    pipelineMode === 'curriculum-mapping' ? 'amboss' : storedSource;
   return {
     region: row?.region ?? null,
     language: row?.language ?? null,
     milestones: row?.milestones ?? null,
     mappingSource,
     pipelineMode,
+    mcpEnv: row?.mcpEnv === 'staging' ? 'staging' : 'production',
   };
 }
 

@@ -13,7 +13,7 @@
 
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
-import type { MappingSource, PipelineMode } from '@/lib/types';
+import type { MappingSource, McpEnv, PipelineMode } from '@/lib/types';
 import { type MappingOutput, mapAndValidateCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -130,6 +130,7 @@ async function mapAndWriteOne(input: {
   includeSuggestions: boolean;
   mappingSource: MappingSource;
   pipelineMode: PipelineMode;
+  mcpEnv: McpEnv;
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
@@ -163,6 +164,7 @@ async function mapAndWriteOne(input: {
           checkAgainstLibrary: input.checkAgainstLibrary,
           includeSuggestions: input.includeSuggestions,
           pipelineMode: input.pipelineMode,
+          mcpEnv: input.mcpEnv,
           runId: input.runId,
           stage: 'map_codes',
           primaryModel: input.primaryModel,
@@ -181,6 +183,7 @@ async function mapAndWriteOne(input: {
           language: input.language,
           milestones: input.milestones,
           additionalInstructions: input.additionalInstructions,
+          mcpEnv: input.mcpEnv,
           runId: input.runId,
           stage: 'map_codes',
           primaryModel: input.primaryModel,
@@ -199,6 +202,7 @@ async function mapAndWriteOne(input: {
           language: input.language,
           milestones: input.milestones,
           additionalInstructions: input.additionalInstructions,
+          mcpEnv: input.mcpEnv,
           runId: input.runId,
           stage: 'map_codes',
           primaryModel: input.primaryModel,
@@ -345,6 +349,7 @@ export async function mapCodesWorkflow(input: MapCodesInput): Promise<void> {
               includeSuggestions: input.includeSuggestions ?? true,
               mappingSource,
               pipelineMode: spec.pipelineMode,
+              mcpEnv: spec.mcpEnv,
               primaryModel: input.primaryModel,
               backupModel: input.backupModel,
               apiKeys: input.apiKeys,
