@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { cache } from 'react';
 import { getArticleBacklogAssignee } from '@/lib/data/article-backlog';
 import { createServerClient } from '@/lib/pb/server';
 import { normalizeRole, type UserRole } from './roles';
@@ -20,9 +21,32 @@ async function readAuthClient() {
   return createServerClient(cookieHeader);
 }
 
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+/**
+ * Loads the current user with SERVER-SIDE validation — the source of truth for
+ * every authorization decision in this app.
+ *
+ * Why not just read `pb.authStore.record`: PocketBase's `authStore.isValid`
+ * only base64-decodes the JWT and checks `exp` locally. It does NOT verify the
+ * token signature, and the record blob in the `pb_auth` cookie is NOT bound to
+ * the signed token — so an authenticated user can edit `role`/`email` (or fake
+ * a whole record) in their own cookie and, because privileged writes run via
+ * the admin client, defeat every guard that trusts the cookie. `authRefresh()`
+ * sends the token to PocketBase, which verifies it and returns the authoritative
+ * record from the DB; we read role/email from THAT, never the raw cookie.
+ *
+ * `cache()` dedupes the round-trip to one call per request.
+ */
+const loadValidatedUser = cache(async (): Promise<CurrentUser | null> => {
   const pb = await readAuthClient();
+  // Cheap reject of missing/expired tokens — avoids a network round-trip.
   if (!pb.authStore.isValid) return null;
+  try {
+    // Verifies the token server-side and refreshes authStore.record from the DB.
+    // Throws on a forged/invalid/revoked token → treated as signed-out.
+    await pb.collection('users').authRefresh();
+  } catch {
+    return null;
+  }
   const record = pb.authStore.record;
   if (!record) return null;
   return {
@@ -31,11 +55,14 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     name: typeof record.name === 'string' ? record.name : null,
     role: normalizeRole(record.role),
   };
+});
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  return loadValidatedUser();
 }
 
 export async function isAuthenticated(): Promise<boolean> {
-  const pb = await readAuthClient();
-  return pb.authStore.isValid;
+  return (await loadValidatedUser()) !== null;
 }
 
 /**
@@ -60,7 +87,9 @@ export async function requireUserResponse(): Promise<NextResponse | null> {
  * mappings/pipelines, approving articles into the backlog, reassigning, etc.).
  * Returns 401 when signed out, 403 when signed in as an editor, null when the
  * caller is an architect. This — not the proxy or nav — is the real security
- * boundary: it re-reads the live record, so a stale cookie role can't bypass it.
+ * boundary: `getCurrentUser` validates the token and reads the role from the
+ * authoritative DB record (see loadValidatedUser), so a forged or stale cookie
+ * role can't bypass it.
  *
  *   export async function POST(req: NextRequest) {
  *     const guard = await requireArchitectResponse();
