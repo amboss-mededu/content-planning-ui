@@ -11,6 +11,8 @@ import {
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { CurrentUser } from '@/lib/auth';
+import type { PipelineMode } from '@/lib/types';
+import { useSpecialtyMode } from './specialty-mode-context';
 
 type SectionKey = 'learning' | 'clinical-care' | 'teaching' | 'content-planner';
 
@@ -89,13 +91,33 @@ const SECTIONS: Section[] = [
 
 const CONTENT_PLANNER = SECTIONS[SECTIONS.length - 1] as Section;
 
-function activeSecondaryIndex(items: NavLink[], pathname: string): number {
-  return Math.max(
-    0,
-    items.findIndex(
-      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-    ),
+// Which subtab a specialty detail page (`/planning/<slug>…`) belongs to, keyed
+// by the specialty's pipeline mode. Lets the nav keep the right tab highlighted
+// even though the detail URL doesn't carry the mode.
+const MODE_SUBTAB_HREF: Record<PipelineMode, string> = {
+  full: '/planning/full-pipeline',
+  'rag-corpus': '/planning/rag-corpus',
+  'mapping-only': '/planning/mapping',
+  'curriculum-mapping': '/planning/curriculum-plans',
+};
+
+function activeSecondaryIndex(
+  items: NavLink[],
+  pathname: string,
+  specialtyMode: PipelineMode | null,
+): number {
+  const matched = items.findIndex(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
   );
+  if (matched >= 0) return matched;
+  // No subtab owns this path. On a specialty detail page (`/planning/<slug>`),
+  // highlight the subtab matching the specialty's mode instead of falling back
+  // to the first tab ("Full pipeline").
+  if (specialtyMode && pathname.startsWith('/planning/')) {
+    const modeIdx = items.findIndex((i) => i.href === MODE_SUBTAB_HREF[specialtyMode]);
+    if (modeIdx >= 0) return modeIdx;
+  }
+  return 0;
 }
 
 function useScrollCompact() {
@@ -158,6 +180,7 @@ const EDITOR_SECTIONS: Section[] = [{ ...CONTENT_PLANNER, secondary: [MY_BACKLOG
 
 export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
   const pathname = usePathname() ?? '/';
+  const { specialtyMode } = useSpecialtyMode();
   const isCompact = useScrollCompact();
   const isAuthenticated = !!user;
   const sections = user?.role === 'editor' ? EDITOR_SECTIONS : SECTIONS;
@@ -198,7 +221,11 @@ export function NavBarDynamic({ user }: { user: CurrentUser | null }) {
             <NavBar.SecondaryNav
               aria-label="Secondary navigation"
               items={active.secondary}
-              activeIndex={activeSecondaryIndex(active.secondary, pathname)}
+              activeIndex={activeSecondaryIndex(
+                active.secondary,
+                pathname,
+                specialtyMode,
+              )}
             />
           </Box>
         </NavBar.SubMenuContainer>

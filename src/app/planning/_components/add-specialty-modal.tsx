@@ -13,50 +13,44 @@ function autoSlug(name: string): string {
     .replace(/[^a-z0-9_-]/g, '');
 }
 
-/** Register a new specialty. Mirrors the old inline AddSpecialtyForm (same
- *  `/api/specialties` POST + auto-slug), relocated into a DS Modal opened from
- *  the dashboard's "Add specialty" button. */
+/** Register a new specialty. The pipeline mode is inherited from the dashboard
+ *  subtab the modal was opened from (`pipelineMode` prop) — there's no Workflow
+ *  picker here. The slug is derived from the name automatically and never shown.
+ *  Posts to `/api/specialties`. */
 export function AddSpecialtyModal({
+  pipelineMode,
   open,
   onClose,
 }: {
+  pipelineMode: PipelineMode;
   open: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
+  const isRagCorpus = pipelineMode === 'rag-corpus';
   const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [slugTouched, setSlugTouched] = useState(false);
   const [region, setRegion] = useState('');
   const [language, setLanguage] = useState('');
-  const [pipelineMode, setPipelineMode] = useState<PipelineMode>('full');
-  const [mappingSource, setMappingSource] = useState<MappingSource>('amboss');
+  // RAG corpus defaults to assessing against the RAG DB (guidelines track);
+  // other modes default to AMBOSS.
+  const [mappingSource, setMappingSource] = useState<MappingSource>(
+    isRagCorpus ? 'guidelines' : 'amboss',
+  );
+  const [mcpEnv, setMcpEnv] = useState<'production' | 'staging'>('production');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
-  const displayedSlug = slugTouched ? slug : autoSlug(name);
+  const displayedSlug = autoSlug(name);
   const canSubmit = !submitting && name.trim().length > 0 && displayedSlug.length > 0;
-  // Some modes pin the mapping source: RAG-corpus → guidelines,
-  // curriculum-mapping → AMBOSS. Lock the source select accordingly.
-  const sourceLocked =
-    pipelineMode === 'rag-corpus' || pipelineMode === 'curriculum-mapping';
-  const effectiveSource: MappingSource =
-    pipelineMode === 'rag-corpus'
-      ? 'guidelines'
-      : pipelineMode === 'curriculum-mapping'
-        ? 'amboss'
-        : mappingSource;
 
   const reset = () => {
     setName('');
-    setSlug('');
-    setSlugTouched(false);
     setRegion('');
     setLanguage('');
-    setPipelineMode('full');
-    setMappingSource('amboss');
+    setMappingSource(isRagCorpus ? 'guidelines' : 'amboss');
+    setMcpEnv('production');
     setError(null);
     setSubmitting(false);
   };
@@ -81,7 +75,8 @@ export function AddSpecialtyModal({
           region: region || undefined,
           language: language || undefined,
           pipelineMode,
-          mappingSource: effectiveSource,
+          mappingSource,
+          mcpEnv: isRagCorpus ? mcpEnv : undefined,
         }),
       });
       if (!res.ok) {
@@ -97,6 +92,19 @@ export function AddSpecialtyModal({
       setSubmitting(false);
     }
   };
+
+  // RAG corpus relabels the source values: the guideline track is the RAG DB.
+  const sourceOptions = isRagCorpus
+    ? [
+        { value: 'guidelines', label: 'RAG DB' },
+        { value: 'amboss', label: 'AMBOSS content' },
+        { value: 'both', label: 'Both (RAG DB + AMBOSS)' },
+      ]
+    : [
+        { value: 'amboss', label: 'AMBOSS' },
+        { value: 'guidelines', label: 'Guidelines' },
+        { value: 'both', label: 'Both' },
+      ];
 
   return (
     <Modal
@@ -124,16 +132,6 @@ export function AddSpecialtyModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <Input
-            name="specialty-slug"
-            label="Slug"
-            placeholder="dermatology"
-            value={displayedSlug}
-            onChange={(e) => {
-              setSlug(autoSlug(e.target.value));
-              setSlugTouched(true);
-            }}
-          />
           <Select
             name="specialty-region"
             label="Region"
@@ -154,43 +152,30 @@ export function AddSpecialtyModal({
             onChange={(e) => setLanguage(e.target.value)}
           />
           <Select
-            name="specialty-pipelineMode"
-            label="Workflow"
-            labelHint="What this specialty runs end to end."
-            value={pipelineMode}
-            onChange={(e) => setPipelineMode(e.target.value as PipelineMode)}
-            options={[
-              { value: 'mapping-only', label: 'Mapping only' },
-              {
-                value: 'rag-corpus',
-                label: 'RAG corpus expansion (mapping → literature search)',
-              },
-              {
-                value: 'curriculum-mapping',
-                label: 'Curriculum mapping (curriculum → AMBOSS coverage)',
-              },
-              { value: 'full', label: 'Full content pipeline (mapping → articles)' },
-            ]}
-          />
-          <Select
             name="specialty-mappingSource"
-            label="Mapping source"
+            label={isRagCorpus ? 'Coverage source' : 'Mapping source'}
             labelHint={
-              pipelineMode === 'rag-corpus'
-                ? 'RAG corpus always assesses coverage against guidelines.'
-                : pipelineMode === 'curriculum-mapping'
-                  ? 'Curriculum mapping always assesses coverage against AMBOSS.'
-                  : 'Which content to assess coverage against.'
+              isRagCorpus
+                ? 'Assess coverage against the RAG DB, AMBOSS content, or both.'
+                : 'Which content to assess coverage against.'
             }
-            value={effectiveSource}
-            disabled={sourceLocked}
+            value={mappingSource}
             onChange={(e) => setMappingSource(e.target.value as MappingSource)}
-            options={[
-              { value: 'amboss', label: 'AMBOSS' },
-              { value: 'guidelines', label: 'Guidelines' },
-              { value: 'both', label: 'Both' },
-            ]}
+            options={sourceOptions}
           />
+          {isRagCorpus ? (
+            <Select
+              name="specialty-mcpEnv"
+              label="MCP server"
+              labelHint="Which AMBOSS MCP environment RAG corpus runs query."
+              value={mcpEnv}
+              onChange={(e) => setMcpEnv(e.target.value as 'production' | 'staging')}
+              options={[
+                { value: 'production', label: 'Production' },
+                { value: 'staging', label: 'Staging' },
+              ]}
+            />
+          ) : null}
           {error ? <Callout type="error" text={error} /> : null}
         </Stack>
       </Modal.Stack>

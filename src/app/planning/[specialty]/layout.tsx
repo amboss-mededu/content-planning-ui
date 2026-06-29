@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { getSpecialty } from '@/lib/data/specialties';
 import { getTabsComplete } from '@/lib/data/tab-status';
 import { RememberSpecialty } from '../_components/remember-specialty';
+import { SetSpecialtyMode } from '../_components/set-specialty-mode';
 import { NotConfiguredView, SpecialtyHeader } from '../_components/specialty-header';
 
 export default async function SpecialtyLayout({
@@ -22,6 +23,7 @@ export default async function SpecialtyLayout({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
       <RememberSpecialty slug={slug} />
+      {specialty ? <SetSpecialtyMode mode={specialty.pipelineMode ?? 'full'} /> : null}
       <Suspense fallback={null}>
         <SpecialtyHeaderData slug={slug} />
       </Suspense>

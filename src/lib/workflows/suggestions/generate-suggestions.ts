@@ -16,6 +16,7 @@ import {
 } from '@/lib/data/codes';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { McpEnv } from '@/lib/types';
 import { generateSuggestionsForCode } from '../lib/amboss-mcp';
 import {
   clearInFlightForRun,
@@ -78,6 +79,7 @@ async function generateAndWriteOne(input: {
   milestones: string;
   additionalInstructions?: string;
   checkAgainstLibrary: boolean;
+  mcpEnv: McpEnv;
   primaryModel: ModelSpec;
   backupModel: ModelSpec;
   apiKeys: ProviderApiKeys;
@@ -100,6 +102,7 @@ async function generateAndWriteOne(input: {
       gaps: input.row.gaps,
       articlesWhereCoverageIs: input.row.articlesWhereCoverageIs,
     },
+    mcpEnv: input.mcpEnv,
     runId: input.runId,
     stage: 'map_suggestions',
     primaryModel: input.primaryModel,
@@ -183,6 +186,7 @@ export async function generateSuggestionsWorkflow(
               milestones,
               additionalInstructions: input.additionalInstructions,
               checkAgainstLibrary: input.checkAgainstLibrary,
+              mcpEnv: spec.mcpEnv,
               primaryModel: input.primaryModel,
               backupModel: input.backupModel,
               apiKeys: input.apiKeys,

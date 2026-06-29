@@ -25,7 +25,8 @@ import { listAmbossArticleIds, listAmbossSectionIds } from '@/lib/data/amboss-li
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
 import type { CoveredSection } from '@/lib/pb/types';
-import type { PipelineMode } from '@/lib/types';
+import type { McpEnv, PipelineMode } from '@/lib/types';
+import { resolveAmbossMcp } from './amboss-mcp-config';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import { type ModelSpec, type ProviderApiKeys, resolveModel } from './llm';
@@ -470,6 +471,8 @@ export async function mapAndValidateCode(input: {
   /** Selects the mapping prompt variant. `'curriculum-mapping'` scores coverage
    *  on the year-based student scale; everything else uses the clinician scale. */
   pipelineMode?: PipelineMode;
+  /** Which AMBOSS MCP environment to query ('production' default). */
+  mcpEnv?: McpEnv;
   checkAgainstLibrary: boolean;
   runId: string;
   stage: StageName;
@@ -528,8 +531,7 @@ export async function mapAndValidateCode(input: {
   // Establish an MCP client once per code. Tools discovered from the server
   // are handed straight to `generateText` — the agent decides when to call
   // them during the response.
-  const mcpUrl = env.AMBOSS_MCP_URL;
-  const mcpToken = env.AMBOSS_MCP_TOKEN;
+  const { url: mcpUrl, token: mcpToken } = resolveAmbossMcp(input.mcpEnv);
   if (!mcpUrl || !mcpToken) {
     throw new Error('AMBOSS_MCP_URL and AMBOSS_MCP_TOKEN must be set');
   }
@@ -779,6 +781,8 @@ export async function generateSuggestionsForCode(input: {
   additionalInstructions?: string;
   checkAgainstLibrary: boolean;
   coverage: SuggestionCoverageInput;
+  /** Which AMBOSS MCP environment to query ('production' default). */
+  mcpEnv?: McpEnv;
   runId: string;
   stage: StageName;
   primaryModel: ModelSpec;
@@ -834,8 +838,7 @@ export async function generateSuggestionsForCode(input: {
     };
   }
 
-  const mcpUrl = env.AMBOSS_MCP_URL;
-  const mcpToken = env.AMBOSS_MCP_TOKEN;
+  const { url: mcpUrl, token: mcpToken } = resolveAmbossMcp(input.mcpEnv);
   if (!mcpUrl || !mcpToken) {
     throw new Error('AMBOSS_MCP_URL and AMBOSS_MCP_TOKEN must be set');
   }

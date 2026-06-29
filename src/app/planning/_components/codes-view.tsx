@@ -485,7 +485,7 @@ export function CodesView({
     const guidelineCols: Column<Code>[] = [
       {
         key: 'inGuidelines',
-        label: 'In guidelines',
+        label: ragCorpus ? 'In RAG DB' : 'In guidelines',
         description: 'Whether this code is addressed by a clinical guideline',
         width: 120,
         align: 'center',
@@ -515,7 +515,7 @@ export function CodesView({
       },
       {
         key: 'guidelineCoverage',
-        label: 'Guideline coverage',
+        label: ragCorpus ? 'RAG DB coverage' : 'Guideline coverage',
         description:
           'Audience level this code is covered for by clinical guidelines (none → … → specialist)',
         render: (r) => {
@@ -537,7 +537,7 @@ export function CodesView({
       },
       {
         key: 'guidelineDepth',
-        label: 'Guideline score',
+        label: ragCorpus ? 'RAG DB score' : 'Guideline score',
         description: 'Numeric depth-of-coverage score from clinical guidelines',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
@@ -560,7 +560,7 @@ export function CodesView({
       },
       {
         key: 'guidelinesWhereCoverageIs',
-        label: 'Guidelines',
+        label: ragCorpus ? 'RAG DB sources' : 'Guidelines',
         description: 'Clinical guidelines (and recommendations) that cover this code',
         width: 180,
         align: 'center',
@@ -841,17 +841,23 @@ export function CodesView({
 
     // Compose the column set by source. AMBOSS coverage columns are dropped
     // for a guidelines-only specialty (AMBOSS was never assessed). For 'both',
-    // guideline + overall columns slot in between AMBOSS coverage and the
-    // suggestion columns.
+    // the synthesized OVERALL coverage leads (right after metadata) so the
+    // reader sees the combined verdict first, then the AMBOSS and guideline
+    // breakdowns, then the suggestion columns.
     let result: Column<Code>[];
     if (mappingSource === 'guidelines') {
       result = [...cols.filter((c) => c.group === 'metadata'), ...guidelineCols];
     } else if (mappingSource === 'both') {
-      const metaAndCoverage = cols.filter(
-        (c) => c.group === 'metadata' || c.group === 'coverage',
-      );
+      const metadataCols = cols.filter((c) => c.group === 'metadata');
+      const coverageCols = cols.filter((c) => c.group === 'coverage');
       const suggestionCols = cols.filter((c) => c.group === 'suggestions');
-      result = [...metaAndCoverage, ...guidelineCols, ...overallCols, ...suggestionCols];
+      result = [
+        ...metadataCols,
+        ...overallCols,
+        ...coverageCols,
+        ...guidelineCols,
+        ...suggestionCols,
+      ];
     } else {
       result = cols; // amboss (default)
     }
@@ -864,8 +870,8 @@ export function CodesView({
       );
     }
 
-    // RAG-corpus appends the Literature corpus column (source is pinned to
-    // guidelines, so AMBOSS columns are already absent via the branch above).
+    // RAG-corpus appends the Literature corpus column. The coverage columns
+    // shown depend on the chosen source (RAG DB / AMBOSS / both), handled above.
     if (ragCorpus) result = [...result, ...litCols];
 
     // Curriculum-mapping reshapes the table around the curriculum item rather

@@ -20,10 +20,11 @@
 import { createMCPClient } from '@ai-sdk/mcp';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { env } from '@/env';
 import { errorMessage } from '@/lib/error-message';
 import { log } from '@/lib/log';
+import type { McpEnv } from '@/lib/types';
 import { hasMappingCreds, parseAgentJson, runAgentAttempt } from './amboss-mcp';
+import { resolveAmbossMcp } from './amboss-mcp-config';
 import type { StageName } from './db-writes';
 import { logEvent } from './events';
 import type { ModelSpec, ProviderApiKeys } from './llm';
@@ -88,6 +89,11 @@ export type GuidelineMappingResult = {
 };
 
 const OverallSynthesisSchema = z.object({
+  // Chain-of-thought scratch fields: the model reasons about AMBOSS coverage,
+  // then guideline coverage, BEFORE judging the overall (see the synthesis
+  // prompt). Captured for the event log; only `overall` is persisted.
+  ambossAssessment: z.string().optional().default(''),
+  guidelineAssessment: z.string().optional().default(''),
   overall: z.object({
     coverageLevel: z.string().optional().default('none'),
     coverageScore: z.union([z.number(), z.string()]).optional().default(0),
@@ -186,6 +192,8 @@ export async function mapGuidelinesForCode(input: {
   language: string;
   milestones: string;
   additionalInstructions?: string;
+  /** Which AMBOSS MCP environment to query ('production' default). */
+  mcpEnv?: McpEnv;
   runId: string;
   stage: StageName;
   primaryModel: ModelSpec;
@@ -212,8 +220,7 @@ export async function mapGuidelinesForCode(input: {
     return { mapping: stub, attempts: 0, model: 'stub', unresolved: false };
   }
 
-  const mcpUrl = env.AMBOSS_MCP_URL;
-  const mcpToken = env.AMBOSS_MCP_TOKEN;
+  const { url: mcpUrl, token: mcpToken } = resolveAmbossMcp(input.mcpEnv);
   if (!mcpUrl || !mcpToken) {
     throw new Error('AMBOSS_MCP_URL and AMBOSS_MCP_TOKEN must be set');
   }
@@ -504,6 +511,10 @@ export async function synthesizeOverallCoverage(input: {
         phase: 'synthesize_overall',
         model: input.model.model,
         completion: verdict,
+        // The step-by-step reasoning behind the verdict (AMBOSS first, then
+        // guidelines, then overall) — kept for auditability of the CoT.
+        ambossAssessment: parsed.ambossAssessment,
+        guidelineAssessment: parsed.guidelineAssessment,
         ...result.usage,
         costUsd: estimateCostUsd(input.model.model, result.usage),
       },
