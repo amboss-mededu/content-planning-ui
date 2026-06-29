@@ -53,6 +53,19 @@ onRecordAuthWithOAuth2Request((e) => {
     if (avatar) {
       e.record.set('avatarUrl', avatar);
     }
+
+    // Assign the initial role. Default is 'editor' (least privilege — My Backlog
+    // only). Bootstrap the first content architects via the comma-separated
+    // CONTENT_ARCHITECT_ALLOWLIST env on the PocketBase process; thereafter
+    // architects promote others from the in-app Settings "Team roles" panel.
+    const architectsRaw = String($os.getenv('CONTENT_ARCHITECT_ALLOWLIST') || '').trim();
+    const architects = new Set(
+      architectsRaw
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0),
+    );
+    e.record.set('role', architects.has(oauthEmail) ? 'architect' : 'editor');
   }
 
   e.next();

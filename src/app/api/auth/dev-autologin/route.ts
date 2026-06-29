@@ -57,6 +57,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     userId = created.id;
   }
 
+  // Dev convenience: the auto-login user is always a content architect, so a
+  // local dev session sees the full app (impersonate bypasses pb_hooks, which
+  // is where role would otherwise be assigned). This route 404s in production,
+  // so real users still get the default 'editor' role from sign-up.
+  await admin.collection('users').update(userId, { role: 'architect' });
+
   // Mint a session via the impersonate API. The returned client carries a
   // valid token + record on its authStore — exportToCookie produces the
   // exact cookie shape `loadFromCookie` expects.

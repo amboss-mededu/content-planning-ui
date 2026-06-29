@@ -13,7 +13,7 @@
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { requireUserResponse } from '@/lib/auth';
+import { requireArchitectResponse } from '@/lib/auth';
 import { getSpecialty } from '@/lib/data/specialties';
 import { errorMessage } from '@/lib/error-message';
 import { parseBodyOr400 } from '@/lib/http/parse-body';
@@ -25,7 +25,7 @@ const Body = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const guard = await requireUserResponse();
+  const guard = await requireArchitectResponse();
   if (guard) return guard;
   const body = await parseBodyOr400(req, Body);
   if (body instanceof NextResponse) return body;

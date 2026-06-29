@@ -215,6 +215,7 @@ async function MyBacklogData() {
       initialLitSearchRuns={litSearchRuns}
       initialCommentsByArticle={initialCommentsByArticle}
       viewerEmail={user.email}
+      viewerRole={user.role}
     />
   );
 }

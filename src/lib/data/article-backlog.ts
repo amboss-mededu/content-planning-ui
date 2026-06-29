@@ -55,6 +55,29 @@ export async function listArticleBacklogForAssignee(
   return rows.filter((r) => r.articleKey);
 }
 
+/**
+ * Returns the assignee email of a single backlog row, or null when no row
+ * exists yet (or it's unassigned). Admin read so it works regardless of the
+ * caller's PB rules — used by the assignee-scoped permission guard
+ * (`assertCanWorkArticle`) to decide whether an editor owns this article.
+ */
+export async function getArticleBacklogAssignee(
+  slug: string,
+  articleKey: string,
+): Promise<string | null> {
+  if (!articleKey) return null;
+  const pb = await createAdminClient();
+  try {
+    const row = await pb
+      .collection<ArticleBacklogRecord>('articleBacklog')
+      .getFirstListItem(`specialtySlug = "${slug}" && articleKey = "${articleKey}"`);
+    return row.assigneeEmail && row.assigneeEmail.length > 0 ? row.assigneeEmail : null;
+  } catch (e) {
+    if (e instanceof ClientResponseError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 async function upsertBacklog(
   pb: PocketBase,
   slug: string,

@@ -15,7 +15,7 @@
 import { revalidateTag } from 'next/cache';
 import { type NextRequest, NextResponse } from 'next/server';
 import { env } from '@/env';
-import { requireUserResponse } from '@/lib/auth';
+import { requireArticleAssigneeResponse, requireUserResponse } from '@/lib/auth';
 import {
   claimArticleDraftRunAsAdmin,
   finishArticleDraftRunAsAdmin,
@@ -71,6 +71,9 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Architects may draft any article; editors only ones assigned to them.
+  const assigneeGuard = await requireArticleAssigneeResponse(slug, articleKey);
+  if (assigneeGuard) return assigneeGuard;
   if (files.length === 0) {
     return NextResponse.json(
       { error: 'at least one source PDF is required' },

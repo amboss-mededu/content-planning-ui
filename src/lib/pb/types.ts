@@ -26,6 +26,10 @@ export interface UserRecord extends PbRecord {
   verified: boolean;
   name?: string;
   avatarUrl?: string;
+  // 'architect' = content lead (full app); 'editor' = individual medical
+  // editor (My Backlog only). Optional because legacy rows predate the field;
+  // read-time defaulting lives in src/lib/auth/roles.ts.
+  role?: 'editor' | 'architect';
 }
 
 // --- Collection: specialties -----------------------------------------------

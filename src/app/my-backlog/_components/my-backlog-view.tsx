@@ -30,6 +30,7 @@ import {
   setBacklogAssignee,
   setBacklogStatus,
 } from '@/app/planning/[specialty]/actions';
+import type { UserRole } from '@/lib/auth/roles';
 import { log } from '@/lib/log';
 import type {
   ArticleBacklogRecord,
@@ -101,6 +102,7 @@ export function MyBacklogView({
   initialLitSearchRuns,
   initialCommentsByArticle,
   viewerEmail,
+  viewerRole,
 }: {
   rows: MyBacklogRow[];
   categoryLookup: CategoryLookup;
@@ -111,7 +113,12 @@ export function MyBacklogView({
   initialLitSearchRuns: ArticleLitSearchRunRecord[];
   initialCommentsByArticle: Record<string, ReviewCommentRecord[]>;
   viewerEmail: string;
+  viewerRole: UserRole;
 }) {
+  // Editors work their own queue (advance status, set their draft folder) but
+  // can't reassign, add, or delete articles — those control what's in the
+  // backlog and are architect responsibilities. Architects get the full set.
+  const isArchitectView = viewerRole === 'architect';
   const router = useRouter();
   const params = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<string>(
@@ -527,23 +534,31 @@ export function MyBacklogView({
         })),
       ],
       filterValue: (r) => assigneeOf(r.articleKey) || '__unassigned__',
-      render: (r) => (
-        <select
-          aria-label="Assignee"
-          style={inlineSelectStyle}
-          value={assigneeOf(r.articleKey)}
-          onChange={(e) => handleAssigneeChange(r, e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <option value="">— Unassigned —</option>
-          {assignableUsers.map((u) => (
-            <option key={u.email} value={u.email}>
-              {u.name ? `${u.name} (${u.email})` : u.email}
-            </option>
-          ))}
-        </select>
-      ),
+      render: (r) => {
+        const assignee = assigneeOf(r.articleKey);
+        // Editors can't reassign — show the assignee as read-only text.
+        if (!isArchitectView) {
+          const u = assignableUsers.find((a) => a.email === assignee);
+          return <Text>{assignee ? (u?.name ?? assignee) : '— Unassigned —'}</Text>;
+        }
+        return (
+          <select
+            aria-label="Assignee"
+            style={inlineSelectStyle}
+            value={assignee}
+            onChange={(e) => handleAssigneeChange(r, e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <option value="">— Unassigned —</option>
+            {assignableUsers.map((u) => (
+              <option key={u.email} value={u.email}>
+                {u.name ? `${u.name} (${u.email})` : u.email}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: 'count',
@@ -600,6 +615,7 @@ export function MyBacklogView({
       verticalAlign: 'middle',
       align: 'center',
       render: (r) => {
+        if (!isArchitectView) return null;
         if (r.codes.length > 0) return null;
         return (
           <Button
@@ -658,9 +674,11 @@ export function MyBacklogView({
             onChange={(e) => setSpecialtyFilter(e.target.value)}
           />
         </div>
-        <Button variant="secondary" onClick={() => setAddModalOpen(true)}>
-          + Add article
-        </Button>
+        {isArchitectView && (
+          <Button variant="secondary" onClick={() => setAddModalOpen(true)}>
+            + Add article
+          </Button>
+        )}
       </Inline>
       <DataTable
         rows={filtered}

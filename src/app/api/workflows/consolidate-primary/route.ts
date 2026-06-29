@@ -18,7 +18,7 @@
 import { revalidateTag } from 'next/cache';
 import { after, type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { requireUserResponse } from '@/lib/auth';
+import { requireArchitectResponse } from '@/lib/auth';
 import { listMappedCodesWithSuggestionsAsAdmin } from '@/lib/data/codes';
 import {
   createPipelineRun,
@@ -81,7 +81,7 @@ function stringArray(raw: unknown): string[] | undefined {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireUserResponse();
+  const guard = await requireArchitectResponse();
   if (guard) return guard;
   const body = await parseBodyOr400(req, Body);
   if (body instanceof NextResponse) return body;

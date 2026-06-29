@@ -50,6 +50,9 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
+  if (user.role !== 'architect') {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
   const body = await parseBodyOr400(req, Body);
   if (body instanceof NextResponse) return body;
 
