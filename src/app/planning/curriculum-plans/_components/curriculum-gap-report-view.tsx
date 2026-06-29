@@ -12,8 +12,8 @@ import {
 } from '@/lib/data/curriculum-analytics';
 import { topBlockOf } from '@/lib/data/curriculum-category';
 import type { CodeRecord } from '@/lib/pb/types';
-import { type Column, DataTable } from '../../planning/_components/data-table';
-import { CoverageBadge, DepthBadge } from '../../planning/_components/suggestion-badge';
+import { type Column, DataTable } from '../../_components/data-table';
+import { CoverageBadge, DepthBadge } from '../../_components/suggestion-badge';
 
 /**
  * Gap Report — the in-scope curriculum topics AMBOSS covers poorly, as a sortable

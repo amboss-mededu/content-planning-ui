@@ -1,8 +1,8 @@
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { SpecialtyTabs } from '@/app/planning/_components/specialty-tabs';
-import { CreateStudyPlanButton } from '@/app/teaching/_components/create-study-plan-button';
-import { CurriculumPlanHeader } from '@/app/teaching/_components/curriculum-plan-header';
+import { CreateStudyPlanButton } from '@/app/planning/curriculum-plans/_components/create-study-plan-button';
+import { CurriculumPlanHeader } from '@/app/planning/curriculum-plans/_components/curriculum-plan-header';
 import { getSpecialty } from '@/lib/data/specialties';
 import { getTabsComplete } from '@/lib/data/tab-status';
 
@@ -16,7 +16,7 @@ const CURRICULUM_HIDDEN_SEGMENTS = new Set([
   'drift',
 ]);
 
-const BASE_PATH = '/teaching/curriculum-plans';
+const BASE_PATH = '/planning/curriculum-plans';
 
 export default async function CurriculumPlanLayout({
   children,

@@ -15,7 +15,7 @@ export function CreateStudyPlanButton({ slug }: { slug: string }) {
   const pathname = usePathname() ?? '';
   const [open, setOpen] = useState(false);
 
-  const base = `/teaching/curriculum-plans/${slug}`;
+  const base = `/planning/curriculum-plans/${slug}`;
   const rest = pathname.startsWith(base)
     ? pathname.slice(base.length).replace(/^\//, '')
     : '';

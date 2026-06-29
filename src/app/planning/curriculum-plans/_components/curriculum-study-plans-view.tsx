@@ -3,7 +3,7 @@
 import { Badge, Button, Card, CardBox, Inline, Stack, Text } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { deleteStudyPlanAction } from '@/app/teaching/curriculum-plans/[plan]/actions';
+import { deleteStudyPlanAction } from '@/app/planning/curriculum-plans/[plan]/actions';
 import type { CodeRecord, StudyPlanRecord } from '@/lib/pb/types';
 import { useLiveCollection } from '@/lib/pb/use-live-collection';
 

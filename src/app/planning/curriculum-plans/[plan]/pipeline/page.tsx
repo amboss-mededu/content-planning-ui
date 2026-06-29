@@ -9,7 +9,7 @@ export default async function CurriculumPipelinePage({
   const { plan: slug } = await params;
   return (
     <Suspense fallback={null}>
-      <PipelineDashboardData slug={slug} basePath="/teaching/curriculum-plans" />
+      <PipelineDashboardData slug={slug} basePath="/planning/curriculum-plans" />
     </Suspense>
   );
 }

@@ -12,12 +12,7 @@ import {
 } from '@amboss/design-system';
 import type { CSSProperties } from 'react';
 import type { CoverageStats } from '@/lib/data/coverage-stats-compute';
-import {
-  fmtNum,
-  fmtPct,
-  Panel,
-  StatRow,
-} from '../../planning/_components/coverage-statistics';
+import { fmtNum, fmtPct, Panel, StatRow } from '../../_components/coverage-statistics';
 
 const rowStyle: CSSProperties = {
   display: 'flex',

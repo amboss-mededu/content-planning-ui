@@ -3,7 +3,7 @@ import { listCurriculumPlansWithStats } from '@/lib/data/curriculum-plans';
 import {
   CurriculumPlansSkeleton,
   CurriculumPlansView,
-} from '../_components/curriculum-plans-view';
+} from './_components/curriculum-plans-view';
 
 export default function CurriculumPlansPage() {
   return (

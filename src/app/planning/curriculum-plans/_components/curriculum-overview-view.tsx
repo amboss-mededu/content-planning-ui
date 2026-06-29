@@ -1,5 +1,5 @@
 import type { CurriculumPlanStats } from '@/lib/data/curriculum-plans';
-import type { StatItem } from '../../planning/_components/coverage-stats';
+import type { StatItem } from '../../_components/coverage-stats';
 
 /**
  * The always-visible curriculum overview stat tiles — the headline numbers for a

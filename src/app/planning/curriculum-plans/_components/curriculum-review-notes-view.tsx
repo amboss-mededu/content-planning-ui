@@ -16,7 +16,7 @@ import {
   reviewCounts,
 } from '@/lib/data/curriculum-analytics';
 import type { CodeRecord } from '@/lib/pb/types';
-import { rowTint } from '../../planning/_components/decision-buttons';
+import { rowTint } from '../../_components/decision-buttons';
 
 /**
  * Read-only review board for a curriculum plan. Shows each topic's approval

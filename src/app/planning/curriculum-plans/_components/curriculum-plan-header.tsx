@@ -2,9 +2,9 @@
 
 import { H1, Stack } from '@amboss/design-system';
 import type { ReactNode } from 'react';
-import { Breadcrumbs } from '../../planning/_components/breadcrumbs';
+import { Breadcrumbs } from '../../_components/breadcrumbs';
 
-const BASE_PATH = '/teaching/curriculum-plans';
+const BASE_PATH = '/planning/curriculum-plans';
 
 // Client boundary for the curriculum plan header. The DS package ships without
 // "use client", so any file rendering its components must be a client module —

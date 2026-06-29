@@ -61,10 +61,12 @@ const SECTIONS: Section[] = [
   {
     key: 'teaching',
     label: 'Teaching',
-    href: '/teaching/curriculum-plans',
+    // Curriculum plans moved under Content Planner; the Teaching tab is kept but
+    // /teaching just redirects into that subtab (no own secondary nav).
+    href: '/teaching',
     subTheme: NavBarName.Teaching,
     match: (p) => p.startsWith('/teaching'),
-    secondary: [{ label: 'Curriculum Plans', href: '/teaching/curriculum-plans' }],
+    secondary: [],
   },
   {
     key: 'content-planner',
@@ -76,7 +78,10 @@ const SECTIONS: Section[] = [
       p.startsWith('/my-backlog') ||
       p.startsWith('/settings'),
     secondary: [
-      { label: 'Specialty Dashboard', href: '/planning' },
+      { label: 'Full pipeline', href: '/planning/full-pipeline' },
+      { label: 'RAG corpus', href: '/planning/rag-corpus' },
+      { label: 'Mapping', href: '/planning/mapping' },
+      { label: 'Curriculum plans', href: '/planning/curriculum-plans' },
       { label: 'My Backlog', href: '/my-backlog' },
     ],
   },

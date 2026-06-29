@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type { CoverageStats } from '@/lib/data/coverage-stats-compute';
 import type { CurriculumPlanStats } from '@/lib/data/curriculum-plans';
 import type { CodeRecord, StudyPlanRecord } from '@/lib/pb/types';
-import { CoverageStats as StatTiles } from '../../planning/_components/coverage-stats';
+import { CoverageStats as StatTiles } from '../../_components/coverage-stats';
 import { CurriculumCoverageStatistics } from './curriculum-coverage-statistics';
 import { CurriculumGapReportView } from './curriculum-gap-report-view';
 import { curriculumStatTiles } from './curriculum-overview-view';

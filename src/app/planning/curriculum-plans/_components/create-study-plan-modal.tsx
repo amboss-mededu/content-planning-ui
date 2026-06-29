@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   createStudyPlanAction,
   loadStudyPlanCategoriesAction,
-} from '@/app/teaching/curriculum-plans/[plan]/actions';
+} from '@/app/planning/curriculum-plans/[plan]/actions';
 import type { StudyPlanCategoryOption } from '@/lib/data/study-plans';
 
 /**

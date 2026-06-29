@@ -26,7 +26,7 @@ import {
   formatDurationOrCadence,
   formatTimeframe,
 } from '@/lib/workflows/lib/curriculum-meta';
-import { CoverageBadge } from '../../planning/_components/suggestion-badge';
+import { CoverageBadge } from '../../_components/suggestion-badge';
 
 /**
  * Timeline / Timeboxes — an academic-year gantt (Sep→Aug columns, year/phase

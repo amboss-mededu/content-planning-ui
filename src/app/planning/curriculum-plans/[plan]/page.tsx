@@ -3,7 +3,7 @@ import { listCodes } from '@/lib/data/codes';
 import { getCoverageStats } from '@/lib/data/coverage-stats';
 import { computeCurriculumPlanStats } from '@/lib/data/curriculum-plans';
 import { listStudyPlans } from '@/lib/data/study-plans';
-import { CurriculumDashboard } from '../../_components/curriculum-dashboard';
+import { CurriculumDashboard } from '../_components/curriculum-dashboard';
 
 export default async function CurriculumPlanOverviewPage({
   params,

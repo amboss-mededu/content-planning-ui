@@ -9,7 +9,7 @@ import {
   type StudyPlanCategoryOption,
 } from '@/lib/data/study-plans';
 
-const PLAN_PATH = '/teaching/curriculum-plans';
+const PLAN_PATH = '/planning/curriculum-plans';
 
 /** Category options for the "Create study plan" modal (loaded on open). */
 export async function loadStudyPlanCategoriesAction(

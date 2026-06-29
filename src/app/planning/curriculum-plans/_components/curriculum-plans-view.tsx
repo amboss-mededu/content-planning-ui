@@ -25,7 +25,7 @@ function CurriculumPlanCard({ row }: { row: CurriculumPlanRow }) {
   return (
     <div className="card-fill" style={fillStyle}>
       <NextLink
-        href={`/teaching/curriculum-plans/${row.specialty.slug}`}
+        href={`/planning/curriculum-plans/${row.specialty.slug}`}
         style={linkStyle}
       >
         <Card title={row.specialty.name} titleAs="h3" outlined>

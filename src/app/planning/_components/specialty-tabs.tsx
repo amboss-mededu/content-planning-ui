@@ -86,7 +86,7 @@ export function SpecialtyTabs({
   hiddenSegments?: Set<string>;
   /** URL prefix the tabs route under (without trailing slash). Defaults to the
    *  Content Planner `/planning`; curriculum plans pass
-   *  `/teaching/curriculum-plans` so the same shell mounts under Teaching. */
+   *  `/planning/curriculum-plans` so the same shell mounts there. */
   basePath?: string;
 }) {
   const router = useRouter();

@@ -4,7 +4,7 @@
  * Scoped to a curriculum plan via `specialtySlug` (same link `codes` use).
  *
  * Mutations are driven by the server actions in
- * `src/app/teaching/curriculum-plans/[plan]/actions.ts`.
+ * `src/app/planning/curriculum-plans/[plan]/actions.ts`.
  */
 
 import 'server-only';

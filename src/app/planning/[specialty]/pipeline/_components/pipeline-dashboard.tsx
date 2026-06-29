@@ -91,8 +91,8 @@ export function PipelineDashboard({
    *  backfill card's visibility and count. */
   mappedWithoutSuggestionsCount?: number;
   /** URL prefix this dashboard is mounted under (without trailing slash).
-   *  Defaults to `/planning`; curriculum plans pass `/teaching/curriculum-plans`
-   *  so in-dashboard navigation stays inside the Teaching tab. */
+   *  Defaults to `/planning`; curriculum plans pass `/planning/curriculum-plans`
+   *  so in-dashboard navigation stays inside the curriculum-plans subtab. */
   basePath?: string;
 }) {
   const runActive =

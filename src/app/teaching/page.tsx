@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 
-// Teaching has no standalone landing yet — its only surface is the Curriculum
-// Plans dashboard, which the secondary nav also points to. Send the bare
-// /teaching route straight there.
+// Curriculum plans now live under Content Planner. The Teaching primary-nav tab
+// is kept, but it has no standalone surface — send the bare /teaching route to
+// the Curriculum plans subtab.
 export default function TeachingIndex() {
-  redirect('/teaching/curriculum-plans');
+  redirect('/planning/curriculum-plans');
 }
