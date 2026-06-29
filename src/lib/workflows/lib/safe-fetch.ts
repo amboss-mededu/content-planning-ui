@@ -17,12 +17,18 @@
  *   - When `allowPublic` is set (case 2), any other host must be *publicly*
  *     routable: private literals are rejected and the hostname is resolved and
  *     re-checked so a public name can't point (or DNS-rebind) to an internal IP.
- *   - Redirects are followed manually so every hop is re-validated, defeating
- *     redirect-to-internal bypasses.
+ *     The validated IPs are then *pinned*: the request is dialed at exactly the
+ *     address that passed the check (via an undici connector whose `lookup`
+ *     ignores DNS and returns only the pinned set), so a low-TTL record can't
+ *     resolve public-then-private between the check and the connect (TOCTOU /
+ *     DNS rebinding). SNI/Host stay the original hostname, so TLS still works.
+ *   - Redirects are followed manually so every hop is re-validated and re-pinned,
+ *     defeating redirect-to-internal bypasses.
  */
 
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
+import { Agent } from 'undici';
 import { env } from '@/env';
 
 export type FetchPolicy = {
@@ -99,12 +105,24 @@ function isPrivateHostLiteral(host: string): boolean {
   return false;
 }
 
-async function assertAllowed(u: URL, policy: FetchPolicy): Promise<void> {
+/** Pre-validated address the connection is pinned to. `family` is 4 or 6. */
+type PinnedAddress = { address: string; family: number };
+
+/**
+ * Validates `u` against `policy`. Returns the set of pre-validated IPs the
+ * connection must be pinned to, or `null` when no pinning is needed (trusted
+ * host — own infra, resolved normally — or a public IP literal, where no DNS
+ * happens at connect time anyway). Throws if the target is disallowed.
+ */
+async function assertAllowed(
+  u: URL,
+  policy: FetchPolicy,
+): Promise<PinnedAddress[] | null> {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     throw new Error(`refusing non-http(s) URL: ${u.protocol}//`);
   }
   // Our own upload host is always allowed (it is intentionally private in dev).
-  if (policy.trustedHosts.has(hostKey(u))) return;
+  if (policy.trustedHosts.has(hostKey(u))) return null;
   if (!policy.allowPublic) {
     throw new Error(`host not in upload allowlist: ${u.host}`);
   }
@@ -113,7 +131,9 @@ async function assertAllowed(u: URL, policy: FetchPolicy): Promise<void> {
   if (isPrivateHostLiteral(host)) {
     throw new Error(`refusing to fetch private host: ${host}`);
   }
-  let addrs: Array<{ address: string }>;
+  // A public IP literal is dialed directly — no DNS, so nothing to pin.
+  if (isIP(host)) return null;
+  let addrs: PinnedAddress[];
   try {
     addrs = await lookup(host, { all: true });
   } catch {
@@ -122,12 +142,33 @@ async function assertAllowed(u: URL, policy: FetchPolicy): Promise<void> {
   if (addrs.length === 0 || addrs.some((a) => isPrivateIp(a.address))) {
     throw new Error(`host resolves to a private address: ${host}`);
   }
+  return addrs;
+}
+
+/**
+ * A dispatcher whose connector dials *only* the pre-validated IPs, ignoring DNS
+ * entirely. This closes the rebinding window: the address that passed
+ * `assertAllowed` is the exact address connected to, so a low-TTL record can't
+ * flip public→private between the check and the socket connect. The original
+ * hostname is still used for SNI and the Host header, so TLS verification works.
+ */
+function makePinnedDispatcher(pinned: PinnedAddress[]): Agent {
+  const lookup: LookupFunction = (_hostname, options, callback) => {
+    if (typeof options === 'object' && options?.all) {
+      callback(null, pinned as never);
+    } else {
+      const { address, family } = pinned[0];
+      callback(null, address as never, family);
+    }
+  };
+  return new Agent({ connect: { lookup } });
 }
 
 /**
  * `fetch` that validates the target (and every redirect hop) against `policy`
- * before each request. Returns the final non-redirect Response. Throws if any
- * hop is disallowed or the redirect chain is too long.
+ * before each request, pinning the connection to the validated IP. Returns the
+ * final non-redirect Response. Throws if any hop is disallowed or the redirect
+ * chain is too long.
  */
 export async function safeFetch(rawUrl: string, policy: FetchPolicy): Promise<Response> {
   let current: URL;
@@ -137,10 +178,25 @@ export async function safeFetch(rawUrl: string, policy: FetchPolicy): Promise<Re
     throw new Error(`invalid URL: ${rawUrl}`);
   }
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    await assertAllowed(current, policy);
-    const res = await fetch(current.toString(), { redirect: 'manual' });
+    const pinned = await assertAllowed(current, policy);
+    const dispatcher = pinned ? makePinnedDispatcher(pinned) : undefined;
+    const init: RequestInit & { dispatcher?: Agent } = { redirect: 'manual' };
+    if (dispatcher) init.dispatcher = dispatcher;
+
+    let res: Response;
+    try {
+      res = await fetch(current.toString(), init);
+    } catch (err) {
+      // No response was produced — tear the pinned pool down immediately.
+      if (dispatcher) void dispatcher.close();
+      throw err;
+    }
+
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
+      // Discard this hop's body and pool; we re-validate + re-pin the next hop.
+      void res.body?.cancel();
+      if (dispatcher) void dispatcher.close();
       if (!loc) return res;
       try {
         current = new URL(loc, current);
@@ -149,6 +205,8 @@ export async function safeFetch(rawUrl: string, policy: FetchPolicy): Promise<Re
       }
       continue;
     }
+    // Final response: graceful close completes once the caller drains the body.
+    if (dispatcher) void dispatcher.close();
     return res;
   }
   throw new Error('too many redirects');
