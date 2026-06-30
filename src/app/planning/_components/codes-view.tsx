@@ -485,7 +485,7 @@ export function CodesView({
     const guidelineCols: Column<Code>[] = [
       {
         key: 'inGuidelines',
-        label: ragCorpus ? 'In RAG DB' : 'In guidelines',
+        label: 'In RAG DB',
         description: 'Whether this code is addressed by a clinical guideline',
         width: 120,
         align: 'center',
@@ -515,7 +515,7 @@ export function CodesView({
       },
       {
         key: 'guidelineCoverage',
-        label: ragCorpus ? 'RAG DB coverage' : 'Guideline coverage',
+        label: 'RAG DB coverage',
         description:
           'Audience level this code is covered for by clinical guidelines (none → … → specialist)',
         render: (r) => {
@@ -537,7 +537,7 @@ export function CodesView({
       },
       {
         key: 'guidelineDepth',
-        label: ragCorpus ? 'RAG DB score' : 'Guideline score',
+        label: 'RAG DB score',
         description: 'Numeric depth-of-coverage score from clinical guidelines',
         render: (r) => {
           if (inFlightSet.has(r.code)) return <MappingPulse />;
@@ -560,7 +560,7 @@ export function CodesView({
       },
       {
         key: 'guidelinesWhereCoverageIs',
-        label: ragCorpus ? 'RAG DB sources' : 'Guidelines',
+        label: 'RAG DB sources',
         description: 'Clinical guidelines (and recommendations) that cover this code',
         width: 180,
         align: 'center',

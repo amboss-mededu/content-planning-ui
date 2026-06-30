@@ -4,6 +4,12 @@ import { Callout, Input, Modal, Select, Stack } from '@amboss/design-system';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { MappingSource, PipelineMode } from '@/lib/types';
+import {
+  COVERAGE_SOURCE_LABEL,
+  coverageSourceHint,
+  coverageSourceOptions,
+  sourceIncludesRagDb,
+} from './coverage-source-copy';
 
 function autoSlug(name: string): string {
   return name
@@ -44,6 +50,10 @@ export function AddSpecialtyModal({
 
   const displayedSlug = autoSlug(name);
   const canSubmit = !submitting && name.trim().length > 0 && displayedSlug.length > 0;
+  // The MCP environment only matters when the RAG DB is part of the source —
+  // independent of pipeline mode, since the RAG DB backs the guidelines track
+  // in every mode.
+  const showMcpServer = sourceIncludesRagDb(mappingSource);
 
   const reset = () => {
     setName('');
@@ -76,7 +86,9 @@ export function AddSpecialtyModal({
           language: language || undefined,
           pipelineMode,
           mappingSource,
-          mcpEnv: isRagCorpus ? mcpEnv : undefined,
+          // Only meaningful when the RAG DB is actually queried — don't persist
+          // a stale staging value for an AMBOSS-content-only specialty.
+          mcpEnv: showMcpServer ? mcpEnv : undefined,
         }),
       });
       if (!res.ok) {
@@ -92,19 +104,6 @@ export function AddSpecialtyModal({
       setSubmitting(false);
     }
   };
-
-  // RAG corpus relabels the source values: the guideline track is the RAG DB.
-  const sourceOptions = isRagCorpus
-    ? [
-        { value: 'guidelines', label: 'RAG DB' },
-        { value: 'amboss', label: 'AMBOSS content' },
-        { value: 'both', label: 'Both (RAG DB + AMBOSS)' },
-      ]
-    : [
-        { value: 'amboss', label: 'AMBOSS' },
-        { value: 'guidelines', label: 'Guidelines' },
-        { value: 'both', label: 'Both' },
-      ];
 
   return (
     <Modal
@@ -153,17 +152,13 @@ export function AddSpecialtyModal({
           />
           <Select
             name="specialty-mappingSource"
-            label={isRagCorpus ? 'Coverage source' : 'Mapping source'}
-            labelHint={
-              isRagCorpus
-                ? 'Assess coverage against the RAG DB, AMBOSS content, or both.'
-                : 'Which content to assess coverage against.'
-            }
+            label={COVERAGE_SOURCE_LABEL}
+            labelHint={coverageSourceHint({ locked: false })}
             value={mappingSource}
             onChange={(e) => setMappingSource(e.target.value as MappingSource)}
-            options={sourceOptions}
+            options={coverageSourceOptions()}
           />
-          {isRagCorpus ? (
+          {showMcpServer ? (
             <Select
               name="specialty-mcpEnv"
               label="MCP server"
