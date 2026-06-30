@@ -175,7 +175,7 @@ function buildVisibleTabs(opts: {
     );
   }
   if (opts.showGuidelines && opts.showAmboss) {
-    tabs.push({ target: 'guideline-coverage', label: 'Guidelines' });
+    tabs.push({ target: 'guideline-coverage', label: 'RAG DB' });
   }
   if (opts.showQuestions) {
     tabs.push({ target: 'questions', label: 'Questions' });
@@ -740,9 +740,9 @@ export function CodeDetailModal({
               {showGuidelines ? (
                 <Inline space="s" vAlignItems="center">
                   {detailRow.isInGuidelines === true ? (
-                    <Badge text="In guidelines" color="green" />
+                    <Badge text="In RAG DB" color="green" />
                   ) : detailRow.isInGuidelines === false ? (
-                    <Badge text="Not in guidelines" color="red" />
+                    <Badge text="Not in RAG DB" color="red" />
                   ) : null}
                   {detailRow.guidelineCoverageLevel ? (
                     <CoverageBadge level={detailRow.guidelineCoverageLevel} />
